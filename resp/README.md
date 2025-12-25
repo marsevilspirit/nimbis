@@ -112,20 +112,14 @@ cargo run --example basic_usage
 ## Running Tests
 
 ```bash
-# Unit tests
-cargo test --lib
-
-# Integration tests
-cargo test --tests
-
-# All tests
-cargo test
+# Run all tests
+just test
 ```
 
 ## Performance Benchmarks
 
 ```bash
-cargo bench
+just bench
 ```
 
 Benchmarks include:
@@ -133,6 +127,22 @@ Benchmarks include:
 - Encoding performance
 - Round-trip (encode + parse) performance
 - Performance with large arrays and complex nested structures
+
+## Development
+
+```bash
+# Build the library
+just build
+
+# Run all checks (format, clippy, test)
+just all
+
+# Check code and formatting
+just check
+
+# Format code
+just fmt
+```
 
 ## API Documentation
 
