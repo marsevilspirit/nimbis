@@ -1,0 +1,38 @@
+set shell := ["bash", "-c"]
+
+# List available recipes
+default:
+    @just --list
+
+# Build the library
+build:
+    cargo build
+
+# Run release build
+build-release:
+    cargo build --release
+
+# Run all tests
+test:
+    cargo test
+
+# Check code without building
+check:
+    cargo check
+    cargo fmt -- --check
+    cargo clippy -- -D warnings
+
+# Format code
+fmt:
+    cargo fmt
+
+# Run all checks (fmt, clippy, test)
+all: fmt check test
+
+# Run benchmarks
+bench:
+    cargo bench
+
+# Clean build artifacts
+clean:
+    cargo clean
