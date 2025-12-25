@@ -1,11 +1,11 @@
 [package]
 name = "resp"
-version = "0.1.0"
-edition = "2021"
-authors = ["Mars <marsevilspirit@gmail.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 description = "High-performance RESP (Redis Serialization Protocol) library"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/marsevilspirit/nimbis"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 bytes = "1.5"
@@ -18,7 +18,3 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "benchmarks"
 harness = false
-
-[lib]
-name = "resp"
-path = "src/lib.rs"

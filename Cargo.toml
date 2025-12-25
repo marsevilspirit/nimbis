@@ -1,3 +1,10 @@
 [workspace]
-members = ["resp"]
+members = ["crates/nimbis-resp", "crates/nimbis-server"]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["marsevilspirit <marsevilspirit@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/marsevilspirit/nimbis"
