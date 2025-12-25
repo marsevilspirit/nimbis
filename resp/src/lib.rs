@@ -11,13 +11,12 @@
 //! - **RESP2 & RESP3 support**: Full protocol support
 //! - **Type-safe API**: Leverages Rust's type system
 //! - **High performance**: Optimized for throughput and minimal allocations
-//! - **Incremental parsing**: Handles streaming data efficiently
 //!
 //! ## Example
 //!
 //! ```rust
-//! use resp::{RespValue, RespParser, RespEncoder};
-//! use bytes::BytesMut;
+//! use resp::{RespValue, RespEncoder};
+//! use bytes::Bytes;
 //!
 //! // Using convenience constructors
 //! let cmd = RespValue::array(vec![
@@ -30,11 +29,8 @@
 //! let encoded = cmd.encode().unwrap();
 //!
 //! // Parse a response
-//! let mut parser = RespParser::new();
-//! let mut buf = BytesMut::from("+OK\r\n");
-//! if let Some(response) = parser.parse(&mut buf).unwrap() {
-//!     assert_eq!(response.as_str(), Some("OK"));
-//! }
+//! let response = resp::parse(b"+OK\r\n").unwrap();
+//! assert_eq!(response.as_str(), Some("OK"));
 //! ```
 
 mod encoder;
@@ -45,5 +41,5 @@ mod utils;
 
 pub use encoder::RespEncoder;
 pub use error::{EncodeError, ParseError, RespError};
-pub use parser::RespParser;
+pub use parser::parse;
 pub use types::RespValue;

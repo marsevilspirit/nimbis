@@ -200,7 +200,6 @@ fn encode_push(buf: &mut BytesMut, push: &[RespValue]) -> Result<(), EncodeError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RespParser;
 
     #[test]
     fn test_encode_simple_string() {
@@ -274,7 +273,7 @@ mod tests {
         ]);
 
         let encoded = original.encode().unwrap();
-        let decoded = RespParser::parse_complete(&encoded).unwrap();
+        let decoded = crate::parse(&encoded).unwrap();
 
         assert_eq!(original, decoded);
     }

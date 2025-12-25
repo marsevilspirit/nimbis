@@ -41,10 +41,6 @@ pub enum ParseError {
     #[error("Invalid array length: {0}")]
     InvalidArrayLength(i64),
 
-    /// Data is incomplete, need more bytes
-    #[error("Incomplete data")]
-    Incomplete,
-
     /// UTF-8 conversion error
     #[error("UTF-8 error: {0}")]
     Utf8Error(String),

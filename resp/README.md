@@ -8,7 +8,6 @@ A high-performance, zero-copy RESP protocol parser and encoder written in Rust.
 - 🔧 **RESP2 & RESP3 support** - Complete protocol support
 - 🔒 **Type-safe** - Leverages Rust's type system
 - 🚀 **High performance** - Optimized for throughput and minimal allocations
-- 📦 **Incremental parsing** - Efficient streaming data handling
 - ✨ **Elegant API** - Ergonomic interface design
 
 ## Usage Examples
@@ -16,14 +15,10 @@ A high-performance, zero-copy RESP protocol parser and encoder written in Rust.
 ### Parsing RESP Values
 
 ```rust
-use resp::{RespParser, RespValue};
-use bytes::BytesMut;
+use resp;
 
-let mut parser = RespParser::new();
-let mut buf = BytesMut::from("+OK\r\n");
-
-let value = parser.parse(&mut buf).unwrap().unwrap();
-assert_eq!(value, RespValue::SimpleString("OK".into()));
+let value = resp::parse(b"+OK\r\n").unwrap();
+assert_eq!(value.as_str(), Some("OK"));
 ```
 
 ### Creating and Encoding RESP Values
@@ -42,24 +37,6 @@ let cmd = RespValue::Array(vec![
 // Encode to bytes
 let encoded = cmd.encode().unwrap();
 // Output: b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n"
-```
-
-### Incremental Parsing
-
-```rust
-use resp::RespParser;
-use bytes::BytesMut;
-
-let mut parser = RespParser::new();
-let mut buf = BytesMut::new();
-
-// Receive first chunk
-buf.extend_from_slice(b"*3\r\n$3\r\nSET");
-assert!(parser.parse(&mut buf).unwrap().is_none()); // Incomplete
-
-// Receive more data
-buf.extend_from_slice(b"\r\n$3\r\nkey\r\n$5\r\nvalue\r\n");
-let value = parser.parse(&mut buf).unwrap().unwrap(); // Complete!
 ```
 
 ### Type Conversions

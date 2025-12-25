@@ -34,7 +34,7 @@ pub fn find_crlf(buf: &[u8]) -> Option<usize> {
 pub fn extract_line(buf: &[u8]) -> Result<(&[u8], usize), ParseError> {
     match find_crlf(buf) {
         Some(pos) => Ok((&buf[..pos], pos + 2)),
-        None => Err(ParseError::Incomplete),
+        None => Err(ParseError::UnexpectedEof),
     }
 }
 
