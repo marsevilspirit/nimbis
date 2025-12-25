@@ -25,13 +25,19 @@ assert_eq!(value.as_str(), Some("OK"));
 
 ```rust
 use resp::{RespValue, RespEncoder};
-use bytes::Bytes;
 
-// Create a Redis SET command
+// Create a Redis SET command (using From trait)
 let cmd = RespValue::Array(vec![
-    RespValue::BulkString(Bytes::from("SET")),
-    RespValue::BulkString(Bytes::from("key")),
-    RespValue::BulkString(Bytes::from("value")),
+    "SET".into(),
+    "key".into(),
+    "value".into(),
+]);
+
+// Or using convenience methods
+let cmd = RespValue::array([
+    RespValue::bulk_string("SET"),
+    RespValue::bulk_string("key"),
+    RespValue::bulk_string("value"),
 ]);
 
 // Encode to bytes
@@ -44,17 +50,22 @@ let encoded = cmd.encode().unwrap();
 ```rust
 use resp::RespValue;
 
-let value = RespValue::BulkString("hello".into());
+// Create values using From trait - no bytes dependency needed!
+let value: RespValue = "hello".into();
 
 // Safe type conversion
 if let Some(s) = value.as_str() {
     println!("String value: {}", s);
 }
 
-// From implementations
+// More From implementations
 let from_str: RespValue = "test".into();
 let from_int: RespValue = 42i64.into();
 let from_bool: RespValue = true.into();
+
+// Or use convenience methods
+let value = RespValue::bulk_string("hello");
+let array = RespValue::array([1.into(), 2.into(), 3.into()]);
 ```
 
 ## Supported Types
