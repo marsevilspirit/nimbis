@@ -1,5 +1,5 @@
 [package]
-name = "nimbis-server"
+name = "nimbis"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

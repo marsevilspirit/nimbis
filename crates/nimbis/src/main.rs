@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use nimbis_server::cmd::{Cmd, CmdType};
+use nimbis::cmd::{Cmd, CmdType};
 use resp::{RespEncoder, RespValue, parse};
 use std::collections::HashMap;
 use std::sync::Arc;
