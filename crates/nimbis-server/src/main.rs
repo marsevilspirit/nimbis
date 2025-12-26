@@ -35,7 +35,6 @@ async fn handle_client(
     let mut buffer = BytesMut::with_capacity(4096);
 
     loop {
-        // Read data from socket directly into buffer
         let n = socket.read_buf(&mut buffer).await?;
 
         if n == 0 {
@@ -47,31 +46,19 @@ async fn handle_client(
             }
         }
 
-        // Try to parse and process all complete messages in buffer
-        loop {
-            // Try to parse a RESP value from the buffer
-            // parse will automatically advance the buffer
+        while !buffer.is_empty() {
             match parse(&mut buffer) {
                 Ok(value) => {
-                    // Process command and get response
                     let response = process_command(value, &db).await;
 
-                    // Encode and send response
                     let encoded = response.encode()?;
                     socket.write_all(&encoded).await?;
                 }
                 Err(e) => {
-                    // Check if it's just incomplete data or a real error
-                    if buffer.is_empty() || matches!(e, resp::ParseError::UnexpectedEOF) {
-                        // Incomplete message, need more data
-                        break;
-                    } else {
-                        // Real parse error
-                        let error_response = RespValue::error(format!("ERR Protocol error: {}", e));
-                        let encoded = error_response.encode()?;
-                        socket.write_all(&encoded).await?;
-                        return Err(e.into());
-                    }
+                    let error_response = RespValue::error(format!("ERR Protocol error: {}", e));
+                    let encoded = error_response.encode()?;
+                    socket.write_all(&encoded).await?;
+                    return Err(e.into());
                 }
             }
         }
