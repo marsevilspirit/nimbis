@@ -1,7 +1,7 @@
 //! Performance benchmarks for RESP parser and encoder
 
 use bytes::{Bytes, BytesMut};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use resp::{RespEncoder, RespValue};
 
 fn bench_parse_simple_string(c: &mut Criterion) {

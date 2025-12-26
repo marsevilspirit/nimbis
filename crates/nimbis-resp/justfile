@@ -8,10 +8,6 @@ default:
 build:
     cargo build
 
-# Run release build
-build-release:
-    cargo build --release
-
 # Run all tests
 test:
     cargo test
@@ -25,9 +21,6 @@ check:
 # Format code
 fmt:
     cargo fmt
-
-# Run all checks (fmt, clippy, test)
-all: fmt check test
 
 # Run benchmarks
 bench:

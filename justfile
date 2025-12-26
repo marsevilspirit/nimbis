@@ -8,10 +8,6 @@ default:
 build:
     cargo build
 
-# Build release
-build-release:
-    cargo build --release
-
 # Run all tests
 test:
     cargo test --workspace
@@ -26,13 +22,6 @@ check:
 fmt:
     cargo fmt --all
 
-# Run all checks (format, clippy, test)
-all: fmt check test
-
 # Clean build artifacts
 clean:
     cargo clean
-
-# Run nimbis-core
-run:
-    cargo run -p nimbis-core
