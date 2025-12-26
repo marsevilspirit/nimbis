@@ -1,8 +1,9 @@
 //! Performance benchmarks for RESP parser and encoder
 
 use bytes::{Bytes, BytesMut};
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use resp::{RespEncoder, RespValue};
+use std::hint::black_box;
 
 fn bench_parse_simple_string(c: &mut Criterion) {
     let mut group = c.benchmark_group("parse_simple_string");
