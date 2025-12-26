@@ -1,5 +1,3 @@
-set shell := ["bash", "-c"]
-
 # List available recipes
 default:
     @just --list
