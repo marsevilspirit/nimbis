@@ -23,3 +23,7 @@ fmt:
 # Clean build artifacts
 clean:
     cargo clean
+
+# Run nimbis-server
+run:
+    cargo run -p nimbis-server

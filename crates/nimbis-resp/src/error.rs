@@ -19,7 +19,7 @@ pub enum RespError {
 pub enum ParseError {
     /// Unexpected end of input while parsing
     #[error("Unexpected end of input")]
-    UnexpectedEof,
+    UnexpectedEOF,
 
     /// Invalid type marker encountered
     #[error("Invalid type marker: {0}")]

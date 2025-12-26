@@ -273,7 +273,8 @@ mod tests {
         ]);
 
         let encoded = original.encode().unwrap();
-        let decoded = crate::parse(&encoded).unwrap();
+        let mut buf = BytesMut::from(&encoded[..]);
+        let decoded = crate::parse(&mut buf).unwrap();
 
         assert_eq!(original, decoded);
     }

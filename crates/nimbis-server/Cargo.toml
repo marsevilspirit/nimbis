@@ -7,3 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+resp = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }

@@ -10,7 +10,10 @@ fn bench_parse_simple_string(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(data.len() as u64));
     group.bench_function("simple_string", |b| {
-        b.iter(|| resp::parse(black_box(&data[..])).unwrap())
+        b.iter(|| {
+            let mut buf = BytesMut::from(&data[..]);
+            resp::parse(black_box(&mut buf)).unwrap()
+        })
     });
     group.finish();
 }
@@ -21,7 +24,10 @@ fn bench_parse_bulk_string(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(data.len() as u64));
     group.bench_function("bulk_string", |b| {
-        b.iter(|| resp::parse(black_box(&data[..])).unwrap())
+        b.iter(|| {
+            let mut buf = BytesMut::from(&data[..]);
+            resp::parse(black_box(&mut buf)).unwrap()
+        })
     });
     group.finish();
 }
@@ -32,7 +38,10 @@ fn bench_parse_integer(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(data.len() as u64));
     group.bench_function("integer", |b| {
-        b.iter(|| resp::parse(black_box(&data[..])).unwrap())
+        b.iter(|| {
+            let mut buf = BytesMut::from(&data[..]);
+            resp::parse(black_box(&mut buf)).unwrap()
+        })
     });
     group.finish();
 }
@@ -43,7 +52,10 @@ fn bench_parse_array(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(data.len() as u64));
     group.bench_function("array_set_command", |b| {
-        b.iter(|| resp::parse(black_box(&data[..])).unwrap())
+        b.iter(|| {
+            let mut buf = BytesMut::from(&data[..]);
+            resp::parse(black_box(&mut buf)).unwrap()
+        })
     });
     group.finish();
 }
@@ -60,7 +72,10 @@ fn bench_parse_large_array(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(data.len() as u64));
     group.bench_function("array_100_items", |b| {
-        b.iter(|| resp::parse(black_box(&data[..])).unwrap())
+        b.iter(|| {
+            let mut buf = data.clone();
+            resp::parse(black_box(&mut buf)).unwrap()
+        })
     });
     group.finish();
 }
@@ -110,7 +125,8 @@ fn bench_roundtrip(c: &mut Criterion) {
     group.bench_function("encode_parse", |b| {
         b.iter(|| {
             let encoded = black_box(&value).encode().unwrap();
-            resp::parse(&encoded).unwrap()
+            let mut buf = BytesMut::from(&encoded[..]);
+            resp::parse(&mut buf).unwrap()
         })
     });
     group.finish();

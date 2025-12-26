@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use resp::{RespValue, RespEncoder};
-//! use bytes::Bytes;
+//! use bytes::{Bytes, BytesMut};
 //!
 //! // Using convenience constructors
 //! let cmd = RespValue::array(vec![
@@ -29,7 +29,8 @@
 //! let encoded = cmd.encode().unwrap();
 //!
 //! // Parse a response
-//! let response = resp::parse(b"+OK\r\n").unwrap();
+//! let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
+//! let response = resp::parse(&mut buf).unwrap();
 //! assert_eq!(response.as_str(), Some("OK"));
 //! ```
 

@@ -76,11 +76,12 @@ bytes = "1.5"
 Use the `resp::parse` function to convert byte data into `RespValue`:
 
 ```rust
+use bytes::BytesMut;
 use resp::RespValue;
 
 fn main() {
-    let data = b"+OK\r\n";
-    let value = resp::parse(data).unwrap();
+    let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     
     assert_eq!(value.as_str(), Some("OK"));
     println!("Parsed: {:?}", value);

@@ -7,18 +7,18 @@ use crate::error::ParseError;
 use crate::types::RespValue;
 use crate::utils::*;
 
-/// Parse a complete RESP value from a byte slice.
+/// Parse a RESP value from a mutable BytesMut buffer, consuming the parsed bytes.
 ///
-/// This function expects a complete RESP message and will return an error if the data is incomplete.
-pub fn parse(buf: &[u8]) -> Result<RespValue, ParseError> {
-    let mut bytes = BytesMut::from(buf);
-    parse_value(&mut bytes)
+/// This function will advance the buffer position past the parsed RESP value.
+/// Returns an error if the buffer doesn't contain a complete RESP value.
+pub fn parse(buf: &mut BytesMut) -> Result<RespValue, ParseError> {
+    parse_value(buf)
 }
 
 /// Internal parsing function that consumes bytes from the buffer.
 fn parse_value(buf: &mut BytesMut) -> Result<RespValue, ParseError> {
     if buf.is_empty() {
-        return Err(ParseError::UnexpectedEof);
+        return Err(ParseError::UnexpectedEOF);
     }
 
     let type_marker = buf[0];
@@ -89,7 +89,7 @@ fn parse_bulk_string(buf: &mut BytesMut) -> Result<RespValue, ParseError> {
 
     // Check if we have enough data
     if buf.len() < length + 2 {
-        return Err(ParseError::UnexpectedEof);
+        return Err(ParseError::UnexpectedEOF);
     }
 
     // Extract the bulk string data (zero-copy)
@@ -149,7 +149,7 @@ fn parse_bulk_with_length(buf: &mut BytesMut) -> Result<Bytes, ParseError> {
     buf.advance(consumed);
 
     if buf.len() < length + 2 {
-        return Err(ParseError::UnexpectedEof);
+        return Err(ParseError::UnexpectedEOF);
     }
 
     let data = buf.split_to(length).freeze();
@@ -287,37 +287,43 @@ mod tests {
 
     #[test]
     fn test_parse_simple_string() {
-        let value = parse(b"+OK\r\n").unwrap();
+        let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::SimpleString(Bytes::from("OK")));
     }
 
     #[test]
     fn test_parse_error() {
-        let value = parse(b"-ERR unknown command\r\n").unwrap();
+        let mut buf = BytesMut::from(&b"-ERR unknown command\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::Error(Bytes::from("ERR unknown command")));
     }
 
     #[test]
     fn test_parse_integer() {
-        let value = parse(b":1000\r\n").unwrap();
+        let mut buf = BytesMut::from(&b":1000\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::Integer(1000));
     }
 
     #[test]
     fn test_parse_bulk_string() {
-        let value = parse(b"$6\r\nfoobar\r\n").unwrap();
+        let mut buf = BytesMut::from(&b"$6\r\nfoobar\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::BulkString(Bytes::from("foobar")));
     }
 
     #[test]
     fn test_parse_null_bulk_string() {
-        let value = parse(b"$-1\r\n").unwrap();
+        let mut buf = BytesMut::from(&b"$-1\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::Null);
     }
 
     #[test]
     fn test_parse_array() {
-        let value = parse(b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n").unwrap();
+        let mut buf = BytesMut::from(&b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
 
         match value {
             RespValue::Array(arr) => {
@@ -331,23 +337,26 @@ mod tests {
 
     #[test]
     fn test_parse_incomplete() {
-        let result = parse(b"+OK");
+        let mut buf = BytesMut::from(&b"+OK"[..]);
+        let result = parse(&mut buf);
         assert!(result.is_err());
         match result {
-            Err(ParseError::UnexpectedEof) => {}
+            Err(ParseError::UnexpectedEOF) => {}
             _ => panic!("Expected UnexpectedEof error"),
         }
     }
 
     #[test]
     fn test_parse_boolean() {
-        let value = parse(b"#t\r\n").unwrap();
+        let mut buf = BytesMut::from(&b"#t\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::Boolean(true));
     }
 
     #[test]
     fn test_parse_double() {
-        let value = parse(b",3.14\r\n").unwrap();
+        let mut buf = BytesMut::from(&b",3.14\r\n"[..]);
+        let value = parse(&mut buf).unwrap();
         assert_eq!(value, RespValue::Double(3.14));
     }
 }

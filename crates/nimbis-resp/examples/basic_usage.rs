@@ -1,6 +1,6 @@
 //! Basic usage examples for the RESP library
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use resp::{RespEncoder, RespValue};
 
 fn main() {
@@ -25,7 +25,8 @@ fn main() {
 fn example_parse_simple_string() {
     println!("--- Example 1: Parse Simple String ---");
 
-    let value = resp::parse(b"+OK\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     println!("Parsed: {:?}", value);
     println!("As string: {:?}", value.as_str());
     println!();
@@ -34,7 +35,8 @@ fn example_parse_simple_string() {
 fn example_parse_redis_command() {
     println!("--- Example 2: Parse Redis Command ---");
 
-    let value = resp::parse(b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     println!("Parsed: {:?}", value);
 
     if let Some(array) = value.as_array() {
@@ -83,7 +85,8 @@ fn example_roundtrip() {
     );
 
     // Parse back
-    let decoded = resp::parse(&encoded).unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
     println!("Decoded: {:?}", decoded);
 
     println!("Match: {}", original == decoded);

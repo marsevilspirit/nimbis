@@ -272,6 +272,11 @@ dependencies = [
 [[package]]
 name = "nimbis-server"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "resp",
+ "tokio",
+]
 
 [[package]]
 name = "num-traits"

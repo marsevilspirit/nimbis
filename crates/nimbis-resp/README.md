@@ -15,9 +15,11 @@ A high-performance, zero-copy RESP protocol parser and encoder written in Rust.
 ### Parsing RESP Values
 
 ```rust
+use bytes::BytesMut;
 use resp;
 
-let value = resp::parse(b"+OK\r\n").unwrap();
+let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
+let value = resp::parse(&mut buf).unwrap();
 assert_eq!(value.as_str(), Some("OK"));
 ```
 

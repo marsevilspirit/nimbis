@@ -1,10 +1,12 @@
 //! Integration tests for RESP parser
 
+use bytes::BytesMut;
 use resp::RespValue;
 
 #[test]
 fn test_parse_redis_ping() {
-    let value = resp::parse(b"*1\r\n$4\r\nPING\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"*1\r\n$4\r\nPING\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
 
     match value {
         RespValue::Array(arr) => {
@@ -17,7 +19,8 @@ fn test_parse_redis_ping() {
 
 #[test]
 fn test_parse_redis_set() {
-    let value = resp::parse(b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
 
     match value {
         RespValue::Array(arr) => {
@@ -32,25 +35,29 @@ fn test_parse_redis_set() {
 
 #[test]
 fn test_parse_redis_get_response() {
-    let value = resp::parse(b"$5\r\nvalue\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"$5\r\nvalue\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert_eq!(value.as_str(), Some("value"));
 }
 
 #[test]
 fn test_parse_redis_nil_response() {
-    let value = resp::parse(b"$-1\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"$-1\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert!(value.is_null());
 }
 
 #[test]
 fn test_parse_redis_ok_response() {
-    let value = resp::parse(b"+OK\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert_eq!(value.as_str(), Some("OK"));
 }
 
 #[test]
 fn test_parse_redis_error_response() {
-    let value = resp::parse(b"-ERR unknown command 'foobar'\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"-ERR unknown command 'foobar'\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert!(value.is_error());
     assert_eq!(
         value,
@@ -60,7 +67,8 @@ fn test_parse_redis_error_response() {
 
 #[test]
 fn test_parse_nested_arrays() {
-    let value = resp::parse(b"*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
 
     match value {
         RespValue::Array(outer) => {
@@ -90,7 +98,8 @@ fn test_parse_nested_arrays() {
 
 #[test]
 fn test_parse_empty_array() {
-    let value = resp::parse(b"*0\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"*0\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     match value {
         RespValue::Array(arr) => assert_eq!(arr.len(), 0),
         _ => panic!("Expected array"),
@@ -99,25 +108,30 @@ fn test_parse_empty_array() {
 
 #[test]
 fn test_parse_empty_bulk_string() {
-    let value = resp::parse(b"$0\r\n\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"$0\r\n\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert_eq!(value.as_str(), Some(""));
 }
 
 #[test]
 fn test_resp3_types() {
     // Boolean true
-    let value = resp::parse(b"#t\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"#t\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert_eq!(value.as_bool(), Some(true));
 
     // Boolean false
-    let value = resp::parse(b"#f\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"#f\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert_eq!(value.as_bool(), Some(false));
 
     // Double
-    let value = resp::parse(b",3.14159\r\n").unwrap();
+    let mut buf = BytesMut::from(&b",3.14159\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert_eq!(value.as_double(), Some(3.14159));
 
     // Null
-    let value = resp::parse(b"_\r\n").unwrap();
+    let mut buf = BytesMut::from(&b"_\r\n"[..]);
+    let value = resp::parse(&mut buf).unwrap();
     assert!(value.is_null());
 }

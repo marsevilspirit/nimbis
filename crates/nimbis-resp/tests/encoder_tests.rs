@@ -1,6 +1,6 @@
 //! Integration tests for RESP encoder
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use resp::{RespEncoder, RespValue};
 
 #[test]
@@ -50,7 +50,8 @@ fn test_roundtrip_simple_types() {
 
     for original in test_cases {
         let encoded = original.encode().unwrap();
-        let decoded = resp::parse(&encoded).unwrap();
+        let mut buf = BytesMut::from(&encoded[..]);
+        let decoded = resp::parse(&mut buf).unwrap();
         assert_eq!(original, decoded, "Roundtrip failed for {:?}", original);
     }
 }
@@ -64,7 +65,8 @@ fn test_roundtrip_arrays() {
     ]);
 
     let encoded = original.encode().unwrap();
-    let decoded = resp::parse(&encoded).unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
     assert_eq!(original, decoded);
 }
 
@@ -76,7 +78,8 @@ fn test_roundtrip_nested_arrays() {
     ]);
 
     let encoded = original.encode().unwrap();
-    let decoded = resp::parse(&encoded).unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
     assert_eq!(original, decoded);
 }
 
@@ -93,7 +96,8 @@ fn test_roundtrip_resp3_types() {
 
     for original in test_cases {
         let encoded = original.encode().unwrap();
-        let decoded = resp::parse(&encoded).unwrap();
+        let mut buf = BytesMut::from(&encoded[..]);
+        let decoded = resp::parse(&mut buf).unwrap();
         assert_eq!(original, decoded, "Roundtrip failed for {:?}", original);
     }
 }
@@ -118,7 +122,8 @@ fn test_encode_large_bulk_string() {
     let value = RespValue::BulkString(Bytes::from(data.clone()));
     let encoded = value.encode().unwrap();
 
-    let decoded = resp::parse(&encoded).unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
     assert_eq!(decoded.as_bytes().unwrap(), &Bytes::from(data));
 }
 
@@ -128,6 +133,7 @@ fn test_encode_binary_data() {
     let value = RespValue::BulkString(Bytes::from(data.clone()));
     let encoded = value.encode().unwrap();
 
-    let decoded = resp::parse(&encoded).unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
     assert_eq!(decoded.as_bytes().unwrap(), &Bytes::from(data));
 }
