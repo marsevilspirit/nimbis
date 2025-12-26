@@ -8,3 +8,9 @@ edition = "2024"
 authors = ["marsevilspirit <marsevilspirit@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/marsevilspirit/nimbis"
+
+[workspace.dependencies]
+bytes = "1.5"
+thiserror = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+criterion = { version = "0.5", features = ["html_reports"] }
