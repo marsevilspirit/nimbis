@@ -1,0 +1,48 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      # Check once every Monday
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    # PR labels
+    labels:
+      - "dependencies"
+    # Commit message prefix
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    # Allowed update types
+    # - "version-update:semver-patch" - Patch updates (0.0.x)
+    # - "version-update:semver-minor" - Minor updates (0.x.0)
+    # - "version-update:semver-major" - Major updates (x.0.0)
+    allow:
+      - dependency-type: "direct"
+      - dependency-type: "indirect"
+    # Group updates - Merge similar dependency updates into one PR
+    groups:
+      tokio-ecosystem:
+        patterns:
+          - "tokio*"
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
