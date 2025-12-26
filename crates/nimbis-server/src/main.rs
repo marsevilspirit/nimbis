@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use nimbis_server::cmd::{Cmd, CmdType};
 use resp::{RespEncoder, RespValue, parse};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -49,7 +50,8 @@ async fn handle_client(
         while !buffer.is_empty() {
             match parse(&mut buffer) {
                 Ok(value) => {
-                    let response = process_command(value, &db).await;
+                    let cmd: Cmd = value.try_into()?;
+                    let response = process_command(cmd, &db).await;
 
                     let encoded = response.encode()?;
                     socket.write_all(&encoded).await?;
@@ -65,55 +67,27 @@ async fn handle_client(
     }
 }
 
-async fn process_command(value: RespValue, db: &Db) -> RespValue {
-    let args = match value.as_array() {
-        Some(arr) => arr,
-        None => {
-            return RespValue::error("ERR expected array");
-        }
-    };
-
-    if args.is_empty() {
-        return RespValue::error("ERR empty command");
-    }
-
-    let command = match args[0].as_str() {
-        Some(cmd) => cmd.to_uppercase(),
-        None => {
-            return RespValue::error("ERR invalid command");
-        }
-    };
-
-    match command.as_str() {
-        "SET" => {
-            if args.len() != 3 {
+async fn process_command(cmd: Cmd, db: &Db) -> RespValue {
+    match cmd.typ {
+        CmdType::SET => {
+            if cmd.args.len() != 2 {
                 return RespValue::error("ERR wrong number of arguments for 'set' command");
             }
 
-            let key = match args[1].as_str() {
-                Some(k) => k.to_string(),
-                None => return RespValue::error("ERR invalid key"),
-            };
-
-            let value = match args[2].as_str() {
-                Some(v) => v.to_string(),
-                None => return RespValue::error("ERR invalid value"),
-            };
+            let key = cmd.args[0].clone();
+            let value = cmd.args[1].clone();
 
             let mut db = db.write().await;
             db.insert(key, value);
 
             RespValue::simple_string("OK")
         }
-        "GET" => {
-            if args.len() != 2 {
+        CmdType::GET => {
+            if cmd.args.len() != 1 {
                 return RespValue::error("ERR wrong number of arguments for 'get' command");
             }
 
-            let key = match args[1].as_str() {
-                Some(k) => k,
-                None => return RespValue::error("ERR invalid key"),
-            };
+            let key = &cmd.args[0];
 
             let db = db.read().await;
             match db.get(key) {
@@ -121,6 +95,5 @@ async fn process_command(value: RespValue, db: &Db) -> RespValue {
                 None => RespValue::Null,
             }
         }
-        _ => RespValue::error(format!("ERR unknown command '{}'", command)),
     }
 }
