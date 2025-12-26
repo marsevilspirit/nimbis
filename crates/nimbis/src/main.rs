@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use nimbis::cmd::{Cmd, CmdType};
+use nimbis::cmd::{Cmd, Db};
 use resp::{RespEncoder, RespValue, parse};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,15 +7,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
-type Db = Arc<RwLock<HashMap<String, String>>>;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = "127.0.0.1:6379";
     let listener = TcpListener::bind(addr).await?;
     println!("Nimbis server listening on {}", addr);
 
-    let db = Arc::new(RwLock::new(HashMap::new()));
+    let db: Db = Arc::new(RwLock::new(HashMap::new()));
 
     loop {
         let (socket, _) = listener.accept().await?;
@@ -51,7 +49,12 @@ async fn handle_client(
             match parse(&mut buffer) {
                 Ok(value) => {
                     let cmd: Cmd = value.try_into()?;
-                    let response = process_command(cmd, &db).await;
+
+                    // 将 Cmd 转换为 CmdExecutor 并执行
+                    let response = match cmd.into_executor() {
+                        Ok(executor) => executor.execute(&db).await,
+                        Err(e) => RespValue::error(e),
+                    };
 
                     let encoded = response.encode()?;
                     socket.write_all(&encoded).await?;
@@ -62,37 +65,6 @@ async fn handle_client(
                     socket.write_all(&encoded).await?;
                     return Err(e.into());
                 }
-            }
-        }
-    }
-}
-
-async fn process_command(cmd: Cmd, db: &Db) -> RespValue {
-    match cmd.typ {
-        CmdType::SET => {
-            if cmd.args.len() != 2 {
-                return RespValue::error("ERR wrong number of arguments for 'set' command");
-            }
-
-            let key = cmd.args[0].clone();
-            let value = cmd.args[1].clone();
-
-            let mut db = db.write().await;
-            db.insert(key, value);
-
-            RespValue::simple_string("OK")
-        }
-        CmdType::GET => {
-            if cmd.args.len() != 1 {
-                return RespValue::error("ERR wrong number of arguments for 'get' command");
-            }
-
-            let key = &cmd.args[0];
-
-            let db = db.read().await;
-            match db.get(key) {
-                Some(value) => RespValue::bulk_string(value.clone()),
-                None => RespValue::Null,
             }
         }
     }

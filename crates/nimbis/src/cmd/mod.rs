@@ -1,3 +1,17 @@
+use resp::RespValue;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+mod get;
+mod set;
+
+pub use get::GetCommand;
+pub use set::SetCommand;
+
+pub type Db = Arc<RwLock<HashMap<String, String>>>;
+
+#[derive(Debug)]
 pub enum CmdType {
     SET,
     GET,
@@ -15,9 +29,20 @@ impl std::str::FromStr for CmdType {
     }
 }
 
+/// Generic command structure
 pub struct Cmd {
     pub typ: CmdType,
     pub args: Vec<String>,
+}
+
+impl Cmd {
+    /// Convert Cmd into a concrete CmdExecutor
+    pub fn into_executor(self) -> Result<CmdExecutor, String> {
+        match self.typ {
+            CmdType::SET => SetCommand::from_args(self.args).map(CmdExecutor::Set),
+            CmdType::GET => GetCommand::from_args(self.args).map(CmdExecutor::Get),
+        }
+    }
 }
 
 impl TryFrom<resp::RespValue> for Cmd {
@@ -46,5 +71,22 @@ impl TryFrom<resp::RespValue> for Cmd {
             typ: cmd_type,
             args: cmd_args?,
         })
+    }
+}
+
+/// Command executor enum containing all possible command types
+/// This enum uses match patterns to dispatch to specific command implementations
+pub enum CmdExecutor {
+    Set(SetCommand),
+    Get(GetCommand),
+}
+
+impl CmdExecutor {
+    /// Execute the command and return a RESP response
+    pub async fn execute(&self, db: &Db) -> RespValue {
+        match self {
+            CmdExecutor::Set(cmd) => cmd.execute(db).await,
+            CmdExecutor::Get(cmd) => cmd.execute(db).await,
+        }
     }
 }

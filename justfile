@@ -26,4 +26,4 @@ clean:
 
 # Run nimbis-server
 run:
-    cargo run -p nimbis-server
+    cargo run -p nimbis
