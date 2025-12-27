@@ -8,7 +8,7 @@ build:
 
 # Run all tests
 test:
-    cargo test --workspace
+    cargo nextest run
 
 # Check all crates
 check:
