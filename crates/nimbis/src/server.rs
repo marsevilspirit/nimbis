@@ -18,8 +18,12 @@ impl Server {
     pub async fn new(
         addr: impl Into<String>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // TODO: configure object storage path
-        let db = ObjectStorage::open("./nimbis_data").await?;
+        // Ensure data directory exists
+        let data_path = "./nimbis_data";
+        std::fs::create_dir_all(data_path)?;
+
+        // Open database
+        let db = ObjectStorage::open(data_path).await?;
         Ok(Self {
             addr: addr.into(),
             db: Arc::new(db),
