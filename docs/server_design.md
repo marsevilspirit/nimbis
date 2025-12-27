@@ -12,14 +12,16 @@ The server follows a classic "Acceptor-Worker" pattern using Tokio's lightweight
 - **Client Tasks (Workers)**: Each connected client is handled by its own independent Tokio task. This ensures that one slow client does not block others.
 
 ### 1.2 Data Storage
-- **In-Memory Database**: The key-value store is implemented as a `HashMap<String, String>`.
-- **Thread Safety**: The map is wrapped in `RwLock` (Read-Write Lock) and `Arc` (Atomic Reference Counting) to allow safe concurrent access across multiple client tasks.
-  - `type Db = Arc<RwLock<HashMap<String, String>>>`
+- **Persistent Storage**: Data is stored persistently using `SlateDB` via an `ObjectStorage` abstraction.
+- **Interface**: The `Storage` trait defines the contract for storage backends, supporting `get` and `set` operations.
+- **Thread Safety**: The storage handle is wrapped in `Arc` (`Arc<dyn Storage>`) for safe concurrent access.
 
 ### 1.3 Protocol
 Nimbis speaks the **RESP (REdis Serialization Protocol)**.
 - It parses incoming byte streams into RESP types (Strings, Arrays, Integers).
 - It executes commands and returns RESP-encoded responses.
+
+For more details on persistent storage, see [Storage Implementation](storage_implementation.md).
 
 ---
 
@@ -32,7 +34,7 @@ The `Server` struct holds the state required to run the application:
 ```rust
 pub struct Server {
     addr: String,
-    db: Db, // Shared database instance
+    db: Db, // Abstract storage handle (Arc<dyn Storage>)
 }
 ```
 
@@ -41,7 +43,7 @@ pub struct Server {
 #### Step 1: Initialization (`new`)
 When `Server::new(addr)` is called:
 1. It initializes the `addr` field.
-2. It creates a fresh, empty database (`Arc::new(RwLock::new(HashMap::new()))`).
+2. It opens the persistent storage (`ObjectStorage::open("./nimbis_data")`).
 
 #### Step 2: Running (`run`)
 The `run` method is the entry point for the server's execution loop:
