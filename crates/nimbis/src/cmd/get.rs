@@ -7,6 +7,12 @@ pub struct GetCommand {
     meta: CmdMeta,
 }
 
+impl Default for GetCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GetCommand {
     pub fn new() -> Self {
         Self {
