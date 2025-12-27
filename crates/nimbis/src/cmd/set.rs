@@ -34,8 +34,9 @@ impl Cmd for SetCommand {
         let key = &args[0];
         let value = &args[1];
 
-        let mut db = db.write().await;
-        db.insert(key.clone(), value.clone());
-        RespValue::simple_string("OK")
+        match db.set(key, value).await {
+            Ok(_) => RespValue::simple_string("OK"),
+            Err(e) => RespValue::error(format!("ERR {}", e)),
+        }
     }
 }

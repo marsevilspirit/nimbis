@@ -4,7 +4,7 @@ use nimbis::server::Server;
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     telemetry::init();
 
-    let server = Server::new("127.0.0.1:6379");
+    let server = Server::new("127.0.0.1:6379").await?;
     server.run().await?;
 
     Ok(())

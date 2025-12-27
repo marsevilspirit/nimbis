@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use resp::RespValue;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use tokio::sync::RwLock;
+use storage::Storage;
 
 mod get;
 mod set;
@@ -10,7 +10,7 @@ mod set;
 pub use get::GetCommand;
 pub use set::SetCommand;
 
-pub type Db = Arc<RwLock<HashMap<String, String>>>;
+pub type Db = Arc<dyn Storage>;
 pub type CmdTable = HashMap<String, Arc<dyn Cmd>>;
 
 /// Command metadata containing immutable information about a command

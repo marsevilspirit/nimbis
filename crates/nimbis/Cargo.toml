@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 resp = { workspace = true }
 telemetry = { workspace = true }
+storage = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }

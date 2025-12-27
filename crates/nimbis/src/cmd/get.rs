@@ -33,10 +33,10 @@ impl Cmd for GetCommand {
     async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue {
         let key = &args[0];
 
-        let db = db.read().await;
-        match db.get(key) {
-            Some(value) => RespValue::bulk_string(value.clone()),
-            None => RespValue::Null,
+        match db.get(key).await {
+            Ok(Some(value)) => RespValue::bulk_string(value),
+            Ok(None) => RespValue::Null,
+            Err(e) => RespValue::error(format!("ERR {}", e)),
         }
     }
 }

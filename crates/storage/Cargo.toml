@@ -1,0 +1,18 @@
+[package]
+name = "storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+slatedb = { workspace = true }
+object_store = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

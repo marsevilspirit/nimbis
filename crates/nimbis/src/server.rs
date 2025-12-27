@@ -1,14 +1,12 @@
 use crate::cmd::{Db, ParsedCmd};
 use bytes::BytesMut;
 use resp::{RespEncoder, RespValue, parse};
-use std::collections::HashMap;
 use std::sync::Arc;
+use storage::ObjectStorage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use tracing::{error, info};
 
-/// Nimbis server
 pub struct Server {
     addr: String,
     db: Db,
@@ -16,14 +14,17 @@ pub struct Server {
 
 impl Server {
     /// Create a new server instance
-    pub fn new(addr: impl Into<String>) -> Self {
-        Self {
+    pub async fn new(
+        addr: impl Into<String>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // TODO: configure object storage path
+        let db = ObjectStorage::open("./nimbis_data").await?;
+        Ok(Self {
             addr: addr.into(),
-            db: Arc::new(RwLock::new(HashMap::new())),
-        }
+            db: Arc::new(db),
+        })
     }
 
-    /// Run the server
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = TcpListener::bind(&self.addr).await?;
         info!("Nimbis server listening on {}", self.addr);
