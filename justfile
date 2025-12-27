@@ -1,4 +1,5 @@
 # List available recipes
+[private]
 default:
     @just --list
 
