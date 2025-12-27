@@ -1,0 +1,107 @@
+# Go Integration Tests Documentation
+
+This document details the implementation approach, operating principles, and how to add new test cases for the Go integration tests located in the `tests` directory.
+
+## 1. Implementation Approach
+
+The core objective of the Integration tests is to perform Black-box Testing on the `nimbis` server. We do not directly test the internal functions of the Rust code; instead, we compile `nimbis` into a binary, run it, and interact with it via the Redis protocol to verify if its behavior meets expectations.
+
+### Tech Stack
+- **Testing Framework**: [Ginkgo v2](https://onsi.github.io/ginkgo/) is used as the BDD (Behavior-Driven Development) style testing framework.
+- **Assertion Library**: [Gomega](https://onsi.github.io/gomega/) is used for assertions.
+- **Redis Client**: [go-redis/v9](https://github.com/redis/go-redis) is used as the client to interact with the server.
+
+### Lifecycle Management
+The Test Suite is responsible for managing the lifecycle of the `nimbis` server process:
+1.  **BeforeSuite**: Automatically compiles or finds the `nimbis` binary, starts the server process, and waits for it to be ready (via Ping probe).
+2.  **During Tests**: Each test case sends Redis commands via TCP connection and verifies the response.
+3.  **AfterSuite**: Sends a signal to kill the server process and cleans up resources.
+
+## 2. Operating Principle
+
+`tests/util/server.go` encapsulates the core logic of service management.
+
+### Binary Discovery
+The test program attempts to find the `nimbis` executable in the following order:
+1.  **Environment Variable**: Checks the path specified by the `NIMBIS_BIN` environment variable.
+2.  **Default Build Path**: Automatically finds the project root (by looking upwards for `Cargo.toml`) and looks for the binary in the approximate path `target/debug/nimbis`.
+    - *Hint*: Please ensure `cargo build` or `just build` has been executed before running tests.
+
+### Server Startup Process
+1.  `util.StartServer()` starts a subprocess (`os/exec`) to run `nimbis`.
+2.  Sets the working directory to the project root to ensure the server can correctly load configuration files or data directories (e.g., `nimbis_data`).
+3.  Redirects the server's `Stdout` and `Stderr` to the test process's standard output for easy debugging.
+4.  **Health Check**: After startup, the test program loops to try sending `PING` commands to `localhost:6379`. Only after receiving a `PONG` response does it consider the server successfully started and begins executing tests; otherwise, it reports an error after a timeout.
+
+## 3. How to Add New Tests
+
+To add new tests in the `tests` directory, please follow these steps:
+
+### 1. Create Test File
+Create a new file ending with `_test.go` in the `tests` directory, for example `list_test.go`.
+
+### 2. Define Test Structure
+Use Ginkgo's `Describe`, `Context`, and `It` structures to organize your tests.
+
+```go
+package tests
+
+import (
+	"context"
+
+	"github.com/marsevilspirit/nimbis/tests/util"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/redis/go-redis/v9"
+)
+
+var _ = Describe("List Commands", func() {
+	var rdb *redis.Client
+	var ctx context.Context
+
+	// Setup runs before each test case
+	BeforeEach(func() {
+		rdb = util.NewClient() // Get a new Redis client connection
+		ctx = context.Background()
+		
+		// Optional: Clear database or reset state
+		// rdb.FlushDB(ctx) 
+	})
+
+	// Cleanup runs after each test case
+	AfterEach(func() {
+		Expect(rdb.Close()).To(Succeed())
+	})
+
+	// Specific test scenarios
+	It("should push and pop elements", func() {
+		key := "mylist"
+		
+		// Perform operations
+		err := rdb.LPush(ctx, key, "world").Err()
+		Expect(err).NotTo(HaveOccurred())
+		
+		err = rdb.LPush(ctx, key, "hello").Err()
+		Expect(err).NotTo(HaveOccurred())
+
+		// Verify results
+		val, err := rdb.LPop(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal("hello"))
+	})
+})
+```
+
+### 3. Run Tests
+Run in the `tests` directory:
+```bash
+go test -v
+```
+Or use the ginkgo CLI (if installed):
+```bash
+ginkgo -v
+```
+Or use the Justfile in the project root (if integration-test command is configured):
+```bash
+just test-int
+```
