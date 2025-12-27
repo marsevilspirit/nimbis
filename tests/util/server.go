@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -54,7 +55,12 @@ func findBinary() (string, error) {
 		return "", fmt.Errorf("failed to find project root: %w", err)
 	}
 
-	binPath := filepath.Join(projectRoot, "target", "debug", "nimbis")
+	binName := "nimbis"
+	if runtime.GOOS == "windows" {
+		binName = "nimbis.exe"
+	}
+
+	binPath := filepath.Join(projectRoot, "target", "debug", binName)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		return "", fmt.Errorf("binary not found at %s (hint: run 'just build' or 'cargo build')", binPath)
 	}
