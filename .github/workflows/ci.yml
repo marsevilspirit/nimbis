@@ -24,6 +24,12 @@ jobs:
     - name: Setup Rust Toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Cache Rust Dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        # Cache key includes the OS to separate caches per platform
+        shared-key: ${{ runner.os }}-rust
+
     - name: Install just
       uses: taiki-e/install-action@just
 
@@ -34,6 +40,8 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.25'
+        cache: true
+        cache-dependency-path: tests/go.sum
 
     - name: Check
       run: just check
