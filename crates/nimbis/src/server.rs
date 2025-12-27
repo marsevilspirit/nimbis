@@ -1,4 +1,4 @@
-use crate::cmd::{Db, ParsedCmd};
+use crate::cmd::{CmdTable, Db, ParsedCmd};
 use bytes::BytesMut;
 use resp::{RespEncoder, RespValue, parse};
 use std::sync::Arc;
@@ -10,6 +10,7 @@ use tracing::{error, info};
 pub struct Server {
     addr: String,
     db: Db,
+    cmd_table: Arc<CmdTable>,
 }
 
 impl Server {
@@ -22,6 +23,7 @@ impl Server {
         Ok(Self {
             addr: addr.into(),
             db: Arc::new(db),
+            cmd_table: Arc::new(CmdTable::new()),
         })
     }
 
@@ -34,9 +36,10 @@ impl Server {
                 Ok((socket, addr)) => {
                     info!("New client connected from {}", addr);
                     let db = self.db.clone();
+                    let cmd_table = self.cmd_table.clone();
 
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(socket, db).await {
+                        if let Err(e) = handle_client(socket, db, cmd_table).await {
                             error!("Error handling client: {}", e);
                         }
                     });
@@ -52,6 +55,7 @@ impl Server {
 async fn handle_client(
     mut socket: TcpStream,
     db: Db,
+    cmd_table: Arc<CmdTable>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut buffer = BytesMut::with_capacity(4096);
 
@@ -79,9 +83,7 @@ async fn handle_client(
                         "Executing command"
                     );
 
-                    // TODO: get cmd_table from member
-                    let cmd_table = crate::cmd::get_cmd_table();
-                    let response = match cmd_table.get(&parsed_cmd.name) {
+                    let response = match cmd_table.get_cmd(&parsed_cmd.name) {
                         Some(cmd) => cmd.execute(&db, &parsed_cmd.args).await,
                         None => RespValue::error(format!(
                             "ERR unknown command '{}'",

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use resp::RespValue;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use storage::Storage;
 
 mod get;
@@ -11,7 +11,6 @@ pub use get::GetCommand;
 pub use set::SetCommand;
 
 pub type Db = Arc<dyn Storage>;
-pub type CmdTable = HashMap<String, Arc<dyn Cmd>>;
 
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Default)]
@@ -71,22 +70,27 @@ pub trait Cmd: Send + Sync {
     }
 }
 
-/// Global command table storing command instances
-static CMD_TABLE: OnceLock<CmdTable> = OnceLock::new();
-
-/// Initialize the global command table with all available commands
-fn init_cmd_table() -> CmdTable {
-    let mut table: CmdTable = HashMap::new();
-
-    table.insert("SET".to_string(), Arc::new(SetCommand::new()));
-    table.insert("GET".to_string(), Arc::new(GetCommand::new()));
-
-    table
+pub struct CmdTable {
+    inner: HashMap<String, Arc<dyn Cmd>>,
 }
 
-/// Get reference to the global command table
-pub fn get_cmd_table() -> &'static CmdTable {
-    CMD_TABLE.get_or_init(init_cmd_table)
+impl Default for CmdTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CmdTable {
+    pub fn new() -> Self {
+        let mut inner: HashMap<String, Arc<dyn Cmd>> = HashMap::new();
+        inner.insert("SET".to_string(), Arc::new(SetCommand::new()));
+        inner.insert("GET".to_string(), Arc::new(GetCommand::new()));
+        Self { inner }
+    }
+
+    pub fn get_cmd(&self, name: &str) -> Option<&Arc<dyn Cmd>> {
+        self.inner.get(name)
+    }
 }
 
 /// Parsed command structure (renamed from Cmd to avoid conflict)
