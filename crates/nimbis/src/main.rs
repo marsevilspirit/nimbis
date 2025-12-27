@@ -19,16 +19,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let db: Db = Arc::new(RwLock::new(HashMap::new()));
 
     loop {
-        let (socket, addr) = listener.accept().await?;
-        info!("New client connected from {}", addr);
-        let db = db.clone();
+        tokio::select! {
+            result = listener.accept() => {
+                let (socket, addr) = result?;
+                info!("New client connected from {}", addr);
+                let db = db.clone();
 
-        tokio::spawn(async move {
-            if let Err(e) = handle_client(socket, db).await {
-                error!("Error handling client: {}", e);
+                tokio::spawn(async move {
+                    if let Err(e) = handle_client(socket, db).await {
+                        error!("Error handling client: {}", e);
+                    }
+                });
             }
-        });
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C, shutting down gracefully...");
+                break;
+            }
+        }
     }
+
+    info!("Server shutdown complete");
+    Ok(())
 }
 
 async fn handle_client(
