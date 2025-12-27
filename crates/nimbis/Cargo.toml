@@ -10,3 +10,4 @@ repository.workspace = true
 resp = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
+async-trait = { workspace = true }

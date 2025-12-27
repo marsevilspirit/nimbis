@@ -1,27 +1,35 @@
-use crate::cmd::Db;
+use crate::cmd::{Cmd, CmdMeta, Db};
+use async_trait::async_trait;
 use resp::RespValue;
 
 /// SET command implementation
 pub struct SetCommand {
-    key: String,
-    value: String,
+    meta: CmdMeta,
 }
 
 impl SetCommand {
-    pub fn from_args(args: Vec<String>) -> Result<Self, String> {
-        if args.len() != 2 {
-            return Err("ERR wrong number of arguments for 'set' command".to_string());
+    pub fn new() -> Self {
+        Self {
+            meta: CmdMeta {
+                name: "SET".to_string(),
+                arity: 2,
+            },
         }
+    }
+}
 
-        Ok(SetCommand {
-            key: args[0].clone(),
-            value: args[1].clone(),
-        })
+#[async_trait]
+impl Cmd for SetCommand {
+    fn meta(&self) -> &CmdMeta {
+        &self.meta
     }
 
-    pub async fn execute(&self, db: &Db) -> RespValue {
+    async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue {
+        let key = &args[0];
+        let value = &args[1];
+
         let mut db = db.write().await;
-        db.insert(self.key.clone(), self.value.clone());
+        db.insert(key.clone(), value.clone());
         RespValue::simple_string("OK")
     }
 }

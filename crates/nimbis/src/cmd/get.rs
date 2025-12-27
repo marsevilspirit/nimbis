@@ -1,25 +1,34 @@
-use crate::cmd::Db;
+use crate::cmd::{Cmd, CmdMeta, Db};
+use async_trait::async_trait;
 use resp::RespValue;
 
 /// GET command implementation
 pub struct GetCommand {
-    key: String,
+    meta: CmdMeta,
 }
 
 impl GetCommand {
-    pub fn from_args(args: Vec<String>) -> Result<Self, String> {
-        if args.len() != 1 {
-            return Err("ERR wrong number of arguments for 'get' command".to_string());
+    pub fn new() -> Self {
+        Self {
+            meta: CmdMeta {
+                name: "GET".to_string(),
+                arity: 1,
+            },
         }
+    }
+}
 
-        Ok(GetCommand {
-            key: args[0].clone(),
-        })
+#[async_trait]
+impl Cmd for GetCommand {
+    fn meta(&self) -> &CmdMeta {
+        &self.meta
     }
 
-    pub async fn execute(&self, db: &Db) -> RespValue {
+    async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue {
+        let key = &args[0];
+
         let db = db.read().await;
-        match db.get(&self.key) {
+        match db.get(key) {
             Some(value) => RespValue::bulk_string(value.clone()),
             None => RespValue::Null,
         }

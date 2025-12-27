@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use nimbis::cmd::{Cmd, Db};
+use nimbis::cmd::{Db, ParsedCmd};
 use resp::{RespEncoder, RespValue, parse};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,12 +48,16 @@ async fn handle_client(
         while !buffer.is_empty() {
             match parse(&mut buffer) {
                 Ok(value) => {
-                    let cmd: Cmd = value.try_into()?;
+                    let parsed_cmd: ParsedCmd = value.try_into()?;
 
-                    // 将 Cmd 转换为 CmdExecutor 并执行
-                    let response = match cmd.into_executor() {
-                        Ok(executor) => executor.execute(&db).await,
-                        Err(e) => RespValue::error(e),
+                    // TODO: get cmd_table from member
+                    let cmd_table = nimbis::cmd::get_cmd_table();
+                    let response = match cmd_table.get(&parsed_cmd.name) {
+                        Some(cmd) => cmd.execute(&db, &parsed_cmd.args).await,
+                        None => RespValue::error(format!(
+                            "ERR unknown command '{}'",
+                            parsed_cmd.name.to_lowercase()
+                        )),
                     };
 
                     let encoded = response.encode()?;

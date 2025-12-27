@@ -1,6 +1,7 @@
+use async_trait::async_trait;
 use resp::RespValue;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
 mod get;
@@ -10,45 +11,94 @@ pub use get::GetCommand;
 pub use set::SetCommand;
 
 pub type Db = Arc<RwLock<HashMap<String, String>>>;
+pub type CmdTable = HashMap<String, Arc<dyn Cmd>>;
 
-#[derive(Debug)]
-pub enum CmdType {
-    SET,
-    GET,
+/// Command metadata containing immutable information about a command
+#[derive(Debug, Clone, Default)]
+pub struct CmdMeta {
+    pub name: String,
+    pub arity: i16,
 }
 
-impl std::str::FromStr for CmdType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "SET" => Ok(CmdType::SET),
-            "GET" => Ok(CmdType::GET),
-            _ => Err(format!("Unknown command: {}", s)),
+impl CmdMeta {
+    /// Validate argument count against arity
+    /// - Positive arity: requires exact match
+    /// - Negative arity: allows up to abs(arity) arguments
+    pub fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
+        if self.arity > 0 {
+            // Positive: exact match required
+            if arg_count != self.arity as usize {
+                return Err(format!(
+                    "ERR wrong number of arguments for '{}' command",
+                    self.name.to_lowercase()
+                ));
+            }
+        } else if self.arity < 0 {
+            // Negative: maximum count allowed
+            let max_args = (-self.arity) as usize;
+            if arg_count > max_args {
+                return Err(format!(
+                    "ERR too many arguments for '{}' command (max {})",
+                    self.name.to_lowercase(),
+                    max_args
+                ));
+            }
         }
+        // arity == 0 means any number of arguments is allowed
+        Ok(())
     }
 }
 
-/// Generic command structure
-pub struct Cmd {
-    pub typ: CmdType,
+/// Command trait - all commands must implement this
+#[async_trait]
+pub trait Cmd: Send + Sync {
+    /// Get command metadata
+    fn meta(&self) -> &CmdMeta;
+
+    fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
+        self.meta().validate_arity(arg_count)
+    }
+
+    async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue;
+
+    /// Execute the command
+    async fn execute(&self, db: &Db, args: &[String]) -> RespValue {
+        if let Err(err) = self.validate_arity(args.len()) {
+            return RespValue::error(err);
+        }
+
+        self.do_cmd(db, args).await
+    }
+}
+
+/// Global command table storing command instances
+static CMD_TABLE: OnceLock<CmdTable> = OnceLock::new();
+
+/// Initialize the global command table with all available commands
+fn init_cmd_table() -> CmdTable {
+    let mut table: CmdTable = HashMap::new();
+
+    table.insert("SET".to_string(), Arc::new(SetCommand::new()));
+    table.insert("GET".to_string(), Arc::new(GetCommand::new()));
+
+    table
+}
+
+/// Get reference to the global command table
+pub fn get_cmd_table() -> &'static CmdTable {
+    CMD_TABLE.get_or_init(init_cmd_table)
+}
+
+/// Parsed command structure (renamed from Cmd to avoid conflict)
+pub struct ParsedCmd {
+    pub name: String,
     pub args: Vec<String>,
 }
 
-impl Cmd {
-    /// Convert Cmd into a concrete CmdExecutor
-    pub fn into_executor(self) -> Result<CmdExecutor, String> {
-        match self.typ {
-            CmdType::SET => SetCommand::from_args(self.args).map(CmdExecutor::Set),
-            CmdType::GET => GetCommand::from_args(self.args).map(CmdExecutor::Get),
-        }
-    }
-}
-
-impl TryFrom<resp::RespValue> for Cmd {
+impl TryFrom<RespValue> for ParsedCmd {
     type Error = String;
 
-    fn try_from(value: resp::RespValue) -> Result<Self, Self::Error> {
+    fn try_from(value: RespValue) -> Result<Self, Self::Error> {
         // RespValue should be an array
         let args = value.as_array().ok_or("Expected array")?;
 
@@ -56,10 +106,11 @@ impl TryFrom<resp::RespValue> for Cmd {
             return Err("Empty command".to_string());
         }
 
-        // First element is the command
-        let cmd_str = args[0].as_str().ok_or("Invalid command type")?;
-
-        let cmd_type = cmd_str.parse::<CmdType>()?;
+        // First element is the command name
+        let cmd_name = args[0]
+            .as_str()
+            .ok_or("Invalid command type")?
+            .to_uppercase();
 
         // Remaining elements are arguments
         let cmd_args: Result<Vec<String>, _> = args[1..]
@@ -67,26 +118,9 @@ impl TryFrom<resp::RespValue> for Cmd {
             .map(|v| v.as_str().map(|s| s.to_string()).ok_or("Invalid argument"))
             .collect();
 
-        Ok(Cmd {
-            typ: cmd_type,
+        Ok(ParsedCmd {
+            name: cmd_name,
             args: cmd_args?,
         })
-    }
-}
-
-/// Command executor enum containing all possible command types
-/// This enum uses match patterns to dispatch to specific command implementations
-pub enum CmdExecutor {
-    Set(SetCommand),
-    Get(GetCommand),
-}
-
-impl CmdExecutor {
-    /// Execute the command and return a RESP response
-    pub async fn execute(&self, db: &Db) -> RespValue {
-        match self {
-            CmdExecutor::Set(cmd) => cmd.execute(db).await,
-            CmdExecutor::Get(cmd) => cmd.execute(db).await,
-        }
     }
 }
