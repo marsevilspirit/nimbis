@@ -5,9 +5,11 @@ use std::sync::Arc;
 use storage::Storage;
 
 mod get;
+mod ping;
 mod set;
 
 pub use get::GetCommand;
+pub use ping::PingCommand;
 pub use set::SetCommand;
 
 pub type Db = Arc<dyn Storage>;
@@ -85,6 +87,7 @@ impl CmdTable {
         let mut inner: HashMap<String, Arc<dyn Cmd>> = HashMap::new();
         inner.insert("SET".to_string(), Arc::new(SetCommand::new()));
         inner.insert("GET".to_string(), Arc::new(GetCommand::new()));
+        inner.insert("PING".to_string(), Arc::new(PingCommand::new()));
         Self { inner }
     }
 

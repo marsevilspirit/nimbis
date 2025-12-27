@@ -10,6 +10,10 @@ build:
 test:
     cargo nextest run
 
+# Run integration tests (Go)
+test-int:
+    cd tests && go test -v .
+
 # Check all crates
 check:
     cargo check --workspace
