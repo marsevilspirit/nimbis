@@ -6,22 +6,26 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    telemetry::init();
+
     let addr = "127.0.0.1:6379";
     let listener = TcpListener::bind(addr).await?;
-    println!("Nimbis server listening on {}", addr);
+    info!("Nimbis server listening on {}", addr);
 
     let db: Db = Arc::new(RwLock::new(HashMap::new()));
 
     loop {
-        let (socket, _) = listener.accept().await?;
+        let (socket, addr) = listener.accept().await?;
+        info!("New client connected from {}", addr);
         let db = db.clone();
 
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, db).await {
-                eprintln!("Error handling client: {}", e);
+                error!("Error handling client: {}", e);
             }
         });
     }
@@ -49,6 +53,13 @@ async fn handle_client(
             match parse(&mut buffer) {
                 Ok(value) => {
                     let parsed_cmd: ParsedCmd = value.try_into()?;
+
+                    // Log the command being executed
+                    tracing::debug!(
+                        command = %parsed_cmd.name,
+                        args = ?parsed_cmd.args,
+                        "Executing command"
+                    );
 
                     // TODO: get cmd_table from member
                     let cmd_table = nimbis::cmd::get_cmd_table();

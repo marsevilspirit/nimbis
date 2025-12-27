@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/resp", "crates/nimbis"]
+members = ["crates/resp", "crates/nimbis", "crates/telemetry"]
 resolver = "2"
 
 [workspace.package]
@@ -11,8 +11,12 @@ repository = "https://github.com/marsevilspirit/nimbis"
 
 [workspace.dependencies]
 resp = { path = "crates/resp" }
+telemetry = { path = "crates/telemetry" }
 bytes = "1.5"
 thiserror = "2.0.17"
 tokio = { version = "1.35", features = ["full"] }
 criterion = { version = "0.8.1", features = ["html_reports"] }
 async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"

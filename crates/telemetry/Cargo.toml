@@ -1,5 +1,5 @@
 [package]
-name = "nimbis"
+name = "telemetry"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,9 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-resp = { workspace = true }
-telemetry = { workspace = true }
-tokio = { workspace = true }
-bytes = { workspace = true }
-async-trait = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+chrono = "0.4"
