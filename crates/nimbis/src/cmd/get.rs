@@ -1,6 +1,8 @@
-use crate::cmd::{Cmd, CmdMeta, Db};
+use crate::cmd::{Cmd, CmdMeta};
 use async_trait::async_trait;
 use resp::RespValue;
+use std::sync::Arc;
+use storage::Storage;
 
 /// GET command implementation
 pub struct GetCommand {
@@ -30,10 +32,10 @@ impl Cmd for GetCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue {
+    async fn do_cmd(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue {
         let key = &args[0];
 
-        match db.get(key).await {
+        match storage.get(key).await {
             Ok(Some(value)) => RespValue::bulk_string(value),
             Ok(None) => RespValue::Null,
             Err(e) => RespValue::error(format!("ERR {}", e)),

@@ -19,8 +19,8 @@ The system is built around the following core components defined in `crates/nimb
 2.  **`Cmd` Trait**: The interface that all commands must implement.
     *   `meta(&self) -> &CmdMeta`: Returns the command's metadata.
     *   `validate_arity(&self, arg_count: usize) -> Result<(), String>`: Validates if the provided argument count matches the command's arity. Has a default implementation delegating to `CmdMeta`.
-    *   `execute(&self, db: &Db, args: &[String]) -> RespValue`: The main entry point for execution. It handles validation (arity check) automatically before calling `do_cmd`.
-    *   `do_cmd(&self, db: &Db, args: &[String]) -> RespValue`: The actual execution logic of the command. This must be implemented by concrete commands.
+    *   `execute(&self, storage: &storage, args: &[String]) -> RespValue`: The main entry point for execution. It handles validation (arity check) automatically before calling `do_cmd`.
+    *   `do_cmd(&self, storage: &storage, args: &[String]) -> RespValue`: The actual execution logic of the command. This must be implemented by concrete commands.
 
 3.  **`CMD_TABLE`**: A global, thread-safe registry (`OnceLock<HashMap>`) storing instances of all available commands. The commands are stored as `Arc<dyn Cmd>`.
 
@@ -33,7 +33,7 @@ To add a new command (e.g., `PING`), follow these steps:
 Create a new file (e.g., `src/cmd/ping.rs`) and define your command struct. It should hold its own `CmdMeta`.
 
 ```rust
-use crate::cmd::{Cmd, CmdMeta, Db};
+use crate::cmd::{Cmd, CmdMeta, storage};
 use async_trait::async_trait;
 use resp::RespValue;
 
@@ -76,7 +76,7 @@ impl Cmd for PingCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, _db: &Db, args: &[String]) -> RespValue {
+    async fn do_cmd(&self, _storage: &storage, args: &[String]) -> RespValue {
         if args.is_empty() {
             RespValue::simple_string("PONG")
         } else {
@@ -123,7 +123,7 @@ Dispatching is handled by looking up the command name in the global `CMD_TABLE` 
 
 ```rust
 if let Some(cmd) = get_cmd_table().get(&parsed_cmd.name) {
-    let response = cmd.execute(&db, &parsed_cmd.args).await;
+    let response = cmd.execute(&storage, &parsed_cmd.args).await;
     // ... handling response
 } else {
     // Handle unknown command

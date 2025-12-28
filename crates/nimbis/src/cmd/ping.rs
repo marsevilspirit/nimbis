@@ -1,6 +1,8 @@
-use crate::cmd::{Cmd, CmdMeta, Db};
+use crate::cmd::{Cmd, CmdMeta};
 use async_trait::async_trait;
 use resp::RespValue;
+use std::sync::Arc;
+use storage::Storage;
 
 /// PING command implementation
 pub struct PingCommand {
@@ -30,7 +32,7 @@ impl Cmd for PingCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, _db: &Db, args: &[String]) -> RespValue {
+    async fn do_cmd(&self, _storage: &Arc<dyn Storage>, args: &[String]) -> RespValue {
         match args.len() {
             0 => RespValue::simple_string("PONG"),
             1 => RespValue::bulk_string(args[0].clone()),

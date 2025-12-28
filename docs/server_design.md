@@ -34,7 +34,7 @@ The `Server` struct holds the state required to run the application:
 ```rust
 pub struct Server {
     addr: String,
-    db: Db, // Abstract storage handle (Arc<dyn Storage>)
+    storage: storage, // Abstract storage handle (Arc<dyn Storage>)
 }
 ```
 
@@ -50,7 +50,7 @@ The `run` method is the entry point for the server's execution loop:
 1. **Bind**: It creates a `TcpListener` bound to the configured address.
 2. **Accept Loop**: It enters an infinite loop waiting for connections.
    - On `listener.accept()` success:
-     - It clones the `db` handle (cheap pointer clone).
+     - It clones the `storage` handle (cheap pointer clone).
      - It spawns a `tokio::spawn` task to run `handle_client`.
 
 ---
@@ -82,7 +82,7 @@ The client handler runs in a loop to process pipelined requests:
      - extracts the command name (normalized to UPPERCASE).
    - **Lookup**: The command name is looked up in the global `CMD_TABLE`.
    - **Run**:
-     - **Found**: Calls `cmd.execute(&db, &args)`.
+     - **Found**: Calls `cmd.execute(&storage, &args)`.
      - **Not Found**: Returns an "unknown command" error.
 
 4. **Response**:

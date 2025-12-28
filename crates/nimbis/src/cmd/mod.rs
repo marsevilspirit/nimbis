@@ -12,8 +12,6 @@ pub use get::GetCommand;
 pub use ping::PingCommand;
 pub use set::SetCommand;
 
-pub type Db = Arc<dyn Storage>;
-
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Default)]
 pub struct CmdMeta {
@@ -60,15 +58,15 @@ pub trait Cmd: Send + Sync {
         self.meta().validate_arity(arg_count)
     }
 
-    async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue;
+    async fn do_cmd(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue;
 
     /// Execute the command
-    async fn execute(&self, db: &Db, args: &[String]) -> RespValue {
+    async fn execute(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue {
         if let Err(err) = self.validate_arity(args.len()) {
             return RespValue::error(err);
         }
 
-        self.do_cmd(db, args).await
+        self.do_cmd(storage, args).await
     }
 }
 

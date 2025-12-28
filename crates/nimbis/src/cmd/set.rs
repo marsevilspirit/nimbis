@@ -1,6 +1,8 @@
-use crate::cmd::{Cmd, CmdMeta, Db};
+use crate::cmd::{Cmd, CmdMeta};
 use async_trait::async_trait;
 use resp::RespValue;
+use std::sync::Arc;
+use storage::Storage;
 
 /// SET command implementation
 pub struct SetCommand {
@@ -30,11 +32,11 @@ impl Cmd for SetCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, db: &Db, args: &[String]) -> RespValue {
+    async fn do_cmd(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue {
         let key = &args[0];
         let value = &args[1];
 
-        match db.set(key, value).await {
+        match storage.set(key, value).await {
             Ok(_) => RespValue::simple_string("OK"),
             Err(e) => RespValue::error(format!("ERR {}", e)),
         }
