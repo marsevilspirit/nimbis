@@ -2,6 +2,7 @@
 
 use bytes::{Bytes, BytesMut};
 use resp::{RespEncoder, RespValue};
+use rstest::rstest;
 
 #[test]
 fn test_encode_redis_ping() {
@@ -37,23 +38,18 @@ fn test_encode_redis_get() {
     assert_eq!(&encoded[..], b"*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n");
 }
 
-#[test]
-fn test_roundtrip_simple_types() {
-    let test_cases = vec![
-        RespValue::SimpleString(Bytes::from("OK")),
-        RespValue::Error(Bytes::from("ERR test error")),
-        RespValue::Integer(42),
-        RespValue::Integer(-100),
-        RespValue::BulkString(Bytes::from("hello world")),
-        RespValue::Null,
-    ];
-
-    for original in test_cases {
-        let encoded = original.encode().unwrap();
-        let mut buf = BytesMut::from(&encoded[..]);
-        let decoded = resp::parse(&mut buf).unwrap();
-        assert_eq!(original, decoded, "Roundtrip failed for {:?}", original);
-    }
+#[rstest]
+#[case(RespValue::SimpleString(Bytes::from("OK")))]
+#[case(RespValue::Error(Bytes::from("ERR test error")))]
+#[case(RespValue::Integer(42))]
+#[case(RespValue::Integer(-100))]
+#[case(RespValue::BulkString(Bytes::from("hello world")))]
+#[case(RespValue::Null)]
+fn test_roundtrip_simple_types(#[case] original: RespValue) {
+    let encoded = original.encode().unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
+    assert_eq!(original, decoded, "Roundtrip failed for {:?}", original);
 }
 
 #[test]
@@ -83,23 +79,18 @@ fn test_roundtrip_nested_arrays() {
     assert_eq!(original, decoded);
 }
 
-#[test]
-fn test_roundtrip_resp3_types() {
-    let test_cases = vec![
-        RespValue::Boolean(true),
-        RespValue::Boolean(false),
-        RespValue::Double(3.14159),
-        RespValue::Double(f64::INFINITY),
-        RespValue::Double(f64::NEG_INFINITY),
-        RespValue::BigNumber(Bytes::from("123456789012345678901234567890")),
-    ];
-
-    for original in test_cases {
-        let encoded = original.encode().unwrap();
-        let mut buf = BytesMut::from(&encoded[..]);
-        let decoded = resp::parse(&mut buf).unwrap();
-        assert_eq!(original, decoded, "Roundtrip failed for {:?}", original);
-    }
+#[rstest]
+#[case(RespValue::Boolean(true))]
+#[case(RespValue::Boolean(false))]
+#[case(RespValue::Double(3.14159))]
+#[case(RespValue::Double(f64::INFINITY))]
+#[case(RespValue::Double(f64::NEG_INFINITY))]
+#[case(RespValue::BigNumber(Bytes::from("123456789012345678901234567890")))]
+fn test_roundtrip_resp3_types(#[case] original: RespValue) {
+    let encoded = original.encode().unwrap();
+    let mut buf = BytesMut::from(&encoded[..]);
+    let decoded = resp::parse(&mut buf).unwrap();
+    assert_eq!(original, decoded, "Roundtrip failed for {:?}", original);
 }
 
 #[test]
