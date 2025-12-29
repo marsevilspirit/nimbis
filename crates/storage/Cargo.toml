@@ -16,3 +16,5 @@ object_store = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+rstest = { workspace = true }
+ulid = { workspace = true }

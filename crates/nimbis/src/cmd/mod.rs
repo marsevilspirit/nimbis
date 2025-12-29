@@ -58,10 +58,10 @@ pub trait Cmd: Send + Sync {
         self.meta().validate_arity(arg_count)
     }
 
-    async fn do_cmd(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue;
+    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue;
 
     /// Execute the command
-    async fn execute(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue {
+    async fn execute(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue {
         if let Err(err) = self.validate_arity(args.len()) {
             return RespValue::error(err);
         }

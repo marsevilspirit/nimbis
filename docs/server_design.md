@@ -12,9 +12,9 @@ The server follows a classic "Acceptor-Worker" pattern using Tokio's lightweight
 - **Client Tasks (Workers)**: Each connected client is handled by its own independent Tokio task. This ensures that one slow client does not block others.
 
 ### 1.2 Data Storage
-- **Persistent Storage**: Data is stored persistently using `SlateDB` via an `ObjectStorage` abstraction.
-- **Interface**: The `Storage` trait defines the contract for storage backends, supporting `get` and `set` operations.
-- **Thread Safety**: The storage handle is wrapped in `Arc` (`Arc<dyn Storage>`) for safe concurrent access.
+- **Persistent Storage**: Data is stored persistently using `SlateDB` via the `Storage` struct.
+- **Interface**: The `Storage` struct provides asynchronous `get` and `set` methods.
+- **Thread Safety**: The storage handle is wrapped in `Arc` (`Arc<Storage>`) for safe concurrent access.
 
 ### 1.3 Protocol
 Nimbis speaks the **RESP (REdis Serialization Protocol)**.
@@ -34,7 +34,7 @@ The `Server` struct holds the state required to run the application:
 ```rust
 pub struct Server {
     addr: String,
-    storage: storage, // Abstract storage handle (Arc<dyn Storage>)
+    storage: Arc<Storage>, // Concrete storage handle
 }
 ```
 
@@ -43,7 +43,7 @@ pub struct Server {
 #### Step 1: Initialization (`new`)
 When `Server::new(addr)` is called:
 1. It initializes the `addr` field.
-2. It opens the persistent storage (`ObjectStorage::open("./nimbis_data")`).
+2. It opens the persistent storage (`Storage::open("./nimbis_data")`).
 
 #### Step 2: Running (`run`)
 The `run` method is the entry point for the server's execution loop:

@@ -2,14 +2,14 @@ use crate::cmd::{CmdTable, ParsedCmd};
 use bytes::BytesMut;
 use resp::{RespEncoder, RespValue, parse};
 use std::sync::Arc;
-use storage::{ObjectStorage, Storage};
+use storage::Storage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
 
 pub struct Server {
     addr: String,
-    storage: Arc<dyn Storage>,
+    storage: Arc<Storage>,
     cmd_table: Arc<CmdTable>,
 }
 
@@ -23,7 +23,7 @@ impl Server {
         std::fs::create_dir_all(data_path)?;
 
         // Open database
-        let storage = ObjectStorage::open(data_path).await?;
+        let storage = Storage::open(data_path).await?;
         Ok(Self {
             addr: addr.into(),
             storage: Arc::new(storage),
@@ -58,7 +58,7 @@ impl Server {
 
 async fn handle_client(
     mut socket: TcpStream,
-    storage: Arc<dyn Storage>,
+    storage: Arc<Storage>,
     cmd_table: Arc<CmdTable>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut buffer = BytesMut::with_capacity(4096);

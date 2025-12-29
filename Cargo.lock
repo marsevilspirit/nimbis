@@ -2576,9 +2576,11 @@ dependencies = [
  "async-trait",
  "bytes",
  "object_store 0.13.0",
+ "rstest",
  "slatedb",
  "thiserror 2.0.17",
  "tokio",
+ "ulid",
 ]
 
 [[package]]

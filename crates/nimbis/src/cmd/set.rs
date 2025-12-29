@@ -32,7 +32,7 @@ impl Cmd for SetCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, storage: &Arc<dyn Storage>, args: &[String]) -> RespValue {
+    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue {
         let key = &args[0];
         let value = &args[1];
 

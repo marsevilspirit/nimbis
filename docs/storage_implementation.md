@@ -4,27 +4,37 @@ This document describes the storage layer implementation in Nimbis.
 
 ## Overview
 
-Nimbis uses a flexible, trait-based storage system designed to support various backends. The current default implementation is persistent object storage backed by [SlateDB](https://github.com/slatedb/slatedb).
+Nimbis uses a persistent object storage backed by [SlateDB](https://github.com/slatedb/slatedb). The core abstraction is the concrete `Storage` struct.
 
 ## Architecture
 
-### The `Storage` Trait
+### The `Storage` Struct
 
-The core interface is defined by the `Storage` trait in `crates/storage/src/lib.rs`. It is an `async_trait` ensuring thread safety (`Send + Sync`).
+The core interface is defined by the `Storage` struct in `crates/storage/src/storage.rs`. It provides a simple, asynchronous key-value interface.
 
 ```rust
-#[async_trait]
-pub trait Storage: Send + Sync {
-    /// Get value by key
-    /// Returns Option<Bytes> to support zero-copy optimized paths where possible
-    async fn get(
+#[derive(Clone)]
+pub struct Storage {
+    pub(crate) db: Arc<Db>,
+}
+```
+
+It leverages `SlateDB` for persistent key-value storage.
+- **Persistence**: Data is stored using `object_store` via `SlateDB`. By default, it uses the local file system, but can be configured for cloud object stores.
+- **Concurrency**: `SlateDB` handles underlying concurrency control. The `Storage` struct is cheap to clone (`Arc<Db>`).
+
+### String Operations
+
+String-specific operations (`get` and `set`) are implemented as inherent methods on the `Storage` struct, defined in `crates/storage/src/storage_string.rs`.
+
+```rust
+impl Storage {
+    pub async fn get(
         &self,
         key: &str,
     ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Set value for key
-    /// Takes &str for value to minimize allocations
-    async fn set(
+    pub async fn set(
         &self,
         key: &str,
         value: &str,
@@ -32,22 +42,9 @@ pub trait Storage: Send + Sync {
 }
 ```
 
-### `ObjectStorage` Backend
-
-The primary implementation is `ObjectStorage`, which leverages `SlateDB` for persistent key-value storage.
-
-- **Persistence**: Data is stored using `object_store` via `SlateDB`. By default, it uses the local file system, but can be configured for cloud object stores (S3, GCS, etc.).
-- **Type Conversion**: 
-  - Keys are converted to bytes for storage.
-  - Values are stored as bytes and returned as `bytes::Bytes`.
-- **Concurrency**: `SlateDB` handles underlying concurrency control. The `ObjectStorage` struct is cheap to clone (`Arc<Db>`).
-
-```rust
-#[derive(Clone)]
-pub struct ObjectStorage {
-    db: Arc<Db>,
-}
-```
+- **Encoding**: 
+  - Keys are encoded with a type prefix (e.g., 's' + key) using `StringKey`.
+  - Values are stored as raw bytes using `StringValue`.
 
 ## Usage
 
@@ -55,15 +52,15 @@ The server initializes the storage in `Server::new`:
 
 ```rust
 // Initialize persistent storage at local path
-let db = ObjectStorage::open("./nimbis_data").await?;
+let db = Storage::open("./nimbis_data").await?;
 ```
 
-Commands interact with the storage via the `Db` type alias (typically `Arc<dyn Storage>`):
+Commands interact with the storage via the `Storage` struct (typically `Arc<Storage>`):
 
 ```rust
 // GET command
-let value = db.get(key).await?;
+let value = storage.get(key).await?;
 
 // SET command
-db.set(key, value).await?;
+storage.set(key, value).await?;
 ```
