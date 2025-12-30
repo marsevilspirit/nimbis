@@ -32,8 +32,8 @@ impl Cmd for GetCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue {
-        let key = &args[0];
+    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+        let key = args[0].clone();
 
         match storage.get(key).await {
             Ok(Some(value)) => RespValue::bulk_string(value),

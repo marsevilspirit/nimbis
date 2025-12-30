@@ -6,20 +6,20 @@ use bytes::Bytes;
 impl Storage {
     pub async fn get(
         &self,
-        key: &str,
+        key: Bytes,
     ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
-        let key = StringKey::new(Bytes::copy_from_slice(key.as_bytes()));
+        let key = StringKey::new(key);
         let result = self.db.get(key.encode()).await?;
         Ok(result.map(|v| StringValue::decode(&v).value))
     }
 
     pub async fn set(
         &self,
-        key: &str,
-        value: &str,
+        key: Bytes,
+        value: Bytes,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let key = StringKey::new(Bytes::copy_from_slice(key.as_bytes()));
-        let value = StringValue::new(Bytes::copy_from_slice(value.as_bytes()));
+        let key = StringKey::new(key);
+        let value = StringValue::new(value);
         self.db.put(key.encode(), value.encode()).await?;
         Ok(())
     }
@@ -48,8 +48,11 @@ mod tests {
         let (storage, path) = get_storage().await;
 
         // Test set and get
-        storage.set(key, value).await.unwrap();
-        let result = storage.get(key).await.unwrap();
+        storage
+            .set(Bytes::from(key.to_string()), Bytes::from(value.to_string()))
+            .await
+            .unwrap();
+        let result = storage.get(Bytes::from(key.to_string())).await.unwrap();
         assert_eq!(result, Some(Bytes::copy_from_slice(value.as_bytes())));
 
         // Clean up
@@ -60,7 +63,7 @@ mod tests {
     async fn test_storage_string_missing() {
         let (storage, path) = get_storage().await;
 
-        let missing = storage.get("missing").await.unwrap();
+        let missing = storage.get(Bytes::from("missing")).await.unwrap();
         assert_eq!(missing, None);
 
         let _ = std::fs::remove_dir_all(path);
@@ -70,12 +73,18 @@ mod tests {
     async fn test_storage_string_overwrite() {
         let (storage, path) = get_storage().await;
 
-        storage.set("key_overwrite", "val1").await.unwrap();
-        let result = storage.get("key_overwrite").await.unwrap();
+        storage
+            .set(Bytes::from("key_overwrite"), Bytes::from("val1"))
+            .await
+            .unwrap();
+        let result = storage.get(Bytes::from("key_overwrite")).await.unwrap();
         assert_eq!(result, Some(Bytes::from("val1")));
 
-        storage.set("key_overwrite", "val2").await.unwrap();
-        let result = storage.get("key_overwrite").await.unwrap();
+        storage
+            .set(Bytes::from("key_overwrite"), Bytes::from("val2"))
+            .await
+            .unwrap();
+        let result = storage.get(Bytes::from("key_overwrite")).await.unwrap();
         assert_eq!(result, Some(Bytes::from("val2")));
 
         let _ = std::fs::remove_dir_all(path);

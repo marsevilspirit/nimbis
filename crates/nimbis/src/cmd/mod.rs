@@ -58,10 +58,10 @@ pub trait Cmd: Send + Sync {
         self.meta().validate_arity(arg_count)
     }
 
-    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue;
+    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue;
 
     /// Execute the command
-    async fn execute(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue {
+    async fn execute(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
         if let Err(err) = self.validate_arity(args.len()) {
             return RespValue::error(err);
         }
@@ -97,7 +97,7 @@ impl CmdTable {
 /// Parsed command structure (renamed from Cmd to avoid conflict)
 pub struct ParsedCmd {
     pub name: String,
-    pub args: Vec<String>,
+    pub args: Vec<bytes::Bytes>,
 }
 
 impl TryFrom<RespValue> for ParsedCmd {
@@ -118,9 +118,9 @@ impl TryFrom<RespValue> for ParsedCmd {
             .to_uppercase();
 
         // Remaining elements are arguments
-        let cmd_args: Result<Vec<String>, _> = args[1..]
+        let cmd_args: Result<Vec<bytes::Bytes>, _> = args[1..]
             .iter()
-            .map(|v| v.as_str().map(|s| s.to_string()).ok_or("Invalid argument"))
+            .map(|v| v.as_bytes().cloned().ok_or("Invalid argument"))
             .collect();
 
         Ok(ParsedCmd {

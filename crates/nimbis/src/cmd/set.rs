@@ -32,9 +32,9 @@ impl Cmd for SetCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[String]) -> RespValue {
-        let key = &args[0];
-        let value = &args[1];
+    async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+        let key = args[0].clone();
+        let value = args[1].clone();
 
         match storage.set(key, value).await {
             Ok(_) => RespValue::simple_string("OK"),

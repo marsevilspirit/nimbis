@@ -32,7 +32,7 @@ impl Cmd for PingCommand {
         &self.meta
     }
 
-    async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[String]) -> RespValue {
+    async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
         match args.len() {
             0 => RespValue::simple_string("PONG"),
             1 => RespValue::bulk_string(args[0].clone()),
