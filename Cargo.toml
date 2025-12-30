@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/resp", "crates/nimbis", "crates/telemetry", "crates/storage"]
+members = [
+    "crates/resp",
+    "crates/nimbis",
+    "crates/telemetry",
+    "crates/storage",
+    "crates/config",
+]
+
 resolver = "2"
 
 [workspace.package]
@@ -27,3 +34,5 @@ rstest = "0.26.1"
 ulid = "1.2"
 arc-swap = "1.8.0"
 smart-default = "0.7.1"
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
