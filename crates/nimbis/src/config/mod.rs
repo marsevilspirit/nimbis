@@ -2,13 +2,16 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
+use config::OnlineConfig;
 use smart_default::SmartDefault;
 
-#[derive(Debug, SmartDefault)]
+#[derive(Debug, SmartDefault, OnlineConfig)]
 pub struct ServerConfig {
 	#[default = "127.0.0.1:6379"]
+	#[online_config(immutable)]
 	pub addr: String,
 	#[default = "./nimbis_data"]
+	#[online_config(immutable)]
 	pub data_path: String,
 }
 

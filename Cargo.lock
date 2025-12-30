@@ -1554,6 +1554,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "bytes",
+ "config",
  "resp",
  "smart-default",
  "storage",
