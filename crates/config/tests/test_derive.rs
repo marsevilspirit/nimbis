@@ -73,3 +73,71 @@ fn test_get_field_unknown() {
 	assert!(result.is_err());
 	assert_eq!(result.unwrap_err(), "Field 'unknown' not found");
 }
+
+#[test]
+fn test_list_fields() {
+	let fields = TestConfig::list_fields();
+	assert_eq!(fields.len(), 3);
+	assert!(fields.contains(&"addr"));
+	assert!(fields.contains(&"port"));
+	assert!(fields.contains(&"id"));
+}
+
+#[test]
+fn test_get_all_fields() {
+	let conf = TestConfig::default();
+	let all_fields = conf.get_all_fields();
+	assert_eq!(all_fields.len(), 3);
+
+	// Check that all expected fields are present
+	let field_map: std::collections::HashMap<_, _> = all_fields.into_iter().collect();
+	assert_eq!(field_map.get("addr"), Some(&"".to_string()));
+	assert_eq!(field_map.get("port"), Some(&"0".to_string()));
+	assert_eq!(field_map.get("id"), Some(&"0".to_string()));
+}
+
+#[test]
+fn test_match_fields_all() {
+	let fields = TestConfig::match_fields("*");
+	assert_eq!(fields.len(), 3);
+	assert!(fields.contains(&"addr"));
+	assert!(fields.contains(&"port"));
+	assert!(fields.contains(&"id"));
+}
+
+#[test]
+fn test_match_fields_prefix() {
+	let fields = TestConfig::match_fields("addr*");
+	assert_eq!(fields, vec!["addr"]);
+
+	// Test prefix that doesn't match
+	let fields = TestConfig::match_fields("xyz*");
+	assert!(fields.is_empty());
+}
+
+#[test]
+fn test_match_fields_suffix() {
+	let fields = TestConfig::match_fields("*port");
+	assert_eq!(fields, vec!["port"]);
+
+	let fields = TestConfig::match_fields("*t");
+	assert_eq!(fields, vec!["port"]);
+}
+
+#[test]
+fn test_match_fields_contains() {
+	let fields = TestConfig::match_fields("*dd*");
+	assert_eq!(fields, vec!["addr"]);
+
+	let fields = TestConfig::match_fields("*or*");
+	assert_eq!(fields, vec!["port"]);
+}
+
+#[test]
+fn test_match_fields_exact() {
+	let fields = TestConfig::match_fields("addr");
+	assert_eq!(fields, vec!["addr"]);
+
+	let fields = TestConfig::match_fields("nonexistent");
+	assert!(fields.is_empty());
+}

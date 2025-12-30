@@ -87,17 +87,43 @@ impl Cmd for ConfigGetCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
-		let field_name = String::from_utf8_lossy(&args[0]);
+		let pattern = String::from_utf8_lossy(&args[0]);
 
-		match crate::config::SERVER_CONF.load().get_field(&field_name) {
-			Ok(value) => {
-				// CONFIG GET returns an array: [field_name, field_value]
-				RespValue::array(vec![
-					RespValue::bulk_string(Bytes::from(field_name.into_owned())),
-					RespValue::bulk_string(Bytes::from(value)),
-				])
+		// Check if pattern contains wildcard
+		if pattern.contains('*') {
+			// Get matching field names
+			let matched_fields = crate::config::ServerConfig::match_fields(&pattern);
+
+			if matched_fields.is_empty() {
+				// No fields matched
+				return RespValue::array(vec![]);
 			}
-			Err(e) => RespValue::error(e),
+
+			// Get current config
+			let config = crate::config::SERVER_CONF.load();
+
+			// Build result array: [key1, value1, key2, value2, ...]
+			let mut result = Vec::new();
+			for field_name in matched_fields {
+				if let Ok(value) = config.get_field(field_name) {
+					result.push(RespValue::bulk_string(Bytes::from(field_name.to_string())));
+					result.push(RespValue::bulk_string(Bytes::from(value)));
+				}
+			}
+
+			RespValue::array(result)
+		} else {
+			// Exact match - original behavior
+			match crate::config::SERVER_CONF.load().get_field(&pattern) {
+				Ok(value) => {
+					// CONFIG GET returns an array: [field_name, field_value]
+					RespValue::array(vec![
+						RespValue::bulk_string(Bytes::from(pattern.into_owned())),
+						RespValue::bulk_string(Bytes::from(value)),
+					])
+				}
+				Err(e) => RespValue::error(e),
+			}
 		}
 	}
 }

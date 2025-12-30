@@ -43,6 +43,34 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Field 'non_existent_field' not found"))
 		})
+
+		It("should get all fields with * wildcard", func() {
+			result, err := rdb.ConfigGet(ctx, "*").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(HaveLen(2)) // addr and data_path
+			Expect(result).To(HaveKeyWithValue("addr", "127.0.0.1:6379"))
+			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
+		})
+
+		It("should match fields with prefix wildcard", func() {
+			result, err := rdb.ConfigGet(ctx, "addr*").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(HaveLen(1))
+			Expect(result).To(HaveKeyWithValue("addr", "127.0.0.1:6379"))
+		})
+
+		It("should match fields with suffix wildcard", func() {
+			result, err := rdb.ConfigGet(ctx, "*path").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(HaveLen(1))
+			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
+		})
+
+		It("should return empty array for non-matching wildcard", func() {
+			result, err := rdb.ConfigGet(ctx, "nonexistent*").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(BeEmpty())
+		})
 	})
 
 	Describe("CONFIG SET", func() {
