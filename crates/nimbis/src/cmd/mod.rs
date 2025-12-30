@@ -8,6 +8,7 @@ pub use cmd_table::CmdTable;
 pub use cmd_trait::Cmd;
 pub use parsed_cmd::ParsedCmd;
 
+mod config_group;
 mod get;
 mod ping;
 mod set;

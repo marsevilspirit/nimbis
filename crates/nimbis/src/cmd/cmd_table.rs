@@ -5,6 +5,7 @@ use super::GetCommand;
 use super::PingCommand;
 use super::SetCommand;
 use super::cmd_trait::Cmd;
+use super::config_group::ConfigCommandGroup;
 
 pub struct CmdTable {
 	inner: HashMap<String, Arc<dyn Cmd>>,
@@ -22,6 +23,7 @@ impl CmdTable {
 		inner.insert("SET".to_string(), Arc::new(SetCommand::new()));
 		inner.insert("GET".to_string(), Arc::new(GetCommand::new()));
 		inner.insert("PING".to_string(), Arc::new(PingCommand::new()));
+		inner.insert("CONFIG".to_string(), Arc::new(ConfigCommandGroup::new()));
 		Self { inner }
 	}
 
