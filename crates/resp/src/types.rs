@@ -1,7 +1,9 @@
 //! RESP data types and value representation.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use bytes::Bytes;
-use std::collections::{HashMap, HashSet};
 
 /// Represents a RESP protocol value.
 ///

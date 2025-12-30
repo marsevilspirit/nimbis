@@ -1,11 +1,19 @@
-use crate::cmd::{CmdTable, ParsedCmd};
-use bytes::BytesMut;
-use resp::{RespEncoder, RespValue, parse};
 use std::sync::Arc;
+
+use bytes::BytesMut;
+use resp::RespEncoder;
+use resp::RespValue;
+use resp::parse;
 use storage::Storage;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info};
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tracing::error;
+use tracing::info;
+
+use crate::cmd::CmdTable;
+use crate::cmd::ParsedCmd;
 
 pub struct Server {
     addr: String,

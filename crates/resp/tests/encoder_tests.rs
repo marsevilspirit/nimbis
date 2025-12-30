@@ -1,7 +1,9 @@
 //! Integration tests for RESP encoder
 
-use bytes::{Bytes, BytesMut};
-use resp::{RespEncoder, RespValue};
+use bytes::Bytes;
+use bytes::BytesMut;
+use resp::RespEncoder;
+use resp::RespValue;
 use rstest::rstest;
 
 #[test]

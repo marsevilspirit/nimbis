@@ -1,7 +1,8 @@
+use bytes::Bytes;
+
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::value::StringValue;
-use bytes::Bytes;
 
 impl Storage {
     pub async fn get(
@@ -27,8 +28,9 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rstest::rstest;
+
+    use super::*;
 
     async fn get_storage() -> (Storage, std::path::PathBuf) {
         let timestamp = ulid::Ulid::new().to_string();

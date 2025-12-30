@@ -1,0 +1,10 @@
+unstable_features = true
+
+# Automatically reorder and sort imports into three groups
+group_imports = "StdExternalCrate"
+
+# Merge imports from the same module
+imports_granularity = "Item"
+
+# Force Unix-style newlines
+newline_style = "Unix"

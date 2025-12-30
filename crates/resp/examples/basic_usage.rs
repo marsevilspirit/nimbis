@@ -1,7 +1,9 @@
 //! Basic usage examples for the RESP library
 
-use bytes::{Bytes, BytesMut};
-use resp::{RespEncoder, RespValue};
+use bytes::Bytes;
+use bytes::BytesMut;
+use resp::RespEncoder;
+use resp::RespValue;
 
 fn main() {
     println!("=== RESP Library Basic Usage Examples ===\n");

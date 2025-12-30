@@ -1,7 +1,9 @@
-use slatedb::Db;
-use slatedb::object_store::{ObjectStore, local::LocalFileSystem};
 use std::path::Path;
 use std::sync::Arc;
+
+use slatedb::Db;
+use slatedb::object_store::ObjectStore;
+use slatedb::object_store::local::LocalFileSystem;
 
 #[derive(Clone)]
 pub struct Storage {

@@ -18,12 +18,12 @@ test-int:
 # Check all crates
 check:
     cargo check --workspace
-    cargo fmt -- --check
+    cargo +nightly fmt -- --check
     cargo clippy --workspace -- -D warnings
 
 # Format code
 fmt:
-    cargo fmt --all
+    cargo +nightly fmt --all
 
 # Clean build artifacts
 clean:

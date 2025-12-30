@@ -41,6 +41,8 @@ mod types;
 mod utils;
 
 pub use encoder::RespEncoder;
-pub use error::{EncodeError, ParseError, RespError};
+pub use error::EncodeError;
+pub use error::ParseError;
+pub use error::RespError;
 pub use parser::parse;
 pub use types::RespValue;

@@ -16,12 +16,12 @@ test:
 # Check code without building
 check:
     cargo check
-    cargo fmt -- --check
+    cargo +nightly fmt -- --check
     cargo clippy -- -D warnings
 
 # Format code
 fmt:
-    cargo fmt
+    cargo +nightly fmt
 
 # Run benchmarks
 bench:

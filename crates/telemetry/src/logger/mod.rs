@@ -1,6 +1,8 @@
-use tracing_subscriber::{
-    EnvFilter, fmt, fmt::time::FormatTime, layer::SubscriberExt, util::SubscriberInitExt,
-};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt;
+use tracing_subscriber::fmt::time::FormatTime;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Custom time formatter that displays time as "YYYY-MM-DD HH:MM:SS.micros"
 struct CustomTimeFormat;

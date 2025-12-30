@@ -1,7 +1,11 @@
 //! RESP protocol encoder for serializing values to bytes.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use bytes::BufMut;
+use bytes::Bytes;
+use bytes::BytesMut;
 
 use crate::error::EncodeError;
 use crate::types::RespValue;
