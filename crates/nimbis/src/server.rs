@@ -14,34 +14,32 @@ use tracing::info;
 
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
+use crate::config::SERVER_CONF;
 
 pub struct Server {
-	addr: String,
 	storage: Arc<Storage>,
 	cmd_table: Arc<CmdTable>,
 }
 
 impl Server {
-	/// Create a new server instance
-	pub async fn new(
-		addr: impl Into<String>,
-	) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+	// Create a new server instance
+	pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 		// Ensure data directory exists
-		let data_path = "./nimbis_data";
+		let data_path = &SERVER_CONF.load().data_path;
 		std::fs::create_dir_all(data_path)?;
 
 		// Open database
 		let storage = Storage::open(data_path).await?;
 		Ok(Self {
-			addr: addr.into(),
 			storage: Arc::new(storage),
 			cmd_table: Arc::new(CmdTable::new()),
 		})
 	}
 
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let listener = TcpListener::bind(&self.addr).await?;
-		info!("Nimbis server listening on {}", self.addr);
+		let addr = &SERVER_CONF.load().addr;
+		let listener = TcpListener::bind(addr).await?;
+		info!("Nimbis server listening on {}", addr);
 
 		loop {
 			match listener.accept().await {

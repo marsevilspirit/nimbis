@@ -14,3 +14,4 @@ tokio = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
+arc-swap = { workspace = true }

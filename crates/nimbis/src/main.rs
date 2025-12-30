@@ -1,10 +1,12 @@
+use nimbis::config;
 use nimbis::server::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	config::init_config();
 	telemetry::init();
 
-	let server = Server::new("127.0.0.1:6379").await?;
+	let server = Server::new().await?;
 	server.run().await?;
 
 	Ok(())
