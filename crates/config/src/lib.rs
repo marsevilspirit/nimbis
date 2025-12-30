@@ -18,7 +18,7 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 		_ => panic!("OnlineConfig only supports structs"),
 	};
 
-	let match_arms = fields.iter().map(|f| {
+	let set_match_arms = fields.iter().map(|f| {
 		let field_name = &f.ident;
 		let field_type = &f.ty;
 		let field_name_str = field_name.as_ref().unwrap().to_string();
@@ -56,11 +56,28 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 		}
 	});
 
+	// Generate match arms for get_field
+	let get_match_arms = fields.iter().map(|f| {
+		let field_name = &f.ident;
+		let field_name_str = field_name.as_ref().unwrap().to_string();
+
+		quote! {
+			#field_name_str => Ok(self.#field_name.to_string()),
+		}
+	});
+
 	let expanded = quote! {
 		impl #name {
 			pub fn set_field(&mut self, key: &str, value: &str) -> Result<(), String> {
 				match key {
-					#(#match_arms)*
+					#(#set_match_arms)*
+					_ => Err(format!("Field '{}' not found", key)),
+				}
+			}
+
+			pub fn get_field(&self, key: &str) -> Result<String, String> {
+				match key {
+					#(#get_match_arms)*
 					_ => Err(format!("Field '{}' not found", key)),
 				}
 			}

@@ -43,3 +43,33 @@ fn test_immutable_field() {
 	assert_eq!(res.unwrap_err(), "Field 'id' is immutable");
 	assert_eq!(conf.id, 0);
 }
+
+#[rstest]
+#[case("addr", "")]
+#[case("port", "0")]
+#[case("id", "0")]
+fn test_get_field_success(#[case] key: &str, #[case] expected: &str) {
+	let conf = TestConfig::default();
+	let result = conf.get_field(key);
+	assert!(result.is_ok());
+	assert_eq!(result.unwrap(), expected);
+}
+
+#[test]
+fn test_get_field_after_set() {
+	let mut conf = TestConfig::default();
+	conf.set_field("addr", "127.0.0.1").unwrap();
+	conf.set_field("port", "8080").unwrap();
+
+	assert_eq!(conf.get_field("addr").unwrap(), "127.0.0.1");
+	assert_eq!(conf.get_field("port").unwrap(), "8080");
+	assert_eq!(conf.get_field("id").unwrap(), "0");
+}
+
+#[test]
+fn test_get_field_unknown() {
+	let conf = TestConfig::default();
+	let result = conf.get_field("unknown");
+	assert!(result.is_err());
+	assert_eq!(result.unwrap_err(), "Field 'unknown' not found");
+}
