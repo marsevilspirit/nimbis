@@ -8,3 +8,5 @@ imports_granularity = "Item"
 
 # Force Unix-style newlines
 newline_style = "Unix"
+
+hard_tabs = true
