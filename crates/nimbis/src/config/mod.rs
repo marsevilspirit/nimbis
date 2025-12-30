@@ -2,20 +2,14 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
+use smart_default::SmartDefault;
 
-#[derive(Debug)]
+#[derive(Debug, SmartDefault)]
 pub struct NimbisConfig {
+	#[default = "127.0.0.1:6379"]
 	pub addr: String,
+	#[default = "./nimbis_data"]
 	pub data_path: String,
-}
-
-impl Default for NimbisConfig {
-	fn default() -> Self {
-		Self {
-			addr: "127.0.0.1:6379".to_string(),
-			data_path: "./nimbis_data".to_string(),
-		}
-	}
 }
 
 pub struct GlobalConfig {
