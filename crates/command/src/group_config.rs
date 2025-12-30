@@ -30,6 +30,12 @@ impl ConfigCommandGroup {
 	}
 }
 
+impl Default for ConfigCommandGroup {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 #[async_trait]
 impl Cmd for ConfigCommandGroup {
 	fn meta(&self) -> &CmdMeta {
