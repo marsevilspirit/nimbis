@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use resp::RespValue;
 use storage::Storage;
 
-use crate::Cmd;
-use crate::CmdMeta;
+use super::Cmd;
+use super::CmdMeta;
 
 /// PING command implementation
 pub struct PingCommand {

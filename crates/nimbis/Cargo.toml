@@ -10,7 +10,6 @@ repository.workspace = true
 resp = { workspace = true }
 telemetry = { workspace = true }
 storage = { workspace = true }
-command = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }

@@ -5,7 +5,6 @@ members = [
     "crates/telemetry",
     "crates/storage",
     "crates/config",
-    "crates/command",
 ]
 
 resolver = "2"
@@ -22,8 +21,6 @@ resp = { path = "crates/resp" }
 telemetry = { path = "crates/telemetry" }
 storage = { path = "crates/storage" }
 config = { path = "crates/config" }
-command = { path = "crates/command" }
-
 
 bytes = "1.5"
 thiserror = "2.0.17"
