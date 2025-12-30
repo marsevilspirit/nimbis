@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use resp::RespValue;
 use storage::Storage;
 
@@ -19,6 +20,7 @@ impl ConfigCommandGroup {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
 		sub_cmds.insert("GET".to_string(), Box::new(ConfigGetCommand::new()));
+		sub_cmds.insert("SET".to_string(), Box::new(ConfigSetCommand::new()));
 
 		Self {
 			meta: CmdMeta {
@@ -84,8 +86,68 @@ impl Cmd for ConfigGetCommand {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Arc<Storage>, _args: &[bytes::Bytes]) -> RespValue {
-		// TODO: Implement CONFIG GET command logic
-		RespValue::error("CONFIG GET not implemented yet")
+	async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+		let field_name = String::from_utf8_lossy(&args[0]);
+
+		match crate::config::SERVER_CONF.load().get_field(&field_name) {
+			Ok(value) => {
+				// CONFIG GET returns an array: [field_name, field_value]
+				RespValue::array(vec![
+					RespValue::bulk_string(Bytes::from(field_name.into_owned())),
+					RespValue::bulk_string(Bytes::from(value)),
+				])
+			}
+			Err(e) => RespValue::error(e),
+		}
+	}
+}
+
+pub struct ConfigSetCommand {
+	meta: CmdMeta,
+}
+
+impl ConfigSetCommand {
+	pub fn new() -> Self {
+		Self {
+			meta: CmdMeta {
+				name: "SET".to_string(),
+				arity: 3, // CONFIG SET key value
+			},
+		}
+	}
+}
+
+impl Default for ConfigSetCommand {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+#[async_trait]
+impl Cmd for ConfigSetCommand {
+	fn meta(&self) -> &CmdMeta {
+		&self.meta
+	}
+
+	async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+		let field_name = String::from_utf8_lossy(&args[0]);
+		let value = String::from_utf8_lossy(&args[1]);
+
+		// Load current config, clone it, and modify
+		let current = crate::config::SERVER_CONF.load();
+		let mut new_config = crate::config::ServerConfig {
+			addr: current.addr.clone(),
+			data_path: current.data_path.clone(),
+		};
+
+		// Try to set the field
+		match new_config.set_field(&field_name, &value) {
+			Ok(_) => {
+				// Update to the new config
+				crate::config::SERVER_CONF.update(new_config);
+				RespValue::simple_string("OK")
+			}
+			Err(e) => RespValue::error(e),
+		}
 	}
 }

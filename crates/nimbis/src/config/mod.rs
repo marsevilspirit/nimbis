@@ -39,6 +39,14 @@ impl GlobalConfig {
 	pub fn load(&self) -> arc_swap::Guard<Arc<ServerConfig>> {
 		self.inner.get().expect("Config is not initialized").load()
 	}
+
+	/// Update the configuration with a new one
+	pub fn update(&self, new_config: ServerConfig) {
+		self.inner
+			.get()
+			.expect("Config is not initialized")
+			.store(Arc::new(new_config));
+	}
 }
 
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
