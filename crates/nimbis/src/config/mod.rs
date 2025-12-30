@@ -22,6 +22,12 @@ pub struct GlobalConfig {
 	inner: OnceLock<ArcSwap<NimbisConfig>>,
 }
 
+impl Default for GlobalConfig {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl GlobalConfig {
 	pub const fn new() -> Self {
 		Self {
