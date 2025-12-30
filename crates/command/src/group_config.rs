@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use resp::RespValue;
 use storage::Storage;
 
-use crate::cmd::Cmd;
-use crate::cmd::CmdMeta;
+use crate::Cmd;
+use crate::CmdMeta;
 
 /// SET command implementation
 pub struct ConfigCommandGroup {

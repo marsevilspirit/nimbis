@@ -1,5 +1,5 @@
 [package]
-name = "nimbis"
+name = "command"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,13 +8,7 @@ repository.workspace = true
 
 [dependencies]
 resp = { workspace = true }
-telemetry = { workspace = true }
 storage = { workspace = true }
-command = { workspace = true }
-tokio = { workspace = true }
-bytes = { workspace = true }
 async-trait = { workspace = true }
-tracing = { workspace = true }
-arc-swap = { workspace = true }
+bytes = { workspace = true }
 config = { workspace = true }
-smart-default = { workspace = true }

@@ -80,10 +80,11 @@ The client handler runs in a loop to process pipelined requests:
    - **Convert**: The raw `RespValue` is converted into a `ParsedCmd` struct.
      - Validates the structure (must be an Array).
      - extracts the command name (normalized to UPPERCASE).
-   - **Lookup**: The command name is looked up in the global `CMD_TABLE`.
+   - **Lookup**: The command name is looked up in the `CmdTable` (from the `command` crate).
    - **Run**:
      - **Found**: Calls `cmd.execute(&storage, &args)`.
      - **Not Found**: Returns an "unknown command" error.
+
 
 4. **Response**:
    - The result (`RespValue`) is encoded back into bytes.
