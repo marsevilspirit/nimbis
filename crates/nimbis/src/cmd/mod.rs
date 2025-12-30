@@ -33,13 +33,12 @@ impl CmdMeta {
                 ));
             }
         } else if self.arity < 0 {
-            // Negative: maximum count allowed
-            let max_args = (-self.arity) as usize;
-            if arg_count > max_args {
+            // Negative: minimum count allowed
+            let min_args = (-self.arity) as usize;
+            if arg_count < min_args {
                 return Err(format!(
-                    "ERR too many arguments for '{}' command (max {})",
-                    self.name.to_lowercase(),
-                    max_args
+                    "ERR wrong number of arguments for '{}' command",
+                    self.name.to_lowercase()
                 ));
             }
         }
@@ -62,7 +61,7 @@ pub trait Cmd: Send + Sync {
 
     /// Execute the command
     async fn execute(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
-        if let Err(err) = self.validate_arity(args.len()) {
+        if let Err(err) = self.validate_arity(args.len() + 1) {
             return RespValue::error(err);
         }
 

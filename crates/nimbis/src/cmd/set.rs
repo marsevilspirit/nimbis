@@ -20,7 +20,7 @@ impl SetCommand {
         Self {
             meta: CmdMeta {
                 name: "SET".to_string(),
-                arity: 2,
+                arity: 3,
             },
         }
     }

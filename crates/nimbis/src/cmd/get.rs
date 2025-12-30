@@ -20,7 +20,7 @@ impl GetCommand {
         Self {
             meta: CmdMeta {
                 name: "GET".to_string(),
-                arity: 1,
+                arity: 2,
             },
         }
     }
