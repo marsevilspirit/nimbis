@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::Cmd;
+use super::ConfigCommandGroup;
 use super::GetCommand;
 use super::PingCommand;
 use super::SetCommand;
-use super::cmd_trait::Cmd;
-use super::config_group::ConfigCommandGroup;
 
 pub struct CmdTable {
 	inner: HashMap<String, Arc<dyn Cmd>>,
