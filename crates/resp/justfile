@@ -1,6 +1,7 @@
 set shell := ["bash", "-c"]
 
 # List available recipes
+[private]
 default:
     @just --list
 
