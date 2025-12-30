@@ -39,12 +39,13 @@ pub struct MyConfig {
 }
 ```
 
-### 2.3 Dynamic Configuration Updates
+### 2.3 Dynamic Configuration Updates and Retrieval
 
-The `OnlineConfig` macro generates a `set_field` method for the struct:
+The `OnlineConfig` macro generates `set_field` and `get_field` methods for the struct:
 
 ```rust
 pub fn set_field(&mut self, key: &str, value: &str) -> Result<(), String>
+pub fn get_field(&self, key: &str) -> Result<String, String>
 ```
 
 Example:
@@ -54,15 +55,46 @@ let mut conf = MyConfig::default();
 
 // Successful updates
 assert!(conf.set_field("addr", "127.0.0.1").is_ok());
-assert!(conf.set_field("port", "8080").is_ok());
+
+// Retrieval
+assert_eq!(conf.get_field("addr").unwrap(), "127.0.0.1");
 
 // Updating an immutable field will fail
 let err = conf.set_field("id", "100");
 assert!(err.is_err());
 assert_eq!(err.unwrap_err(), "Field 'id' is immutable");
 
-// Updating a non-existent field will fail
+// Getting/Setting a non-existent field will fail
 assert!(conf.set_field("unknown", "val").is_err());
+assert!(conf.get_field("unknown").is_err());
+```
+
+### 2.4 Configuration Inspection
+
+The `OnlineConfig` trait also provides methods to inspect available fields, which is useful for implementing wildcard matching or listing configuration.
+
+```rust
+// List all available field names
+pub fn list_fields() -> Vec<&'static str>
+
+// Get all fields as key-value pairs
+pub fn get_all_fields(&self) -> Vec<(String, String)>
+
+// Match fields by wildcard pattern (*, prefix*, *suffix, *middle*)
+pub fn match_fields(pattern: &str) -> Vec<&'static str>
+```
+
+Example:
+
+```rust
+// List all
+let fields = MyConfig::list_fields();
+assert!(fields.contains(&"addr"));
+
+// Wildcard matching
+let matches = MyConfig::match_fields("*port"); // Suffix match
+let matches = MyConfig::match_fields("addr*"); // Prefix match
+let matches = MyConfig::match_fields("*");     // Match all
 ```
 
 ## 3. Implementation Principle
@@ -95,27 +127,11 @@ Note: The macro currently ignores unknown attributes (like `mutable`), which mea
 
 ### 3.3 Code Generation
 
-The macro uses the `quote` library to generate the implementation of the `set_field` method:
+The macro uses the `quote` library to generate the implementation of the methods:
 
-1.  **Match Statement**: Generates a `match key { ... }` statement.
-2.  **Type Conversion**: For mutable fields, uses `std::str::FromStr` to convert the string value to the field's type.
-    ```rust
-    #field_name_str => {
-        match #field_type::from_str(value) {
-            Ok(v) => {
-                self.#field_name = v;
-                Ok(())
-            }
-            Err(_) => Err(format!("Failed to parse value for field '{}'", ...)),
-        }
-    }
-    ```
-3.  **Immutability Protection**: For immutable fields, it directly returns an error.
-    ```rust
-    #field_name_str => {
-        Err(format!("Field '{}' is immutable", #field_name_str))
-    }
-    ```
-4.  **Default Branch**: If no field matches, it returns a "Field not found" error.
+1.  **set_field**: Generates a `match` statement to dispatch to the correct field. Converts string values using `FromStr` for mutable fields, and returns errors for immutable ones.
+2.  **get_field**: Generates a `match` statement to return `self.field.to_string()`.
+3.  **list_fields**: Returns a static vector of string literals generated from field names.
+4.  **match_fields**: Implements efficient string matching logic (using `strip_prefix`/`strip_suffix`) against the static field list to support wildcards.
 
 In this way, we generate efficient field dispatch logic at compile time, avoiding runtime reflection overhead.
