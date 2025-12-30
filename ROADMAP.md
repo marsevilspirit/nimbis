@@ -13,7 +13,7 @@ Nimbis aims to be a cloud-native, cost-effective alternative to Redis for datase
 - **Version**: `v0.1.0`
 - **Core**: RESP protocol implementation, async server architecture.
 - **Storage**: Basic object storage backend via `SlateDB`.
-- **Commands**: `GET`, `SET`, `PING`.
+- **Commands**: `GET`, `SET`, `PING`, `CONFIG GET`, `CONFIG SET`.
 
 ## 🗺️ Development Phases
 
