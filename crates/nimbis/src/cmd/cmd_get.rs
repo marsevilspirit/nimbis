@@ -8,17 +8,17 @@ use super::Cmd;
 use super::CmdMeta;
 
 /// GET command implementation
-pub struct GetCommand {
+pub struct GetCmd {
 	meta: CmdMeta,
 }
 
-impl Default for GetCommand {
+impl Default for GetCmd {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl GetCommand {
+impl GetCmd {
 	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -30,7 +30,7 @@ impl GetCommand {
 }
 
 #[async_trait]
-impl Cmd for GetCommand {
+impl Cmd for GetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}

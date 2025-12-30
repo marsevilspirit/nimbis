@@ -8,17 +8,17 @@ use super::Cmd;
 use super::CmdMeta;
 
 /// SET command implementation
-pub struct SetCommand {
+pub struct SetCmd {
 	meta: CmdMeta,
 }
 
-impl Default for SetCommand {
+impl Default for SetCmd {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl SetCommand {
+impl SetCmd {
 	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -30,7 +30,7 @@ impl SetCommand {
 }
 
 #[async_trait]
-impl Cmd for SetCommand {
+impl Cmd for SetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}

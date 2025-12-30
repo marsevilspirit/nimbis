@@ -103,8 +103,8 @@ mod cmd_set;
 mod group_cmd_config;
 mod table;
 
-pub use cmd_get::GetCommand;
-pub use cmd_ping::PingCommand;
-pub use cmd_set::SetCommand;
-pub use group_cmd_config::ConfigCommandGroup;
+pub use cmd_get::GetCmd;
+pub use cmd_ping::PingCmd;
+pub use cmd_set::SetCmd;
+pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;

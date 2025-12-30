@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::Cmd;
-use super::ConfigCommandGroup;
-use super::GetCommand;
-use super::PingCommand;
-use super::SetCommand;
+use super::ConfigGroupCmd;
+use super::GetCmd;
+use super::PingCmd;
+use super::SetCmd;
 
 pub struct CmdTable {
 	inner: HashMap<String, Arc<dyn Cmd>>,
@@ -20,10 +20,10 @@ impl Default for CmdTable {
 impl CmdTable {
 	pub fn new() -> Self {
 		let mut inner: HashMap<String, Arc<dyn Cmd>> = HashMap::new();
-		inner.insert("SET".to_string(), Arc::new(SetCommand::new()));
-		inner.insert("GET".to_string(), Arc::new(GetCommand::new()));
-		inner.insert("PING".to_string(), Arc::new(PingCommand::new()));
-		inner.insert("CONFIG".to_string(), Arc::new(ConfigCommandGroup::new()));
+		inner.insert("SET".to_string(), Arc::new(SetCmd::new()));
+		inner.insert("GET".to_string(), Arc::new(GetCmd::new()));
+		inner.insert("PING".to_string(), Arc::new(PingCmd::new()));
+		inner.insert("CONFIG".to_string(), Arc::new(ConfigGroupCmd::new()));
 		Self { inner }
 	}
 

@@ -10,12 +10,12 @@ use super::Cmd;
 use super::CmdMeta;
 
 /// SET command implementation
-pub struct ConfigCommandGroup {
+pub struct ConfigGroupCmd {
 	meta: CmdMeta,
 	sub_cmds: HashMap<String, Box<dyn Cmd>>,
 }
 
-impl ConfigCommandGroup {
+impl ConfigGroupCmd {
 	pub fn new() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
@@ -32,14 +32,14 @@ impl ConfigCommandGroup {
 	}
 }
 
-impl Default for ConfigCommandGroup {
+impl Default for ConfigGroupCmd {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
 #[async_trait]
-impl Cmd for ConfigCommandGroup {
+impl Cmd for ConfigGroupCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}

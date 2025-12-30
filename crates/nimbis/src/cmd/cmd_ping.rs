@@ -8,17 +8,17 @@ use super::Cmd;
 use super::CmdMeta;
 
 /// PING command implementation
-pub struct PingCommand {
+pub struct PingCmd {
 	meta: CmdMeta,
 }
 
-impl Default for PingCommand {
+impl Default for PingCmd {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl PingCommand {
+impl PingCmd {
 	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -30,7 +30,7 @@ impl PingCommand {
 }
 
 #[async_trait]
-impl Cmd for PingCommand {
+impl Cmd for PingCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
