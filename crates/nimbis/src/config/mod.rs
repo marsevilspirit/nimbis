@@ -5,7 +5,7 @@ use arc_swap::ArcSwap;
 use smart_default::SmartDefault;
 
 #[derive(Debug, SmartDefault)]
-pub struct NimbisConfig {
+pub struct ServerConfig {
 	#[default = "127.0.0.1:6379"]
 	pub addr: String,
 	#[default = "./nimbis_data"]
@@ -13,7 +13,7 @@ pub struct NimbisConfig {
 }
 
 pub struct GlobalConfig {
-	inner: OnceLock<ArcSwap<NimbisConfig>>,
+	inner: OnceLock<ArcSwap<ServerConfig>>,
 }
 
 impl Default for GlobalConfig {
@@ -29,11 +29,11 @@ impl GlobalConfig {
 		}
 	}
 
-	pub fn init(&self, config: NimbisConfig) {
+	pub fn init(&self, config: ServerConfig) {
 		let _ = self.inner.set(ArcSwap::from_pointee(config));
 	}
 
-	pub fn load(&self) -> arc_swap::Guard<Arc<NimbisConfig>> {
+	pub fn load(&self) -> arc_swap::Guard<Arc<ServerConfig>> {
 		self.inner.get().expect("Config is not initialized").load()
 	}
 }
@@ -41,7 +41,7 @@ impl GlobalConfig {
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 
 pub fn init_config() {
-	SERVER_CONF.init(NimbisConfig::default());
+	SERVER_CONF.init(ServerConfig::default());
 }
 
 #[cfg(test)]
@@ -51,7 +51,7 @@ mod tests {
 	#[test]
 	fn test_config_singleton() {
 		// Initialize with default values
-		let config = NimbisConfig::default();
+		let config = ServerConfig::default();
 
 		// Try to init. If it's already initialized (by other tests), this is a no-op due to our idempotent implementation.
 		SERVER_CONF.init(config);
