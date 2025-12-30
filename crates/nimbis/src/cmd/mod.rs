@@ -97,14 +97,14 @@ impl TryFrom<RespValue> for ParsedCmd {
 	}
 }
 
+mod cmd_get;
+mod cmd_ping;
+mod cmd_set;
 mod cmd_table;
-mod get;
-mod group_config;
-mod ping;
-mod set;
+mod group_cmd_config;
 
+pub use cmd_get::GetCommand;
+pub use cmd_ping::PingCommand;
+pub use cmd_set::SetCommand;
 pub use cmd_table::CmdTable;
-pub use get::GetCommand;
-pub use group_config::ConfigCommandGroup;
-pub use ping::PingCommand;
-pub use set::SetCommand;
+pub use group_cmd_config::ConfigCommandGroup;
