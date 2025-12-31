@@ -15,18 +15,8 @@
 //! ## Example
 //!
 //! ```rust
-//! use resp::{RespValue, RespEncoder};
-//! use bytes::{Bytes, BytesMut};
-//!
-//! // Using convenience constructors
-//! let cmd = RespValue::array(vec![
-//!     RespValue::bulk_string("SET"),
-//!     RespValue::bulk_string("key"),
-//!     RespValue::bulk_string("value"),
-//! ]);
-//!
-//! // Encode the command
-//! let encoded = cmd.encode().unwrap();
+//! use resp::RespValue;
+//! use bytes::BytesMut;
 //!
 //! // Parse a response
 //! let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
@@ -34,15 +24,14 @@
 //! assert_eq!(response.as_str(), Some("OK"));
 //! ```
 
-mod encoder;
 mod error;
 mod parser;
 mod types;
 mod utils;
 
-pub use encoder::RespEncoder;
-pub use error::EncodeError;
 pub use error::ParseError;
 pub use error::RespError;
+pub use parser::RespParseResult;
+pub use parser::RespParser;
 pub use parser::parse;
 pub use types::RespValue;

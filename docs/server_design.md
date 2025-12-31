@@ -70,11 +70,12 @@ The client handler runs in a loop to process pipelined requests:
    - Calls `socket.read_buf(&mut buffer)`.
    - If 0 bytes are read, the connection is closed.
 
-2. **Parse & Execute Loop**:
-   - The buffer is strictly processed in a loop to handle multiple commands in a single packet (pipelining).
-   - **Parse**: Calls `resp::parse(&mut buffer)` from the `nimbis-resp` crate.
-     - This function attempts to decode a complete RESP frame.
-     - It advances the buffer cursor automatically.
+3. **Parse & Execute Loop**:
+   - The buffer is strictly processed in a loop to handle multiple commands in a single packet (pipelining) and fragmented data.
+   - **Parse**: Calls `parser.parse(&mut buffer)` using `RespParser` from the `nimbis-resp` crate.
+     - **Complete**: Returns `RespParseResult::Complete(value)`, consumes the frame from buffer, and proceeds to execution.
+     - **Incomplete**: Returns `RespParseResult::Incomplete`. The loop breaks to wait for more data from the socket.
+     - **Error**: Returns `RespParseResult::Error`.
 
 3. **Command Execution**:
    - **Convert**: The raw `RespValue` is converted into a `ParsedCmd` struct.

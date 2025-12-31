@@ -1,15 +1,11 @@
-//! Performance benchmarks for RESP parser and encoder
-
+//! Performance benchmarks for RESP parser
 use std::hint::black_box;
 
-use bytes::Bytes;
 use bytes::BytesMut;
 use criterion::Criterion;
 use criterion::Throughput;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use resp::RespEncoder;
-use resp::RespValue;
 
 fn bench_parse_simple_string(c: &mut Criterion) {
 	let mut group = c.benchmark_group("parse_simple_string");
@@ -87,58 +83,6 @@ fn bench_parse_large_array(c: &mut Criterion) {
 	group.finish();
 }
 
-fn bench_encode_simple_string(c: &mut Criterion) {
-	let mut group = c.benchmark_group("encode_simple_string");
-	let value = RespValue::SimpleString(Bytes::from("OK"));
-
-	group.bench_function("simple_string", |b| {
-		b.iter(|| black_box(&value).encode().unwrap())
-	});
-	group.finish();
-}
-
-fn bench_encode_bulk_string(c: &mut Criterion) {
-	let mut group = c.benchmark_group("encode_bulk_string");
-	let value = RespValue::BulkString(Bytes::from("hello world"));
-
-	group.bench_function("bulk_string", |b| {
-		b.iter(|| black_box(&value).encode().unwrap())
-	});
-	group.finish();
-}
-
-fn bench_encode_array(c: &mut Criterion) {
-	let mut group = c.benchmark_group("encode_array");
-	let value = RespValue::Array(vec![
-		RespValue::BulkString(Bytes::from("SET")),
-		RespValue::BulkString(Bytes::from("key")),
-		RespValue::BulkString(Bytes::from("value")),
-	]);
-
-	group.bench_function("array_set_command", |b| {
-		b.iter(|| black_box(&value).encode().unwrap())
-	});
-	group.finish();
-}
-
-fn bench_roundtrip(c: &mut Criterion) {
-	let mut group = c.benchmark_group("roundtrip");
-	let value = RespValue::Array(vec![
-		RespValue::BulkString(Bytes::from("SET")),
-		RespValue::BulkString(Bytes::from("key")),
-		RespValue::BulkString(Bytes::from("value")),
-	]);
-
-	group.bench_function("encode_parse", |b| {
-		b.iter(|| {
-			let encoded = black_box(&value).encode().unwrap();
-			let mut buf = BytesMut::from(&encoded[..]);
-			resp::parse(&mut buf).unwrap()
-		})
-	});
-	group.finish();
-}
-
 criterion_group!(
 	benches,
 	bench_parse_simple_string,
@@ -146,10 +90,6 @@ criterion_group!(
 	bench_parse_integer,
 	bench_parse_array,
 	bench_parse_large_array,
-	bench_encode_simple_string,
-	bench_encode_bulk_string,
-	bench_encode_array,
-	bench_roundtrip,
 );
 
 criterion_main!(benches);

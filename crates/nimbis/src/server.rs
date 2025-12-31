@@ -1,20 +1,22 @@
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use resp::RespEncoder;
+use resp::RespParseResult;
+use resp::RespParser;
 use resp::RespValue;
-use resp::parse;
 use storage::Storage;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
 use crate::config::SERVER_CONF;
+use crate::resp_encoder::RespEncoder;
 
 pub struct Server {
 	storage: Arc<Storage>,
@@ -44,7 +46,7 @@ impl Server {
 		loop {
 			match listener.accept().await {
 				Ok((socket, addr)) => {
-					info!("New client connected from {}", addr);
+					debug!("New client connected from {}", addr);
 					let storage = self.storage.clone();
 					let cmd_table = self.cmd_table.clone();
 
@@ -67,6 +69,7 @@ async fn handle_client(
 	storage: Arc<Storage>,
 	cmd_table: Arc<CmdTable>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	let mut parser = RespParser::new();
 	let mut buffer = BytesMut::with_capacity(4096);
 
 	loop {
@@ -81,9 +84,9 @@ async fn handle_client(
 			}
 		}
 
-		while !buffer.is_empty() {
-			match parse(&mut buffer) {
-				Ok(value) => {
+		loop {
+			match parser.parse(&mut buffer) {
+				RespParseResult::Complete(value) => {
 					let parsed_cmd: ParsedCmd = value.try_into()?;
 
 					// Log the command being executed
@@ -104,7 +107,10 @@ async fn handle_client(
 					let encoded = response.encode()?;
 					socket.write_all(&encoded).await?;
 				}
-				Err(e) => {
+				RespParseResult::Incomplete => {
+					break;
+				}
+				RespParseResult::Error(e) => {
 					let error_response = RespValue::error(format!("ERR Protocol error: {}", e));
 					let encoded = error_response.encode()?;
 					socket.write_all(&encoded).await?;

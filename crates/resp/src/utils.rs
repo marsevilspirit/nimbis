@@ -29,13 +29,11 @@ pub fn find_crlf(buf: &[u8]) -> Option<usize> {
 	buf.windows(2).position(|window| window == CRLF)
 }
 
-/// Extract a line from buffer (without CRLF)
+/// Peek a line from buffer (without CRLF), returning (line, total_len_including_crlf)
+/// returns None if CRLF is not found
 #[inline]
-pub fn extract_line(buf: &[u8]) -> Result<(&[u8], usize), ParseError> {
-	match find_crlf(buf) {
-		Some(pos) => Ok((&buf[..pos], pos + 2)),
-		None => Err(ParseError::UnexpectedEOF),
-	}
+pub fn peek_line(buf: &[u8]) -> Option<(&[u8], usize)> {
+	find_crlf(buf).map(|pos| (&buf[..pos], pos + 2))
 }
 
 /// Parse an integer from a byte slice
@@ -89,13 +87,6 @@ mod tests {
 		assert_eq!(find_crlf(b"hello\r\n"), Some(5));
 		assert_eq!(find_crlf(b"hello"), None);
 		assert_eq!(find_crlf(b"\r\n"), Some(0));
-	}
-
-	#[test]
-	fn test_extract_line() {
-		let (line, consumed) = extract_line(b"hello\r\nworld").unwrap();
-		assert_eq!(line, b"hello");
-		assert_eq!(consumed, 7);
 	}
 
 	#[test]

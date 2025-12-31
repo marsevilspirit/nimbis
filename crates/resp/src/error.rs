@@ -8,10 +8,6 @@ pub enum RespError {
 	/// Error during parsing
 	#[error("Parse error: {0}")]
 	Parse(#[from] ParseError),
-
-	/// Error during encoding
-	#[error("Encode error: {0}")]
-	Encode(#[from] EncodeError),
 }
 
 /// Errors that can occur during RESP parsing.
@@ -48,18 +44,6 @@ pub enum ParseError {
 	/// Invalid double value
 	#[error("Invalid double: {0}")]
 	InvalidDouble(String),
-}
-
-/// Errors that can occur during RESP encoding.
-#[derive(Error, Debug, Clone, PartialEq)]
-pub enum EncodeError {
-	/// Value too large to encode
-	#[error("Value too large: {0}")]
-	ValueTooLarge(String),
-
-	/// Invalid value for encoding
-	#[error("Invalid value: {0}")]
-	InvalidValue(String),
 }
 
 impl From<std::str::Utf8Error> for ParseError {

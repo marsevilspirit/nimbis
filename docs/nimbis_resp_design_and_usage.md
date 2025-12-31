@@ -47,10 +47,10 @@ This design makes handling polymorphic responses simple and safe, allowing elega
 
 ### 1.4 Parsing and Encoding Mechanisms
 
-- **Parser**: Uses a recursive descent strategy.
-    1. Reads the first byte (Type Marker) to determine the type.
-    2. Reads subsequent data based on the type (line parsing or length-prefixed parsing).
-    3. Recursively calls parsing functions for collection types (Array, Map, Set).
+- **Parser (`RespParser`)**: Uses a stateful, resumable parsing strategy.
+    1. Maintains a stack of frames to track nested structures (Arrays, Maps, etc.).
+    2. Uses `peek_line` to check for complete data before consuming.
+    3. Returns `RespParseResult` to indicate `Complete`, `Incomplete`, or `Error` states.
     
 - **Encoder**: Implements the `RespEncoder` trait.
     - Provides an `encode_to` method to write data into a mutable `BytesMut` buffer.
@@ -71,9 +71,47 @@ nimbis-resp = { path = "crates/nimbis-resp" } # Or specify version/git url
 bytes = "1.5"
 ```
 
-### 2.2 Basic Parsing
+### 2.2 Streaming Parsing (Recommended)
 
-Use the `resp::parse` function to convert byte data into `RespValue`:
+For TCP servers, use `RespParser` to handle streaming data, allowing for partial reads and resumable parsing:
+
+```rust
+use bytes::BytesMut;
+use resp::{RespParser, RespParseResult, RespValue};
+
+fn main() {
+    let mut parser = RespParser::new();
+    let mut buf = BytesMut::from(&b"*2\r\n$3\r\nSET"[..]); // Incomplete data
+
+    // First attempt: Incomplete
+    match parser.parse(&mut buf) {
+        RespParseResult::Incomplete => println!("Need more data..."),
+        _ => panic!("Should be incomplete"),
+    }
+
+    // Append more data
+    buf.extend_from_slice(b"\r\n$3\r\nkey\r\n");
+    
+    // Second attempt: Complete
+    loop {
+        match parser.parse(&mut buf) {
+            RespParseResult::Complete(val) => {
+                println!("Parsed: {:?}", val);
+                // Handle value...
+            },
+            RespParseResult::Incomplete => break,
+            RespParseResult::Error(e) => {
+                eprintln!("Error: {}", e);
+                break;
+            }
+        }
+    }
+}
+```
+
+### 2.3 One-off Parsing
+
+For simple cases where you have a full buffer, you can use the `resp::parse` helper:
 
 ```rust
 use bytes::BytesMut;
@@ -84,11 +122,10 @@ fn main() {
     let value = resp::parse(&mut buf).unwrap();
     
     assert_eq!(value.as_str(), Some("OK"));
-    println!("Parsed: {:?}", value);
 }
 ```
 
-### 2.3 Creation and Encoding
+### 2.4 Creation and Encoding
 
 You can construct `RespValue` directly using variants or use convenience constructors:
 
@@ -118,7 +155,7 @@ fn main() {
 }
 ```
 
-### 2.4 Handling Complex Types (Arrays & Maps)
+### 2.5 Handling Complex Types (Arrays & Maps)
 
 ```rust
 use resp::RespValue;
@@ -145,7 +182,7 @@ fn handle_response(val: RespValue) {
 }
 ```
 
-### 2.5 Helper Methods
+### 2.6 Helper Methods
 
 `RespValue` provides various helper methods to simplify data extraction from the enum:
 
