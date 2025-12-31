@@ -9,7 +9,7 @@ use storage::Storage;
 use super::Cmd;
 use super::CmdMeta;
 
-/// SET command implementation
+/// Config group command implementation
 pub struct ConfigGroupCmd {
 	meta: CmdMeta,
 	sub_cmds: HashMap<String, Box<dyn Cmd>>,
