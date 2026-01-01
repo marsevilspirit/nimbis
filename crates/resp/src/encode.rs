@@ -4,8 +4,9 @@ use std::collections::HashSet;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
-use resp::RespValue;
 use thiserror::Error;
+
+use crate::RespValue;
 
 /// Errors that can occur during RESP encoding.
 #[derive(Error, Debug, Clone, PartialEq)]
@@ -191,4 +192,149 @@ fn encode_push(buf: &mut BytesMut, push: &[RespValue]) -> Result<(), EncodeError
 		value.encode_to(buf)?;
 	}
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[test]
+	fn test_encode_simple_string() {
+		let val = RespValue::SimpleString(Bytes::from_static(b"OK"));
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"+OK\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_error() {
+		let val = RespValue::Error(Bytes::from_static(b"ERR"));
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"-ERR\r\n".as_slice());
+	}
+
+	#[rstest]
+	#[case(100, b":100\r\n")]
+	#[case(-100, b":-100\r\n")]
+	#[case(0, b":0\r\n")]
+	fn test_encode_integer(#[case] input: i64, #[case] expected: &[u8]) {
+		let val = RespValue::Integer(input);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, expected);
+	}
+
+	#[test]
+	fn test_encode_bulk_string() {
+		let val = RespValue::BulkString(Bytes::from_static(b"hello"));
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"$5\r\nhello\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_bulk_string_empty() {
+		let val = RespValue::BulkString(Bytes::new());
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"$0\r\n\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_array() {
+		let val = RespValue::Array(vec![
+			RespValue::SimpleString(Bytes::from_static(b"hello")),
+			RespValue::Integer(42),
+		]);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"*2\r\n+hello\r\n:42\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_array_empty() {
+		let val = RespValue::Array(vec![]);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"*0\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_null() {
+		let val = RespValue::Null;
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"_\r\n".as_slice());
+	}
+
+	#[rstest]
+	#[case(true, b"#t\r\n")]
+	#[case(false, b"#f\r\n")]
+	fn test_encode_boolean(#[case] input: bool, #[case] expected: &[u8]) {
+		let val = RespValue::Boolean(input);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, expected);
+	}
+
+	#[rstest]
+	#[case(3.14, b",3.14\r\n")]
+	#[case(10.0, b",10\r\n")]
+	#[case(f64::INFINITY, b",inf\r\n")]
+	#[case(f64::NEG_INFINITY, b",-inf\r\n")]
+	fn test_encode_double(#[case] input: f64, #[case] expected: &[u8]) {
+		let val = RespValue::Double(input);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, expected);
+	}
+
+	#[test]
+	fn test_encode_big_number() {
+		let val = RespValue::BigNumber(Bytes::from_static(b"12345678901234567890"));
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"(12345678901234567890\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_bulk_error() {
+		let val = RespValue::BulkError(Bytes::from_static(b"ERR"));
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"!3\r\nERR\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_verbatim_string() {
+		let val = RespValue::VerbatimString {
+			format: Bytes::from_static(b"txt"),
+			data: Bytes::from_static(b"msg"),
+		};
+		let encoded = val.encode().unwrap();
+		// length = 4 (format + :) + 3 (data) = 7
+		assert_eq!(encoded, b"=7\r\ntxt:msg\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_map() {
+		let mut map = HashMap::new();
+		map.insert(
+			RespValue::SimpleString(Bytes::from_static(b"k1")),
+			RespValue::Integer(1),
+		);
+		let val = RespValue::Map(map);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"%1\r\n+k1\r\n:1\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_set() {
+		let mut set = HashSet::new();
+		set.insert(RespValue::SimpleString(Bytes::from_static(b"v1")));
+		let val = RespValue::Set(set);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b"~1\r\n+v1\r\n".as_slice());
+	}
+
+	#[test]
+	fn test_encode_push() {
+		let val = RespValue::Push(vec![
+			RespValue::SimpleString(Bytes::from_static(b"pubsub")),
+			RespValue::SimpleString(Bytes::from_static(b"message")),
+		]);
+		let encoded = val.encode().unwrap();
+		assert_eq!(encoded, b">2\r\n+pubsub\r\n+message\r\n".as_slice());
+	}
 }

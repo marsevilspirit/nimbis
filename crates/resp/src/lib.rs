@@ -24,11 +24,14 @@
 //! assert_eq!(response.as_str(), Some("OK"));
 //! ```
 
+mod encode;
 mod error;
 mod parser;
 mod types;
 mod utils;
 
+pub use encode::EncodeError;
+pub use encode::RespEncoder;
 pub use error::ParseError;
 pub use error::RespError;
 pub use parser::RespParseResult;

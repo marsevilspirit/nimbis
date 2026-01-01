@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use resp::RespEncoder;
 use resp::RespParseResult;
 use resp::RespParser;
 use resp::RespValue;
@@ -16,7 +17,6 @@ use tracing::info;
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
 use crate::config::SERVER_CONF;
-use crate::resp_encoder::RespEncoder;
 
 pub struct Server {
 	storage: Arc<Storage>,
