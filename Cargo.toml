@@ -30,7 +30,7 @@ async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
-slatedb = "0.9.2"
+slatedb = "0.10.0"
 object_store = "0.13.0"
 rstest = "0.26.1"
 ulid = "1.2"
