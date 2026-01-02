@@ -28,6 +28,7 @@ fmt:
 # Clean build artifacts
 clean:
     cargo clean
+    rm -rf nimbis_data
 
 # Run nimbis-server
 run:
