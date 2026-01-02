@@ -65,7 +65,7 @@ impl Storage {
 ```
 
 - **Metadata**: Stored in `meta_db` using `MetaKey` and `HashMetaValue`.
-- **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` + `field`).
+- **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` as u32 BigEndian + `field`).
 
 ## Usage
 

@@ -68,14 +68,14 @@ user_key
 
 **Field Key (in Hash DB):**
 ```
-user_key + length(field) (u16 BigEndian) + field
+user_key + length(field) (u32 BigEndian) + field
 ```
 *   **Value Format**: `raw_value_bytes`
 
 **Example:**
 *   Redis Command: `HSET myhash field1 value1`
 *   **Meta DB**: Key=`myhash`, Value=`'h'` + `1`
-*   **Hash DB**: Key=`myhash` + `0x00 0x06` + `field1`, Value=`value1`
+*   **Hash DB**: Key=`myhash` + `0x00 0x00 0x00 0x06` + `field1`, Value=`value1`
 
 ---
 

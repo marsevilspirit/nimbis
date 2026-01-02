@@ -114,14 +114,14 @@ impl Storage {
 				break;
 			}
 
-			// Parse field: user_key + len(u16) + field
+			// Parse field: user_key + len(u32) + field
 			let suffix = &k[key.len()..];
-			if suffix.len() < 2 {
+			if suffix.len() < 4 {
 				continue;
 			}
 
 			let mut buf = suffix;
-			let field_len = buf.get_u16() as usize;
+			let field_len = buf.get_u32() as usize;
 
 			if buf.len() != field_len {
 				continue;
