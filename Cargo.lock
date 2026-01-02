@@ -2599,6 +2599,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "futures",
  "object_store 0.13.0",
  "rstest",
  "slatedb",

@@ -10,57 +10,70 @@ Nimbis uses a persistent object storage backed by [SlateDB](https://github.com/s
 
 ### The `Storage` Struct
 
-The core interface is defined by the `Storage` struct in `crates/storage/src/storage.rs`. It provides a simple, asynchronous key-value interface.
+The core interface is defined by the `Storage` struct in `crates/storage/src/storage.rs`. It provides an asynchronous key-value interface.
 
 ```rust
 #[derive(Clone)]
 pub struct Storage {
-    pub(crate) db: Arc<Db>,
+    pub(crate) meta_db: Arc<Db>,
+    pub(crate) string_db: Arc<Db>,
+    pub(crate) hash_db: Arc<Db>,
+    // TODO: add more type db
 }
 ```
 
-It leverages `SlateDB` for persistent key-value storage.
-- **Persistence**: Data is stored using `object_store` via `SlateDB`. By default, it uses the local file system, but can be configured for cloud object stores.
-- **Concurrency**: `SlateDB` handles underlying concurrency control. The `Storage` struct is cheap to clone (`Arc<Db>`).
+It leverages multiple `SlateDB` instances for different data types.
+- **Multi-Engine**: Separate DBs for `Meta`, `String`, `Hash`, etc., to avoid key collisions without manual type prefixes.
+- **Persistence**: Data is stored using `object_store` via `SlateDB`. By default, it uses the local file system.
+- **Concurrency**: `SlateDB` handles underlying concurrency control. The `Storage` struct is cheap to clone (`Arc`'d DBs).
 
 ### String Operations
 
-String-specific operations (`get` and `set`) are implemented as inherent methods on the `Storage` struct, defined in `crates/storage/src/storage_string.rs`.
+String-specific operations (`get` and `set`) are implemented in `crates/storage/src/storage_string.rs`.
 
 ```rust
 impl Storage {
     pub async fn get(
         &self,
-        key: &str,
+        key: Bytes,
     ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>>;
 
     pub async fn set(
         &self,
-        key: &str,
-        value: &str,
+        key: Bytes,
+        value: Bytes,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 ```
 
 - **Encoding**: 
-  - Keys are encoded with a type prefix (e.g., 's' + key) using `StringKey`.
-  - Values are stored as raw bytes using `StringValue`.
+  - `StringKey` (in `crates/storage/src/string/key.rs`) handles key encoding. No manual prefixes are used as data is isolated in `string_db`.
+  - `StringValue` (in `crates/storage/src/string/value.rs`) manages the raw bytes.
+
+### Hash Operations
+
+Hash operations are implemented in `crates/storage/src/storage_hash.rs`.
+
+```rust
+impl Storage {
+    pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, ...>;
+    pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, ...>;
+    pub async fn hlen(&self, key: Bytes) -> Result<u64, ...>;
+    pub async fn hmget(&self, key: Bytes, fields: &[Bytes]) -> Result<Vec<Option<Bytes>>, ...>;
+    pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, ...>;
+}
+```
+
+- **Metadata**: Stored in `meta_db` using `MetaKey` and `HashMetaValue`.
+- **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` + `field`).
 
 ## Usage
 
-The server initializes the storage in `Server::new`:
+The server initializes the storage in `Storage::open`:
 
 ```rust
 // Initialize persistent storage at local path
-let db = Storage::open("./nimbis_data").await?;
+let storage = Storage::open("./nimbis_data").await?;
 ```
 
-Commands interact with the storage via the `Storage` struct (typically `Arc<Storage>`):
-
-```rust
-// GET command
-let value = storage.get(key).await?;
-
-// SET command
-storage.set(key, value).await?;
-```
+Commands interact with the storage via `Arc<Storage>`.

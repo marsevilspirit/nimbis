@@ -4,20 +4,6 @@ Nimbis is organized as a Cargo workspace with multiple focused crates:
 
 ## Core Crates
 
-### `command`
-The command system implementation, providing the framework for defining and executing Redis-compatible commands.
-
-**Location**: `crates/command/`
-
-**Key Components**:
-- `CmdMeta`: Command metadata (name, arity)
-- `Cmd` trait: Interface that all commands must implement
-- `CmdTable`: Command registry
-- `ParsedCmd`: Parsed command structure
-- Built-in commands: GET, SET, PING, CONFIG
-
-**Documentation**: See [Command System Implementation](cmd_implementation.md)
-
 ### `config`
 Configuration management system with derive macros for easy configuration handling.
 
@@ -31,7 +17,7 @@ Configuration management system with derive macros for easy configuration handli
 **Documentation**: See [Config Crate](config_crate.md)
 
 ### `resp`
-RESP (REdis Serialization Protocol) parser and encoder implementation.
+RESP (REdis Serialization Protocol) parser and implementation.
 
 **Location**: `crates/resp/`
 
@@ -48,8 +34,8 @@ Persistent storage layer using SlateDB.
 **Location**: `crates/storage/`
 
 **Key Components**:
-- `Storage` struct with async `get`/`set` methods
-- String key/value encoding
+- `Storage` struct with multi-engine support (`meta_db`, `string_db`, `hash_db`)
+- Type-specific encoding logic (StringKey, HashFieldKey, etc.)
 - SlateDB integration
 
 **Documentation**: See [Storage Implementation](storage_implementation.md) and [SlateDB Redis Design](slatedb_redis_design.md)
@@ -64,38 +50,28 @@ Logging and observability infrastructure.
 - Tracing setup
 
 ### `nimbis`
-The main server executable, integrating all the above crates.
+The main server executable, integrating all the above crates and implementing the command system.
 
 **Location**: `crates/nimbis/`
 
 **Key Components**:
 - `Server` struct
 - TCP connection handling
+- **Command System** (`src/cmd/`): Meta, Trait, and concrete command implementations (GET, SET, HSET, etc.)
 - Request processing
-- Configuration management
 
-**Documentation**: See [Server Design](server_design.md)
+**Documentation**: See [Server Design](server_design.md) and [Command System Implementation](cmd_implementation.md)
 
 ## Dependency Graph
 
 ```
 nimbis
-├── command
-│   ├── resp
-│   ├── storage
-│   ├── async-trait
+├── resp
+├── storage
 │   ├── bytes
-│   └── config
-├── resp
-├── storage
+│   ├── slatedb
+│   └── object_store
 ├── telemetry
-└── config
-
-command (standalone)
-├── resp
-├── storage
-├── async-trait
-├── bytes
 └── config
 ```
 
@@ -103,37 +79,32 @@ command (standalone)
 
 To add a new command to Nimbis:
 
-1. Create a new file in `crates/command/src/your_command.rs`
+1. Create a new file in `crates/nimbis/src/cmd/cmd_your_command.rs`
 2. Implement the `Cmd` trait
-3. Export it in `crates/command/src/lib.rs`
-4. Register it in `crates/command/src/cmd_table.rs`
+3. Export it in `crates/nimbis/src/cmd/mod.rs`
+4. Register it in `crates/nimbis/src/cmd/table.rs`
 
 See [Command System Implementation](cmd_implementation.md) for detailed instructions.
 
 ## Running Tests
 
 ```bash
-# Run all tests
-cargo test
+# Run unit tests
+just test
 
-# Run tests for a specific crate
-cargo test --package command
-cargo test --package resp
-cargo test --package storage
+# Run e2e tests
+just e2e-test
 ```
 
 ## Building
 
 ```bash
 # Build all crates
-cargo build
-
-# Build release version
-cargo build --release
+just build
 ```
 
 ## Running the Server
 
 ```bash
-cargo run --package nimbis
+just run
 ```
