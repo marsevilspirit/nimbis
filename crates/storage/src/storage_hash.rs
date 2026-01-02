@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use futures::future;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -89,11 +90,14 @@ impl Storage {
 		key: Bytes,
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
-		let mut results = Vec::with_capacity(fields.len());
-		for field in fields {
-			results.push(self.hget(key.clone(), field.clone()).await?);
-		}
-		Ok(results)
+		// Create a future for each field lookup to enable concurrent execution
+		// These futures will be awaited in parallel using try_join_all below
+		let futures: Vec<_> = fields
+			.iter()
+			.map(|field| self.hget(key.clone(), field.clone()))
+			.collect();
+
+		future::try_join_all(futures).await
 	}
 
 	pub async fn hgetall(
