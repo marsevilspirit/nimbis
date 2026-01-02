@@ -4,11 +4,21 @@ This document outlines the design for implementing Redis data types on top of Sl
 
 ## Overview
 
-SlateDB is a key-value store. To support Redis data types (String, Hash, List, Set, ZSet), we need to map high-level Redis structures to SlateDB's flat binary key-space.
+SlateDB is a key-value store. To support Redis data types (String, Hash, List, Set, ZSet), we use a multi-engine architecture where each data type is stored in its own dedicated SlateDB instance. This provides isolation and simplifies key management by removing the need for type prefixes in keys.
+
+## Storage Architecture
+
+We maintain separate SlateDB instances for:
+- **Meta**: Metadata storage
+- **String**: String data type storage
+- **Hash**: Hash data type storage
+- **Set**: Set data type storage
+- **List**: List data type storage
+- **ZSet**: ZSet data type storage
+
+Each instance manages its own key space, so keys do not need type prefixes to avoid collisions between types.
 
 ## Encoding Scheme
-
-We use a prefix-based encoding scheme to distinguish between different data types and metadata.
 
 ### 1. Meta Key
 
@@ -16,30 +26,19 @@ The Meta Key is used to store metadata for a specific user key and data type (e.
 
 **Key Format:**
 ```
-'m' + user_key + type
+user_key
 ```
 
-*   **Prefix**: `m` (ASCII char) identifies the key as a Metadata key.
-*   **User Key**: The original key provided by the client.
-*   **Type**: Single byte identifier for the data type (e.g., 's' for String, 'h' for Hash).
-
 **Value Format:**
-Variable based on `type`.
-
-*   **String ('s')**: NO Meta Key. Simple strings do not use a separate metadata key.
-*   **Hash ('h')**: (Format definition tbd, e.g., field_count, encoding_version)
-*   **List ('l')**: (Format definition tbd, e.g., head_index, tail_index, length)
+Variable based on data `type` (stored in the metadata value itself or implied by the DB instance if strict separation is used).
 
 ### 2. String Type
 
-Strings are the simplest Redis data type. They map almost directly to the underlying KV store, with a type prefix.
-
 **Key Format:**
 ```
-'s' + user_key
+user_key
 ```
 
-*   **Prefix**: `s` (ASCII char) identifies the key as a String type.
 *   **User Key**: The original key provided by the client (bytes).
 
 **Value Format:**
@@ -47,33 +46,33 @@ Strings are the simplest Redis data type. They map almost directly to the underl
 raw_value_bytes
 ```
 
-*   **Value**: The raw binary data of the string value. No additional metadata or encoding wrappers are added to the value itself for simple strings.
+*   **Value**: The raw binary data of the string value.
 
 **Example:**
 *   Redis Command: `SET mykey "hello"`
-*   SlateDB Key: `[115, 109, 121, 107, 101, 121]` (bytes for 's' + 'mykey')
-*   SlateDB Value: `[104, 101, 108, 108, 111]` (bytes for "hello")
+*   SlateDB String DB Key: `[109, 121, 107, 101, 121]` (bytes for 'mykey')
+*   SlateDB String DB Value: `[104, 101, 108, 108, 111]` (bytes for "hello")
 
 ---
-
 
 ## Future Implementations (Tentative)
 
 The following designs are placeholders and subject to change.
 
-### Hash
-*   **Meta Key**: `h` + `user_key` -> Metadata (count, encoding, etc.)
-*   **Field Key**: `H` + `user_key` + `length(field)` + `field` -> `value`
+### Hash (in Hash DB)
+*   **Meta Key** (in Meta DB or Hash DB): `user_key` -> Metadata
+*   **Field Key**: `user_key` + `length(field)` + `field` -> `value`
+Note: Requires careful key design even within Hash DB to distinguish meta from fields if stored together, or separating HashMeta vs HashFields db. For now, assuming standard separation.
 
-### Set
-*   **Meta Key**: `t` + `user_key`
-*   **Member Key**: `T` + `user_key` + `member` -> `(empty)`
+### Set (in Set DB)
+*   **Meta Key**: `user_key`
+*   **Member Key**: `user_key` + `member` -> `(empty)`
 
-### List
-*   **Meta Key**: `l` + `user_key` -> Metadata (head, tail, count)
-*   **Node Key**: `L` + `user_key` + `seq_id` -> `value`
+### List (in List DB)
+*   **Meta Key**: `user_key` -> Metadata
+*   **Node Key**: `user_key` + `seq_id` -> `value`
 
-### ZSet
-*   **Meta Key**: `z` + `user_key`
-*   **Member Key**: `Z` + `user_key` + `member` -> `score`
-*   **Score Key**: `S` + `user_key` + `score` + `member` -> `(empty)`
+### ZSet (in ZSet DB)
+*   **Meta Key**: `user_key`
+*   **Member Key**: `user_key` + `member` -> `score`
+*   **Score Key**: `user_key` + `score` + `member` -> `(empty)`

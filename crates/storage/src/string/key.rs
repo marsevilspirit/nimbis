@@ -15,20 +15,14 @@ impl StringKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut bytes = Vec::with_capacity(1 + self.user_key.len());
-		bytes.push(b's');
-		bytes.extend_from_slice(&self.user_key);
-		Bytes::from(bytes)
+		self.user_key.clone()
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		if bytes.is_empty() {
 			return Err(DecoderError::Empty);
 		}
-		if bytes[0] != b's' {
-			return Err(DecoderError::InvalidPrefix);
-		}
-		Ok(Self::new(Bytes::copy_from_slice(&bytes[1..])))
+		Ok(Self::new(Bytes::copy_from_slice(bytes)))
 	}
 }
 
@@ -39,9 +33,8 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("mykey", b"smykey")]
-	#[case("", b"s")]
-	#[case("something else", b"ssomething else")]
+	#[case("mykey", b"mykey")]
+	#[case("something else", b"something else")]
 	fn test_encode(#[case] key: &str, #[case] expected: &[u8]) {
 		let key = StringKey::new(Bytes::copy_from_slice(key.as_bytes()));
 		let encoded = key.encode();
@@ -49,31 +42,17 @@ mod tests {
 	}
 
 	#[rstest]
-	#[case(b"smykey", "mykey")]
-	#[case(b"s", "")]
-	#[case(b"ssomething else", "something else")]
+	#[case(b"mykey", "mykey")]
+	#[case(b"something else", "something else")]
 	fn test_decode(#[case] encoded: &[u8], #[case] expected: &str) {
 		let key = StringKey::decode(encoded).unwrap();
 		assert_eq!(key.user_key, Bytes::copy_from_slice(expected.as_bytes()));
 	}
 
 	#[test]
-	fn test_decode_invalid_prefix() {
-		let encoded = b"xmykey";
-		let err = StringKey::decode(encoded).unwrap_err();
-		match err {
-			DecoderError::InvalidPrefix => (),
-			_ => panic!("Expected InvalidPrefix error"),
-		}
-	}
-
-	#[test]
 	fn test_decode_empty() {
 		let encoded = b"";
 		let err = StringKey::decode(encoded).unwrap_err();
-		match err {
-			DecoderError::Empty => (),
-			_ => panic!("Expected Empty error"),
-		}
+		assert!(matches!(err, DecoderError::Empty));
 	}
 }

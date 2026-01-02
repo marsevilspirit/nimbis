@@ -12,7 +12,7 @@ impl Storage {
 		key: Bytes,
 	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
 		let key = StringKey::new(key);
-		let result = self.db.get(key.encode()).await?;
+		let result = self.string_db.get(key.encode()).await?;
 		Ok(result.map(|v| StringValue::decode(&v).value))
 	}
 
@@ -27,7 +27,7 @@ impl Storage {
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
-		self.db
+		self.string_db
 			.put_with_options(
 				key.encode(),
 				value.encode(),

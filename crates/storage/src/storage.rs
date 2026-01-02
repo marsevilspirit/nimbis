@@ -7,21 +7,28 @@ use slatedb::object_store::local::LocalFileSystem;
 
 #[derive(Clone)]
 pub struct Storage {
-	pub(crate) db: Arc<Db>,
+	pub(crate) string_db: Arc<Db>,
+	// TODO: add more type db
 }
 
 impl Storage {
-	pub fn new(db: Arc<Db>) -> Self {
-		Self { db }
+	pub fn new(string_db: Arc<Db>) -> Self {
+		Self { string_db }
 	}
 
 	/// Open a new SlateDB storage backed by local file system
 	pub async fn open(
 		path: impl AsRef<Path>,
 	) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+		let path = path.as_ref();
 		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
-		let db_path = slatedb::object_store::path::Path::from("/");
-		let db = Db::open(db_path, object_store).await?;
-		Ok(Self::new(Arc::new(db)))
+
+		let string_db = Db::open(
+			slatedb::object_store::path::Path::from("/string"),
+			object_store.clone(),
+		)
+		.await?;
+
+		Ok(Self::new(Arc::new(string_db)))
 	}
 }
