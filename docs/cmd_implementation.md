@@ -126,6 +126,7 @@ The following table lists the currently implemented Redis commands and their sta
 | Category    | Command      | Arity | Description                                         |
 | :---------- | :----------- | :---- | :-------------------------------------------------- |
 | **Generic** | `PING`       | `-1`  | Ping the server (optionally with a message).        |
+| **Generic** | `DEL`        | `-2`  | Delete one or more keys.                            |
 | **String**  | `SET`        | `3`   | Set the string value of a key.                      |
 | **String**  | `GET`        | `2`   | Get the value of a key.                             |
 | **Hash**    | `HSET`       | `-4`  | Sets field(s) in the hash.                          |

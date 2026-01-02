@@ -3,9 +3,25 @@ use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
 
+use crate::data_type::DataType;
 use crate::error::DecoderError;
 
-const HASH_TYPE_CODE: u8 = b'h';
+#[derive(Debug, PartialEq)]
+pub struct MetaKey {
+	user_key: Bytes,
+}
+
+impl MetaKey {
+	pub fn new(user_key: impl Into<Bytes>) -> Self {
+		Self {
+			user_key: user_key.into(),
+		}
+	}
+
+	pub fn encode(&self) -> Bytes {
+		self.user_key.clone()
+	}
+}
 
 #[derive(Debug, PartialEq)]
 pub struct HashMetaValue {
@@ -19,7 +35,7 @@ impl HashMetaValue {
 
 	pub fn encode(&self) -> Bytes {
 		let mut bytes = BytesMut::with_capacity(9);
-		bytes.put_u8(HASH_TYPE_CODE);
+		bytes.put_u8(DataType::Hash as u8);
 		bytes.put_u64(self.len);
 		bytes.freeze()
 	}
@@ -31,7 +47,7 @@ impl HashMetaValue {
 
 		let mut buf = bytes;
 		let type_code = buf.get_u8();
-		if type_code != HASH_TYPE_CODE {
+		if type_code != DataType::Hash as u8 {
 			return Err(DecoderError::InvalidType);
 		}
 		let len = buf.get_u64();
@@ -41,8 +57,17 @@ impl HashMetaValue {
 
 #[cfg(test)]
 mod tests {
+	use rstest::rstest;
 
 	use super::*;
+
+	#[rstest]
+	#[case("mykey", b"mykey")]
+	#[case("", b"")]
+	fn test_meta_key_encode(#[case] key: &str, #[case] expected: &[u8]) {
+		let meta_key = MetaKey::new(Bytes::copy_from_slice(key.as_bytes()));
+		assert_eq!(&meta_key.encode()[..], expected);
+	}
 
 	#[test]
 	fn test_hash_meta_value_encode() {

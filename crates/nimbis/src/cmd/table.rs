@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::Cmd;
 use super::ConfigGroupCmd;
+use super::DelCmd;
 use super::GetCmd;
 use super::PingCmd;
 use super::SetCmd;
@@ -25,6 +26,7 @@ impl CmdTable {
 		// string type cmd
 		inner.insert("SET".to_string(), Arc::new(SetCmd::new()));
 		inner.insert("GET".to_string(), Arc::new(GetCmd::new()));
+		inner.insert("DEL".to_string(), Arc::new(DelCmd::default()));
 		// hash type cmd
 		inner.insert("HSET".to_string(), Arc::new(super::HSetCmd::new()));
 		inner.insert("HGET".to_string(), Arc::new(super::HGetCmd::new()));

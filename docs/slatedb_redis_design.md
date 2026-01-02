@@ -9,20 +9,19 @@ SlateDB is a key-value store. To support Redis data types (String, Hash, List, S
 ## Storage Architecture
 
 We maintain separate SlateDB instances for:
-- **Meta**: Metadata storage
-- **String**: String data type storage
-- **Hash**: Hash data type storage
-- **Set**: Set data type storage
-- **List**: List data type storage
-- **ZSet**: ZSet data type storage
+- **String (and Meta)**: Stores String values and Metadata for other types (Hash, Set, etc.)
+- **Hash**: Hash fields storage
+- **Set**: Set members storage
+- **List**: List nodes storage
+- **ZSet**: ZSet nodes storage
 
-Each instance manages its own key space, so keys do not need type prefixes to avoid collisions between types.
+Each supported data type has a **Type Code** stored in the `String DB` key-value pair to identify the type and allow collision detection.
 
 ## Encoding Scheme
 
-### 1. Meta Key
+### 1. Root Key (in String DB)
 
-The Meta Key is used to store metadata for a specific user key and data type (e.g., expiration, encoding info, item count).
+All keys start in the `String DB`, which acts as the source of truth for the key's type.
 
 **Key Format:**
 ```
@@ -30,52 +29,41 @@ user_key
 ```
 
 **Value Format:**
-Variable based on data `type` (stored in the metadata value itself or implied by the DB instance if strict separation is used).
+```
+[Type Code (u8)] [Payload (Bytes)]
+```
+*   **Type Code**: `s` (String), `h` (Hash), etc.
 
 ### 2. String Type
 
-**Key Format:**
-```
-user_key
-```
-
-*   **User Key**: The original key provided by the client (bytes).
+**Stored in String DB.**
 
 **Value Format:**
 ```
-raw_value_bytes
+['s'] [raw_value_bytes]
 ```
-
-*   **Value**: The raw binary data of the string value.
 
 **Example:**
 *   Redis Command: `SET mykey "hello"`
-*   SlateDB String DB Key: `[109, 121, 107, 101, 121]` (bytes for 'mykey')
-*   SlateDB String DB Value: `[104, 101, 108, 108, 111]` (bytes for "hello")
-
----
-
+*   String DB Key: `mykey`
+*   String DB Value: `['s', 'h', 'e', 'l', 'l', 'o']`
 
 ### 3. Hash Type
 
-Implemented using `Hash DB` for data and `Meta DB` for metadata.
+**Meta Stored in String DB, Fields in Hash DB.**
 
-**Meta Key (in Meta DB):**
-```
-user_key
-```
-*   **Value Format**: `type_code` (u8, 'h') + `count` (u64 BigEndian)
+**Meta (String DB):**
+*   **Key**: `user_key`
+*   **Value**: `['h']` + `[count (u64 BE)]` // HashMetaValue (Currently len is u64)
 
-**Field Key (in Hash DB):**
-```
-user_key + length(field) (u32 BigEndian) + field
-```
-*   **Value Format**: `raw_value_bytes`
+**Fields (Hash DB):**
+*   **Key**: `user_key + length(field) (u32 BigEndian) + field`
+*   **Value**: `raw_value_bytes`
 
 **Example:**
 *   Redis Command: `HSET myhash field1 value1`
-*   **Meta DB**: Key=`myhash`, Value=`'h'` + `1`
-*   **Hash DB**: Key=`myhash` + `0x00 0x00 0x00 0x06` + `field1`, Value=`value1`
+*   **String DB**: Key=`myhash`, Value=`['h']` + `1`
+*   **Hash DB**: Key=`myhash` + `...field1...`, Value=`value1`
 
 ---
 

@@ -15,17 +15,16 @@ The core interface is defined by the `Storage` struct in `crates/storage/src/sto
 ```rust
 #[derive(Clone)]
 pub struct Storage {
-    pub(crate) meta_db: Arc<Db>,
     pub(crate) string_db: Arc<Db>,
     pub(crate) hash_db: Arc<Db>,
     // TODO: add more type db
 }
 ```
 
-It leverages multiple `SlateDB` instances for different data types.
-- **Multi-Engine**: Separate DBs for `Meta`, `String`, `Hash`, etc., to avoid key collisions without manual type prefixes.
-- **Persistence**: Data is stored using `object_store` via `SlateDB`. By default, it uses the local file system.
-- **Concurrency**: `SlateDB` handles underlying concurrency control. The `Storage` struct is cheap to clone (`Arc`'d DBs).
+It leverages multiple `SlateDB` instances:
+- **String DB**: Stores actual String values AND Metadata for all other types.
+- **Hash DB**: Stores Hash fields.
+- **Unified Key Space**: `String DB` uses a type code prefix (e.g. `s`, `h`) in the Value to resolve type collisions.
 
 ### String Operations
 
@@ -64,7 +63,7 @@ impl Storage {
 }
 ```
 
-- **Metadata**: Stored in `meta_db` using `MetaKey` and `HashMetaValue`.
+- **Metadata**: Stored in `string_db` using `MetaKey` and `HashMetaValue` (with type prefix).
 - **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` as u32 BigEndian + `field`).
 
 ## Usage

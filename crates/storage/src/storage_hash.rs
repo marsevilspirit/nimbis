@@ -1,14 +1,56 @@
+use bytes::Buf;
 use bytes::Bytes;
 use futures::future;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
+use crate::data_type::DataType;
 use crate::hash::field_key::HashFieldKey;
-use crate::meta::hash_value::HashMetaValue;
-use crate::meta::key::MetaKey;
 use crate::storage::Storage;
+use crate::string::meta::HashMetaValue;
+use crate::string::meta::MetaKey;
 
 impl Storage {
+	// Helper to delete all fields of a hash.
+	// Used when overwriting a Hash with a String, or deleting a Hash.
+	// TODO: This function is temporary; once the compaction filter is implemented,
+	// it will be replaced with a custom filter for elegant deletion.
+	pub(crate) async fn delete_hash_fields(
+		&self,
+		key: Bytes,
+	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+		let range = key.as_ref()..;
+		let mut stream = self.hash_db.scan(range).await?;
+		let mut keys_to_delete = Vec::new();
+
+		while let Some(kv) = stream.next().await? {
+			let k = kv.key;
+			if !k.starts_with(&key) {
+				break;
+			}
+			// Verify suffix
+			let suffix = &k[key.len()..];
+			if suffix.len() < 4 {
+				continue;
+			}
+			let mut buf = suffix;
+			let field_len = buf.get_u32() as usize;
+			if buf.len() != field_len {
+				continue;
+			}
+
+			keys_to_delete.push(k);
+		}
+
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		for k in keys_to_delete {
+			self.hash_db.delete_with_options(k, &write_opts).await?;
+		}
+		Ok(())
+	}
+
 	pub async fn hset(
 		&self,
 		key: Bytes,
@@ -16,13 +58,41 @@ impl Storage {
 		value: Bytes,
 	) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		let field_key = HashFieldKey::new(key, field);
+		let field_key = HashFieldKey::new(key.clone(), field);
 
-		// Check if field exists to know if we are updating or adding new
+		// 1. Valid type check (Must be Hash or None)
+		// We read from string_db which holds ALL metadata (StringValue or HashMetaValue)
+		let meta_encoded_key = meta_key.encode();
+		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
+
+		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
+			// Check type
+			if meta_bytes.is_empty() {
+				// Should not happen for valid keys, but treat as new
+				HashMetaValue::new(0)
+			} else {
+				match DataType::from_u8(meta_bytes[0]) {
+					Some(DataType::String) => {
+						return Err(
+							"WRONGTYPE Operation against a key holding the wrong kind of value"
+								.into(),
+						);
+					}
+					_ => {
+						// It should be a Hash (or valid meta), decode it
+						HashMetaValue::decode(&meta_bytes)?
+					}
+				}
+			}
+		} else {
+			HashMetaValue::new(0)
+		};
+
+		// 2. Check if field exists in hash_db
 		let existing_field = self.hash_db.get(field_key.encode()).await?;
 		let is_new_field = existing_field.is_none();
 
-		// Set the field in hash_db
+		// 3. Set the field in hash_db
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
@@ -35,22 +105,10 @@ impl Storage {
 			)
 			.await?;
 
-		// Update metadata in meta_db
-		// Optimistic locking / CAS is ideally needed here but for now simplistic approach:
-		// Get Meta -> Update -> Put Meta
-		// TODO: add lock to avoid race conditions
-		let meta_encoded_key = meta_key.encode();
-		let current_meta = self.meta_db.get(meta_encoded_key.clone()).await?;
-
-		let mut meta_val = if let Some(meta_bytes) = current_meta {
-			HashMetaValue::decode(&meta_bytes)?
-		} else {
-			HashMetaValue::new(0)
-		};
-
+		// 4. Update metadata in string_db if needed
 		if is_new_field {
 			meta_val.len += 1;
-			self.meta_db
+			self.string_db
 				.put_with_options(
 					meta_encoded_key,
 					meta_val.encode(),
@@ -69,6 +127,14 @@ impl Storage {
 		key: Bytes,
 		field: Bytes,
 	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+		let meta_key = MetaKey::new(key.clone());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await?
+			&& !meta_bytes.is_empty()
+			&& meta_bytes[0] != DataType::Hash as u8
+		{
+			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		}
+
 		let field_key = HashFieldKey::new(key, field);
 		let result = self.hash_db.get(field_key.encode()).await?;
 		Ok(result)
@@ -76,8 +142,13 @@ impl Storage {
 
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key);
-		let result = self.meta_db.get(meta_key.encode()).await?;
+		let result = self.string_db.get(meta_key.encode()).await?;
 		if let Some(meta_bytes) = result {
+			if !meta_bytes.is_empty() && meta_bytes[0] != DataType::Hash as u8 {
+				return Err(
+					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+				);
+			}
 			let meta_val = HashMetaValue::decode(&meta_bytes)?;
 			Ok(meta_val.len)
 		} else {
@@ -90,14 +161,42 @@ impl Storage {
 		key: Bytes,
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
+		// Optimization: Check meta once
+		let meta_key = MetaKey::new(key.clone());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await?
+			&& !meta_bytes.is_empty()
+			&& meta_bytes[0] != DataType::Hash as u8
+		{
+			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		}
+
 		// Create a future for each field lookup to enable concurrent execution
 		// These futures will be awaited in parallel using try_join_all below
 		let futures: Vec<_> = fields
 			.iter()
-			.map(|field| self.hget(key.clone(), field.clone()))
+			.map(|field| {
+				// We don't need to call self.hget() which repeats the check, we can access hash_db directly
+				let field_key = HashFieldKey::new(key.clone(), field.clone());
+				// We need to clone the db handle for the closure/future if needed, but self.hash_db is Arc
+				// Actually self.hash_db.get is async.
+				// We can just call self.hash_db.get
+				async move {
+					let k = field_key.encode();
+					self.hash_db.get(k).await
+				}
+			})
 			.collect();
 
-		future::try_join_all(futures).await
+		// The error handling types need to match. hash_db.get returns SlateDB error.
+		// hget returns Box<dyn Error>.
+		// try_join_all expects futures to return Result<T, E> where E is same.
+		// slateDB errors satisfy Into<Box<dyn Error>>? Maybe.
+		// Let's keep it simple and use a loop or just map errors.
+		// Or verify if try_join_all works with SlateDB errors directly.
+		// For simplicity/safety, let's just map the results.
+
+		let results = future::try_join_all(futures).await?;
+		Ok(results)
 	}
 
 	pub async fn hgetall(
@@ -105,6 +204,15 @@ impl Storage {
 		key: Bytes,
 	) -> Result<Vec<(Bytes, Bytes)>, Box<dyn std::error::Error + Send + Sync>> {
 		use bytes::Buf;
+
+		// Check type
+		let meta_key = MetaKey::new(key.clone());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await?
+			&& !meta_bytes.is_empty()
+			&& meta_bytes[0] != DataType::Hash as u8
+		{
+			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		}
 
 		let range = key.as_ref()..;
 		let mut stream = self.hash_db.scan(range).await?;
