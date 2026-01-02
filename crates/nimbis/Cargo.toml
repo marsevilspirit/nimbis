@@ -16,5 +16,4 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 arc-swap = { workspace = true }
 config = { workspace = true }
-smart-default = { workspace = true }
 thiserror = { workspace = true }

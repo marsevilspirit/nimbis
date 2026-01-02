@@ -3,16 +3,22 @@ use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
 use config::OnlineConfig;
-use smart_default::SmartDefault;
 
-#[derive(Debug, SmartDefault, OnlineConfig)]
+#[derive(Debug, OnlineConfig)]
 pub struct ServerConfig {
-	#[default = "127.0.0.1:6379"]
 	#[online_config(immutable)]
 	pub addr: String,
-	#[default = "./nimbis_data"]
 	#[online_config(immutable)]
 	pub data_path: String,
+}
+
+impl Default for ServerConfig {
+	fn default() -> Self {
+		Self {
+			addr: "127.0.0.1:6379".to_string(),
+			data_path: "./nimbis_data".to_string(),
+		}
+	}
 }
 
 pub struct GlobalConfig {
