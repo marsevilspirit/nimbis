@@ -55,14 +55,33 @@ raw_value_bytes
 
 ---
 
+
+### 3. Hash Type
+
+Implemented using `Hash DB` for data and `Meta DB` for metadata.
+
+**Meta Key (in Meta DB):**
+```
+user_key
+```
+*   **Value Format**: `type_code` (u8, 'h') + `count` (u64 BigEndian)
+
+**Field Key (in Hash DB):**
+```
+user_key + length(field) (u32 BigEndian) + field
+```
+*   **Value Format**: `raw_value_bytes`
+
+**Example:**
+*   Redis Command: `HSET myhash field1 value1`
+*   **Meta DB**: Key=`myhash`, Value=`'h'` + `1`
+*   **Hash DB**: Key=`myhash` + `0x00 0x00 0x00 0x06` + `field1`, Value=`value1`
+
+---
+
 ## Future Implementations (Tentative)
 
 The following designs are placeholders and subject to change.
-
-### Hash (in Hash DB)
-*   **Meta Key** (in Meta DB or Hash DB): `user_key` -> Metadata
-*   **Field Key**: `user_key` + `length(field)` + `field` -> `value`
-Note: Requires careful key design even within Hash DB to distinguish meta from fields if stored together, or separating HashMeta vs HashFields db. For now, assuming standard separation.
 
 ### Set (in Set DB)
 *   **Meta Key**: `user_key`

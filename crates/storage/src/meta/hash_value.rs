@@ -1,0 +1,63 @@
+use bytes::Buf;
+use bytes::BufMut;
+use bytes::Bytes;
+use bytes::BytesMut;
+
+use crate::error::DecoderError;
+
+const HASH_TYPE_CODE: u8 = b'h';
+
+#[derive(Debug, PartialEq)]
+pub struct HashMetaValue {
+	pub len: u64,
+}
+
+impl HashMetaValue {
+	pub fn new(len: u64) -> Self {
+		Self { len }
+	}
+
+	pub fn encode(&self) -> Bytes {
+		let mut bytes = BytesMut::with_capacity(9);
+		bytes.put_u8(HASH_TYPE_CODE);
+		bytes.put_u64(self.len);
+		bytes.freeze()
+	}
+
+	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		if bytes.len() < 9 {
+			return Err(DecoderError::InvalidLength);
+		}
+
+		let mut buf = bytes;
+		let type_code = buf.get_u8();
+		if type_code != HASH_TYPE_CODE {
+			return Err(DecoderError::InvalidType);
+		}
+		let len = buf.get_u64();
+		Ok(Self::new(len))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn test_hash_meta_value_encode() {
+		let val = HashMetaValue::new(10);
+		let encoded = val.encode();
+		assert_eq!(encoded.len(), 9);
+		assert_eq!(encoded[0], b'h');
+		assert_eq!(&encoded[1..], &10u64.to_be_bytes());
+	}
+
+	#[test]
+	fn test_hash_meta_value_decode() {
+		let val = HashMetaValue::new(12345);
+		let encoded = val.encode();
+		let decoded = HashMetaValue::decode(&encoded).unwrap();
+		assert_eq!(decoded, val);
+	}
+}

@@ -12,9 +12,9 @@ The server follows a classic "Acceptor-Worker" pattern using Tokio's lightweight
 - **Client Tasks (Workers)**: Each connected client is handled by its own independent Tokio task. This ensures that one slow client does not block others.
 
 ### 1.2 Data Storage
-- **Persistent Storage**: Data is stored persistently using `SlateDB` via the `Storage` struct.
-- **Interface**: The `Storage` struct provides asynchronous `get` and `set` methods.
-- **Thread Safety**: The storage handle is wrapped in `Arc` (`Arc<Storage>`) for safe concurrent access.
+- **Persistent Storage**: Data is stored persistently using multiple `SlateDB` engines via the `Storage` struct.
+- **Interface**: The `Storage` struct provides asynchronous methods like `get`, `set`, `hset`, etc.
+- **Thread Safety**: The storage handle is wrapped in `Arc` (`Arc<Storage>`) for safe concurrent access across worker tasks.
 
 ### 1.3 Protocol
 Nimbis speaks the **RESP (REdis Serialization Protocol)**.
@@ -72,7 +72,7 @@ The client handler runs in a loop to process pipelined requests:
 
 3. **Parse & Execute Loop**:
    - The buffer is strictly processed in a loop to handle multiple commands in a single packet (pipelining) and fragmented data.
-   - **Parse**: Calls `parser.parse(&mut buffer)` using `RespParser` from the `nimbis-resp` crate.
+   - **Parse**: Calls `parser.parse(&mut buffer)` using `RespParser` from the `resp` crate.
      - **Complete**: Returns `RespParseResult::Complete(value)`, consumes the frame from buffer, and proceeds to execution.
      - **Incomplete**: Returns `RespParseResult::Incomplete`. The loop breaks to wait for more data from the socket.
      - **Error**: Returns `RespParseResult::Error`.
@@ -81,7 +81,7 @@ The client handler runs in a loop to process pipelined requests:
    - **Convert**: The raw `RespValue` is converted into a `ParsedCmd` struct.
      - Validates the structure (must be an Array).
      - extracts the command name (normalized to UPPERCASE).
-   - **Lookup**: The command name is looked up in the `CmdTable` (from the `command` crate).
+   - **Lookup**: The command name is looked up in the `CmdTable` (located in `crates/nimbis/src/cmd/`).
    - **Run**:
      - **Found**: Calls `cmd.execute(&storage, &args)`.
      - **Not Found**: Returns an "unknown command" error.

@@ -27,5 +27,5 @@ Nimbis follows standard Redis command arity rules. The `arity` field in command 
 
 ## Implementation Details
 
-In `CmdMeta::validate_arity`:
+In `CmdMeta::validate_arity` (in `crates/nimbis/src/cmd/mod.rs`):
 - The input `arg_count` should be `args.len() + 1` (i.e., the length of the `args` array plus the command name).

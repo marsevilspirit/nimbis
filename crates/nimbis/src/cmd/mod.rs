@@ -94,12 +94,22 @@ impl TryFrom<RespValue> for ParsedCmd {
 }
 
 mod cmd_get;
+mod cmd_hget;
+mod cmd_hgetall;
+mod cmd_hlen;
+mod cmd_hmget;
+mod cmd_hset;
 mod cmd_ping;
 mod cmd_set;
 mod group_cmd_config;
 mod table;
 
 pub use cmd_get::GetCmd;
+pub use cmd_hget::HGetCmd;
+pub use cmd_hgetall::HGetAllCmd;
+pub use cmd_hlen::HLenCmd;
+pub use cmd_hmget::HMGetCmd;
+pub use cmd_hset::HSetCmd;
 pub use cmd_ping::PingCmd;
 pub use cmd_set::SetCmd;
 pub use group_cmd_config::ConfigGroupCmd;

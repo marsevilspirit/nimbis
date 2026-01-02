@@ -13,7 +13,8 @@ test:
 
 # Run e2e tests
 e2e-test:
-    cd tests && go test -timeout 15m --ginkgo.v
+	rm -rf nimbis_data
+	cd tests && go test -timeout 15m --ginkgo.v
     
 # Check all crates
 check:
