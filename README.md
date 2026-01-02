@@ -43,6 +43,9 @@ For detailed information about the crate organization, see [Crates Organization]
 # Build the project
 just build
 
+# Run the server
+just run
+
 # Run unit tests
 just test
 
