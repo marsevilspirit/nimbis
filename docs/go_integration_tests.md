@@ -105,3 +105,49 @@ Or use the Justfile in the project root (if integration-test command is configur
 ```bash
 just test-int
 ```
+
+## 4. Current Test Coverage
+
+The current integration tests cover the following functional areas of the Nimbis server. Each area is tested in a dedicated file within the `tests/` directory.
+
+### 4.1 String Commands (`string_test.go`)
+- **GET / SET**: Verification of basic string storage and retrieval.
+- **Missing Keys**: Ensures `GET` returns `nil` for non-existent keys.
+
+### 4.2 Hash Commands (`hash_test.go`)
+- **HSET**: Supports single and multiple field-value pairs setting.
+- **HGET**: Retrieval of individual field values.
+- **HMGET**: Retrieval of multiple field values in one command.
+- **HGETALL**: Retrieval of all fields and values in a hash.
+- **HLEN**: Correct calculation of the number of fields in a hash.
+- **Updates**: Verifies that updating existing fields overwrites values but maintains field count.
+
+### 4.3 Key Deletion (`delele_test.go`)
+- **String Deletion**: Deleting single and multiple string keys.
+- **Hash Deletion**: Deleting hash keys (ensures underlying fields are cleaned up).
+- **Mixed Deletion**: Deleting a mix of string, hash, and non-existent keys in a single command.
+- **Return Value**: Verifies `DEL` returns the correct count of actually deleted keys.
+
+### 4.4 Configuration (`config_test.go`)
+- **CONFIG GET**:
+  - Exact match (e.g., `addr`, `data_path`).
+  - Wildcard support (`*`, `prefix*`, `*suffix`).
+  - Handling of non-existent fields.
+- **CONFIG SET**:
+  - Verification of immutable fields protection (`addr`, `data_path` cannot be changed at runtime).
+  - Error reporting for unknown fields.
+
+### 4.5 Type Conflict Handling (`conflict_key_test.go`)
+This suite ensures Nimbis behaves correctly (like Redis) when multiple data types share the same key namespace.
+
+- **String vs Hash Conflicts**:
+  - `HSET` on an existing String key -> Returns `WRONGTYPE` error (does not overwrite).
+  - `GET` on an existing Hash key -> Returns `WRONGTYPE` error.
+- **Type Overwrite (SET)**:
+  - `SET` command forces overwrite of any existing key type (including Hash).
+  - Verifies that when a Hash is overwritten by a String, the old Hash fields are properly cleaned up and inaccessible.
+- **DEL and Type Reuse**:
+  - Verifies a key can be reused for a different type after being deleted (e.g., String -> DEL -> Hash).
+- **Edge Cases**:
+  - Empty string values.
+  - Keys with special characters (Unicode, Emoji).
