@@ -9,7 +9,8 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Core Commands**: `PING`, `GET`, `SET`, `CONFIG GET`, `CONFIG SET`
+- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `CONFIG GET`, `CONFIG SET`
+- **Hash Commands**: `HSET`, `HGET`, `HMGET`, `HGETALL`, `HLEN`
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates via `CONFIG SET`.
 
@@ -33,9 +34,20 @@ For detailed information about the crate organization, see [Crates Organization]
 
 ### Prerequisites
 
-- Rust (latest stable)
-- Go (for integration tests)
-- `just` command runner
+- **Rust**: Latest stable version
+- **Go**: Required for integration tests
+- **Just**: Command runner
+- **rust-script**: Required for running utility scripts
+
+**Install dependencies:**
+
+```bash
+# Install rust-script
+cargo install rust-script
+
+# Install just
+cargo install just
+```
 
 ### Common Commands
 
