@@ -18,9 +18,14 @@ e2e-test:
     
 # Check all crates
 check:
+    just check-workspace
     cargo check --workspace
     cargo fmt -- --check
     cargo clippy --workspace -- -D warnings
+
+# Check workspace dependencies
+check-workspace:
+    rust-script scripts/check_workspace_deps.rs
 
 # Format code
 fmt:
