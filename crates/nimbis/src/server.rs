@@ -73,7 +73,16 @@ async fn handle_client(
 	let mut buffer = BytesMut::with_capacity(4096);
 
 	loop {
-		let n = socket.read_buf(&mut buffer).await?;
+		let n = match socket.read_buf(&mut buffer).await {
+			Ok(n) => n,
+			Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+				// Connection reset by peer (e.g. client crashed or closed abruptly)
+				// Treat as normal disconnect
+				debug!("Connection reset by peer");
+				return Ok(());
+			}
+			Err(e) => return Err(e.into()),
+		};
 
 		if n == 0 {
 			// Connection closed
@@ -105,7 +114,13 @@ async fn handle_client(
 					};
 
 					let encoded = response.encode()?;
-					socket.write_all(&encoded).await?;
+					if let Err(e) = socket.write_all(&encoded).await {
+						if e.kind() == std::io::ErrorKind::ConnectionReset {
+							debug!("Connection reset by peer");
+							return Ok(());
+						}
+						return Err(e.into());
+					}
 				}
 				RespParseResult::Incomplete => {
 					break;
@@ -113,7 +128,12 @@ async fn handle_client(
 				RespParseResult::Error(e) => {
 					let error_response = RespValue::error(format!("ERR Protocol error: {}", e));
 					let encoded = error_response.encode()?;
-					socket.write_all(&encoded).await?;
+					if let Err(write_err) = socket.write_all(&encoded).await {
+						// If we can't write the error response because connection is reset, just give up
+						if write_err.kind() != std::io::ErrorKind::ConnectionReset {
+							return Err(write_err.into());
+						}
+					}
 					return Err(e.into());
 				}
 			}
