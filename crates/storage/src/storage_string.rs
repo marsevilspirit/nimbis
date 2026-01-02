@@ -1,4 +1,6 @@
 use bytes::Bytes;
+use slatedb::config::PutOptions;
+use slatedb::config::WriteOptions;
 
 use crate::storage::Storage;
 use crate::string::key::StringKey;
@@ -21,7 +23,18 @@ impl Storage {
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
-		self.db.put(key.encode(), value.encode()).await?;
+
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		self.db
+			.put_with_options(
+				key.encode(),
+				value.encode(),
+				&PutOptions::default(),
+				&write_opts,
+			)
+			.await?;
 		Ok(())
 	}
 }
