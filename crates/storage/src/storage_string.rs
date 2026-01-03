@@ -6,6 +6,7 @@ use crate::data_type::DataType;
 use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
+use crate::string::meta;
 use crate::string::value::StringValue;
 
 impl Storage {
@@ -30,6 +31,25 @@ impl Storage {
 				}
 				Ok(Some(string_val.value))
 			}
+			Some(DataType::Hash) => {
+				let meta_val = meta::HashMetaValue::decode(&bytes)?;
+				if meta_val.is_expired() {
+					self.del(key.encode()).await?;
+					return Ok(None);
+				}
+				// Hash doesn't return value here usually? get() is for string?
+				// get() here is generic string_db get?
+				// If it is Hash, it returns WRONGTYPE. storage_string.rs line 33.
+				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
+			}
+			Some(DataType::List) => {
+				let meta_val = meta::ListMetaValue::decode(&bytes)?;
+				if meta_val.is_expired() {
+					self.del(key.encode()).await?;
+					return Ok(None);
+				}
+				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
+			}
 			_ => Err("WRONGTYPE Operation against a key holding the wrong kind of value".into()),
 		}
 	}
@@ -43,13 +63,20 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
-		let Some(meta) = self.string_db.get(key.encode()).await? else {
-			return Ok(());
-		};
+		let meta_opt = self.string_db.get(key.encode()).await?;
 
-		// Clean up if it's a Hash
-		if !meta.is_empty() && DataType::from_u8(meta[0]) == Some(DataType::Hash) {
-			self.delete_hash_fields(user_key).await?;
+		// Clean up if it's a Hash or List
+		if let Some(meta) = meta_opt {
+			match meta.first().and_then(|&b| DataType::from_u8(b)) {
+				Some(DataType::Hash) => {
+					self.delete_hash_fields(user_key).await?;
+				}
+				Some(DataType::List) => {
+					let meta_val = meta::ListMetaValue::decode(&meta)?;
+					self.delete_list_elements(user_key, &meta_val).await?;
+				}
+				_ => {}
+			}
 		}
 
 		let write_opts = WriteOptions {
@@ -70,9 +97,18 @@ impl Storage {
 			return Ok(false);
 		};
 
-		// Clean up hash fields if this is a hash type
-		if !meta.is_empty() && DataType::from_u8(meta[0]) == Some(DataType::Hash) {
-			self.delete_hash_fields(user_key).await?;
+		// Clean up fields if this is a collection type
+		if let Some(dt) = meta.first().and_then(|&b| DataType::from_u8(b)) {
+			match dt {
+				DataType::Hash => {
+					self.delete_hash_fields(user_key).await?;
+				}
+				DataType::List => {
+					let meta_val = meta::ListMetaValue::decode(&meta)?;
+					self.delete_list_elements(user_key, &meta_val).await?;
+				}
+				_ => {}
+			}
 		}
 
 		// Delete from string_db
@@ -106,7 +142,12 @@ impl Storage {
 					val.encode()
 				}
 				Some(DataType::Hash) => {
-					let mut val = crate::string::meta::HashMetaValue::decode(&bytes)?;
+					let mut val = meta::HashMetaValue::decode(&bytes)?;
+					val.expire_at(expire_time);
+					val.encode()
+				}
+				Some(DataType::List) => {
+					let mut val = meta::ListMetaValue::decode(&bytes)?;
 					val.expire_at(expire_time);
 					val.encode()
 				}
@@ -156,9 +197,8 @@ impl Storage {
 
 			let remaining_ttl = match DataType::from_u8(bytes[0]) {
 				Some(DataType::String) => StringValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::Hash) => {
-					crate::string::meta::HashMetaValue::decode(&bytes)?.remaining_ttl()
-				}
+				Some(DataType::Hash) => meta::HashMetaValue::decode(&bytes)?.remaining_ttl(),
+				Some(DataType::List) => meta::ListMetaValue::decode(&bytes)?.remaining_ttl(),
 				_ => return Ok(None),
 			};
 
@@ -186,9 +226,8 @@ impl Storage {
 
 			let is_expired = match DataType::from_u8(bytes[0]) {
 				Some(DataType::String) => StringValue::decode(&bytes)?.is_expired(),
-				Some(DataType::Hash) => {
-					crate::string::meta::HashMetaValue::decode(&bytes)?.is_expired()
-				}
+				Some(DataType::Hash) => meta::HashMetaValue::decode(&bytes)?.is_expired(),
+				Some(DataType::List) => meta::ListMetaValue::decode(&bytes)?.is_expired(),
 				_ => return Ok(false),
 			};
 
