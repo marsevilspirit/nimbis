@@ -43,11 +43,13 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
-		if let Some(existing_meta) = self.string_db.get(key.encode()).await? {
-			// Clean up if it's a Hash
-			if !existing_meta.is_empty() && existing_meta[0] == DataType::Hash as u8 {
-				self.delete_hash_fields(user_key).await?;
-			}
+		let Some(meta) = self.string_db.get(key.encode()).await? else {
+			return Ok(());
+		};
+
+		// Clean up if it's a Hash
+		if !meta.is_empty() && DataType::from_u8(meta[0]) == Some(DataType::Hash) {
+			self.delete_hash_fields(user_key).await?;
 		}
 
 		let write_opts = WriteOptions {
