@@ -12,9 +12,9 @@ bytes = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 criterion = { workspace = true }
 rstest = { workspace = true }
+tokio = { workspace = true }
 
 [[bench]]
 name = "benchmarks"

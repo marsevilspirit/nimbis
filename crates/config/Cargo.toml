@@ -10,8 +10,8 @@ description = "Configuration procedural macros for Nimbis"
 proc-macro = true
 
 [dependencies]
-syn = { workspace = true }
 quote = { workspace = true }
+syn = { workspace = true }
 
 [dev-dependencies]
-rstest.workspace = true
+rstest = { workspace = true }
