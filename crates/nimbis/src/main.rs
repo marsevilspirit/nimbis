@@ -7,7 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	config::init_config();
 	telemetry::init();
 
-	println!("{}", logo::LOGO);
+	println!("{}\tv{}", logo::LOGO.trim_end(), env!("CARGO_PKG_VERSION"));
 
 	let server = Server::new().await?;
 	server.run().await?;
