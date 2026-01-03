@@ -64,25 +64,23 @@ impl Storage {
 		let user_key = key.clone();
 		let key = StringKey::new(key);
 
-		if let Some(existing_meta) = self.string_db.get(key.encode()).await? {
-			if !existing_meta.is_empty() {
-				// Clean up hash fields
-				if let Some(DataType::Hash) = DataType::from_u8(existing_meta[0]) {
-					self.delete_hash_fields(user_key).await?;
-				}
-			}
+		let Some(meta) = self.string_db.get(key.encode()).await? else {
+			return Ok(false);
+		};
 
-			// Delete from string_db
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			self.string_db
-				.delete_with_options(key.encode(), &write_opts)
-				.await?;
-			Ok(true)
-		} else {
-			Ok(false)
+		// Clean up hash fields if this is a hash type
+		if !meta.is_empty() && DataType::from_u8(meta[0]) == Some(DataType::Hash) {
+			self.delete_hash_fields(user_key).await?;
 		}
+
+		// Delete from string_db
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		self.string_db
+			.delete_with_options(key.encode(), &write_opts)
+			.await?;
+		Ok(true)
 	}
 
 	pub async fn expire(
