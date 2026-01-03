@@ -11,6 +11,35 @@ use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
+	// Helper to get and validate hash metadata.
+	// Returns:
+	// - Ok(Some(meta)) if the key is a valid, non-expired Hash
+	// - Ok(None) if the key doesn't exist or is expired
+	// - Err if the key exists but is of wrong type (e.g., String)
+	async fn get_valid_hash_meta(
+		&self,
+		key: &Bytes,
+	) -> Result<Option<HashMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
+		let meta_key = MetaKey::new(key.clone());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
+			if meta_bytes.is_empty() {
+				return Ok(None);
+			}
+			if meta_bytes[0] != DataType::Hash as u8 {
+				return Err(
+					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+				);
+			}
+			let meta_val = HashMetaValue::decode(&meta_bytes)?;
+			if meta_val.is_expired() {
+				return Ok(None);
+			}
+			Ok(Some(meta_val))
+		} else {
+			Ok(None)
+		}
+	}
+
 	// Helper to delete all fields of a hash.
 	// Used when overwriting a Hash with a String, or deleting a Hash.
 	// TODO: This function is temporary; once the compaction filter is implemented,
@@ -139,21 +168,8 @@ impl Storage {
 		key: Bytes,
 		field: Bytes,
 	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
-		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
-			if meta_bytes.is_empty() {
-				return Ok(None);
-			}
-			if meta_bytes[0] != DataType::Hash as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
-			}
-			let meta_val = HashMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				return Ok(None);
-			}
-		} else {
+		// Check if the hash exists and is valid
+		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(None);
 		}
 
@@ -163,18 +179,7 @@ impl Storage {
 	}
 
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-		let meta_key = MetaKey::new(key);
-		let result = self.string_db.get(meta_key.encode()).await?;
-		if let Some(meta_bytes) = result {
-			if !meta_bytes.is_empty() && meta_bytes[0] != DataType::Hash as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
-			}
-			let meta_val = HashMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				return Ok(0);
-			}
+		if let Some(meta_val) = self.get_valid_hash_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
@@ -186,22 +191,8 @@ impl Storage {
 		key: Bytes,
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
-		// Optimization: Check meta once
-		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
-			if meta_bytes.is_empty() {
-				return Ok(vec![None; fields.len()]);
-			}
-			if meta_bytes[0] != DataType::Hash as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
-			}
-			let meta_val = HashMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				return Ok(vec![None; fields.len()]);
-			}
-		} else {
+		// Check if the hash exists and is valid
+		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(vec![None; fields.len()]);
 		}
 
@@ -240,22 +231,8 @@ impl Storage {
 	) -> Result<Vec<(Bytes, Bytes)>, Box<dyn std::error::Error + Send + Sync>> {
 		use bytes::Buf;
 
-		// Check type
-		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
-			if meta_bytes.is_empty() {
-				return Ok(Vec::new());
-			}
-			if meta_bytes[0] != DataType::Hash as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
-			}
-			let meta_val = HashMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				return Ok(Vec::new());
-			}
-		} else {
+		// Check if the hash exists and is valid
+		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(Vec::new());
 		}
 
