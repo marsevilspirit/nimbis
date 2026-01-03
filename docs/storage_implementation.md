@@ -42,12 +42,20 @@ impl Storage {
         key: Bytes,
         value: Bytes,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, ...>;
+    pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, ...>;
+    pub async fn exists(&self, key: Bytes) -> Result<bool, ...>;
 }
 ```
 
 - **Encoding**: 
   - `StringKey` (in `crates/storage/src/string/key.rs`) handles key encoding. No manual prefixes are used as data is isolated in `string_db`.
   - `StringValue` (in `crates/storage/src/string/value.rs`) manages the raw bytes.
+
+- **Binary Format**:
+  - `[DataType::String (1 byte)] [expire_time (8 bytes BE)] [payload (remainder)]`
+  - `expire_time` is milliseconds since epoch. `0` means no expiration.
 
 ### Hash Operations
 
@@ -64,7 +72,40 @@ impl Storage {
 ```
 
 - **Metadata**: Stored in `string_db` using `MetaKey` and `HashMetaValue` (with type prefix).
+- **Binary Format (Metadata)**:
+  - `[DataType::Hash (1 byte)] [field_count (8 bytes BE)] [expire_time (8 bytes BE)]`
 - **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` as u32 BigEndian + `field`).
+- **Strict Metadata Check**: Hash read operations (`hget`, `hmget`, `hgetall`, `hlen`) perform a strict metadata check. If the metadata in `string_db` is missing (due to expiration or key deletion), the command treats the hash as non-existent, even if orphaned fields remain in `hash_db`. This ensures consistent lazy expiration behavior.
+
+### Expiration Trait
+
+To ensure consistent TTL/expiration behavior across different value types, the storage layer implements an `Expirable` trait in `crates/storage/src/expirable.rs`.
+
+#### Trait Interface
+
+```rust
+pub trait Expirable {
+    // Required methods
+    fn expire_time(&self) -> u64;
+    fn set_expire_time(&mut self, timestamp: u64);
+    
+    // Default implementations (can be overridden)
+    fn is_expired(&self) -> bool;
+    fn expire_at(&mut self, timestamp: u64);
+    fn expire_after(&mut self, duration: Duration);
+    fn remaining_ttl(&self) -> Option<Duration>;
+}
+```
+
+#### Implementations
+
+- **StringValue** implements `Expirable` to manage expiration for String type keys.
+- **HashMetaValue** implements `Expirable` to manage expiration for Hash type keys.
+
+This design:
+- Eliminates code duplication (previously ~54 lines of identical expiration logic)
+- Ensures type-safe and consistent expiration behavior
+- Makes it easy to add expiration support to future data types (Lists, Sets, etc.)
 
 ## Usage
 

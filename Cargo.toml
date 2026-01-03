@@ -17,24 +17,29 @@ license = "MIT"
 repository = "https://github.com/marsevilspirit/nimbis"
 
 [workspace.dependencies]
+# Local Dependencies
+config = { path = "crates/config" }
+resp = { path = "crates/resp" }
+storage = { path = "crates/storage" }
+telemetry = { path = "crates/telemetry" }
+
+# Dependencies
 arc-swap = "1.8.0"
 async-trait = "0.1"
 bytes = "1.5"
 chrono = "0.4"
-config = { path = "crates/config" }
-criterion = { version = "0.8.1", features = ["html_reports"] }
 futures = "0.3.31"
 object_store = "0.13.0"
 quote = "1.0"
-resp = { path = "crates/resp" }
-rstest = "0.26.1"
 slatedb = "0.10.0"
-storage = { path = "crates/storage" }
 syn = { version = "2.0", features = ["full"] }
-telemetry = { path = "crates/telemetry" }
 thiserror = "2.0.17"
 tokio = { version = "1.35", features = ["full"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Dev Dependencies
+criterion = { version = "0.8.1", features = ["html_reports"] }
+rstest = "0.26.1"
 ulid = "1.2"

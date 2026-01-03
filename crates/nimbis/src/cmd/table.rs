@@ -4,6 +4,7 @@ use std::sync::Arc;
 use super::Cmd;
 use super::ConfigGroupCmd;
 use super::DelCmd;
+use super::ExistsCmd;
 use super::GetCmd;
 use super::PingCmd;
 use super::SetCmd;
@@ -27,12 +28,16 @@ impl CmdTable {
 		inner.insert("SET".to_string(), Arc::new(SetCmd::new()));
 		inner.insert("GET".to_string(), Arc::new(GetCmd::new()));
 		inner.insert("DEL".to_string(), Arc::new(DelCmd::default()));
+		inner.insert("EXISTS".to_string(), Arc::new(ExistsCmd::default()));
 		// hash type cmd
 		inner.insert("HSET".to_string(), Arc::new(super::HSetCmd::new()));
 		inner.insert("HGET".to_string(), Arc::new(super::HGetCmd::new()));
 		inner.insert("HLEN".to_string(), Arc::new(super::HLenCmd::new()));
 		inner.insert("HMGET".to_string(), Arc::new(super::HMGetCmd::new()));
 		inner.insert("HGETALL".to_string(), Arc::new(super::HGetAllCmd::new()));
+		// expire type cmd
+		inner.insert("EXPIRE".to_string(), Arc::new(super::ExpireCmd::default()));
+		inner.insert("TTL".to_string(), Arc::new(super::TtlCmd::default()));
 		// config type cmd
 		inner.insert("CONFIG".to_string(), Arc::new(ConfigGroupCmd::new()));
 		Self { inner }

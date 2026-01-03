@@ -9,7 +9,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `CONFIG GET`, `CONFIG SET`
+- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `CONFIG GET`, `CONFIG SET`
 - **Hash Commands**: `HSET`, `HGET`, `HMGET`, `HGETALL`, `HLEN`
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates via `CONFIG SET`.

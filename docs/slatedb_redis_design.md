@@ -40,13 +40,15 @@ user_key
 
 **Value Format:**
 ```
-['s'] [raw_value_bytes]
+['s'] [expire_time (u64 BE)] [raw_value_bytes]
 ```
+*   **expire_time**: 8 bytes, milliseconds since epoch. `0` means no expiration.
 
 **Example:**
 *   Redis Command: `SET mykey "hello"`
 *   String DB Key: `mykey`
-*   String DB Value: `['s', 'h', 'e', 'l', 'l', 'o']`
+*   String DB Value: `['s', 0, 0, 0, 0, 0, 0, 0, 0, 'h', 'e', 'l', 'l', 'o']` (Example with no TTL)
+
 
 ### 3. Hash Type
 
@@ -54,7 +56,8 @@ user_key
 
 **Meta (String DB):**
 *   **Key**: `user_key`
-*   **Value**: `['h']` + `[count (u64 BE)]` // HashMetaValue (Currently len is u64)
+*   **Value**: `['h']` + `[count (u64 BE)]` + `[expire_time (u64 BE)]`
+*   **Payload**: 1 byte type code + 8 bytes field count + 8 bytes expiration timestamp.
 
 **Fields (Hash DB):**
 *   **Key**: `user_key + length(field) (u32 BigEndian) + field`
@@ -64,6 +67,8 @@ user_key
 *   Redis Command: `HSET myhash field1 value1`
 *   **String DB**: Key=`myhash`, Value=`['h']` + `1`
 *   **Hash DB**: Key=`myhash` + `...field1...`, Value=`value1`
+
+**Note on Expiration:** Both `StringValue` and `HashMetaValue` implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`), which provides a unified interface for managing TTL/expiration logic. This ensures consistent expiration behavior across different data types and eliminates code duplication.
 
 ---
 

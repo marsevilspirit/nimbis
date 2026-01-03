@@ -127,6 +127,9 @@ The following table lists the currently implemented Redis commands and their sta
 | :---------- | :----------- | :---- | :-------------------------------------------------- |
 | **Generic** | `PING`       | `-1`  | Ping the server (optionally with a message).        |
 | **Generic** | `DEL`        | `-2`  | Delete one or more keys.                            |
+| **Generic** | `EXISTS`     | `-2`  | Check if one or more keys exist.                    |
+| **Generic** | `EXPIRE`     | `3`   | Set a timeout on key.                               |
+| **Generic** | `TTL`        | `2`   | Get the time to live for a key in seconds.          |
 | **String**  | `SET`        | `3`   | Set the string value of a key.                      |
 | **String**  | `GET`        | `2`   | Get the value of a key.                             |
 | **Hash**    | `HSET`       | `-4`  | Sets field(s) in the hash.                          |

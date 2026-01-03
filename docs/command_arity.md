@@ -18,12 +18,15 @@ Nimbis follows standard Redis command arity rules. The `arity` field in command 
 
 ## Examples
 
-| Command  | Arity | Type             | Meaning              | Example                                                    |
-| :------- | :---- | :--------------- | :------------------- | :--------------------------------------------------------- |
-| **GET**  | `2`   | Positive (Exact) | Exactly 2 arguments  | `GET <key>` <br> (1 cmd + 1 arg)                           |
-| **SET**  | `3`   | Positive (Exact) | Exactly 3 arguments  | `SET <key> <value>` <br> (1 cmd + 2 args)                  |
-| **PING** | `-1`  | Negative (Min)   | At least 1 argument  | `PING` (1 arg) <br> `PING <msg>` (2 args)                  |
-| **MGET** | `-2`  | Negative (Min)   | At least 2 arguments | `MGET <key1>` (2 args) <br> `MGET <k1> <k2> ...` (>2 args) |
+| Command    | Arity | Type             | Meaning              | Example                                                        |
+| :--------- | :---- | :--------------- | :------------------- | :------------------------------------------------------------- |
+| **GET**    | `2`   | Positive (Exact) | Exactly 2 arguments  | `GET <key>` <br> (1 cmd + 1 arg)                               |
+| **SET**    | `3`   | Positive (Exact) | Exactly 3 arguments  | `SET <key> <value>` <br> (1 cmd + 2 args)                      |
+| **PING**   | `-1`  | Negative (Min)   | At least 1 argument  | `PING` (1 arg) <br> `PING <msg>` (2 args)                      |
+| **EXISTS** | `-2`  | Negative (Min)   | At least 2 arguments | `EXISTS <key1>` (2 args) <br> `EXISTS <k1> <k2> ...` (>2 args) |
+| **EXPIRE** | `3`   | Positive (Exact) | Exactly 3 arguments  | `EXPIRE <key> <seconds>` (3 args)                              |
+| **TTL**    | `2`   | Positive (Exact) | Exactly 2 arguments  | `TTL <key>` (2 args)                                           |
+| **MGET**   | `-2`  | Negative (Min)   | At least 2 arguments | `MGET <key1>` (2 args) <br> `MGET <k1> <k2> ...` (>2 args)     |
 
 ## Implementation Details
 
