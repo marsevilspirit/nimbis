@@ -55,11 +55,9 @@ impl Cmd for LPopCmd {
 
 				if args.len() == 1 {
 					// Single pop
-					if let Some(val) = elements.first() {
-						RespValue::bulk_string(val.clone())
-					} else {
-						RespValue::Null
-					}
+					// The `elements.is_empty()` check above ensures `elements` has exactly one item here
+					// so we can safely unwrap.
+					RespValue::bulk_string(elements.first().unwrap().clone())
 				} else {
 					// Count pop
 					let resp_elements: Vec<RespValue> =

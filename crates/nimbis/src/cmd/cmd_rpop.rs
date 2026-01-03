@@ -53,11 +53,9 @@ impl Cmd for RPopCmd {
 					return RespValue::Null;
 				}
 				if args.len() == 1 {
-					if let Some(val) = elements.first() {
-						RespValue::bulk_string(val.clone())
-					} else {
-						RespValue::Null
-					}
+					// The `elements.is_empty()` check above ensures `elements` has exactly one item here
+					// so we can safely unwrap.
+					RespValue::bulk_string(elements.first().unwrap().clone())
 				} else {
 					let resp_elements: Vec<RespValue> =
 						elements.into_iter().map(RespValue::bulk_string).collect();
