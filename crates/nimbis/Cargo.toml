@@ -7,13 +7,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-resp = { workspace = true }
-telemetry = { workspace = true }
-storage = { workspace = true }
-tokio = { workspace = true }
-bytes = { workspace = true }
-async-trait = { workspace = true }
-tracing = { workspace = true }
 arc-swap = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
 config = { workspace = true }
+resp = { workspace = true }
+storage = { workspace = true }
+telemetry = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
