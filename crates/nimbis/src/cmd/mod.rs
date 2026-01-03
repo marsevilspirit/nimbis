@@ -94,6 +94,8 @@ impl TryFrom<RespValue> for ParsedCmd {
 }
 
 mod cmd_del;
+mod cmd_exists;
+mod cmd_expire;
 mod cmd_get;
 mod cmd_hget;
 mod cmd_hgetall;
@@ -102,10 +104,13 @@ mod cmd_hmget;
 mod cmd_hset;
 mod cmd_ping;
 mod cmd_set;
+mod cmd_ttl;
 mod group_cmd_config;
 mod table;
 
 pub use cmd_del::DelCmd;
+pub use cmd_exists::ExistsCmd;
+pub use cmd_expire::ExpireCmd;
 pub use cmd_get::GetCmd;
 pub use cmd_hget::HGetCmd;
 pub use cmd_hgetall::HGetAllCmd;
@@ -114,5 +119,6 @@ pub use cmd_hmget::HMGetCmd;
 pub use cmd_hset::HSetCmd;
 pub use cmd_ping::PingCmd;
 pub use cmd_set::SetCmd;
+pub use cmd_ttl::TtlCmd;
 pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;

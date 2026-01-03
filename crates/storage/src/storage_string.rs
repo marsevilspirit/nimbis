@@ -23,6 +23,11 @@ impl Storage {
 			match DataType::from_u8(bytes[0]) {
 				Some(DataType::String) => {
 					let string_val = StringValue::decode(&bytes)?;
+					if string_val.is_expired() {
+						// TODO: Lazy expire: return None.
+						// We could allow Slatedb to clean it up eventually.
+						return Ok(None);
+					}
 					Ok(Some(string_val.value))
 				}
 				_ => {
@@ -53,13 +58,9 @@ impl Storage {
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
+		let put_opts = PutOptions::default();
 		self.string_db
-			.put_with_options(
-				key.encode(),
-				value.encode(),
-				&PutOptions::default(),
-				&write_opts,
-			)
+			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
 			.await?;
 		Ok(())
 	}
@@ -84,6 +85,124 @@ impl Storage {
 				.delete_with_options(key.encode(), &write_opts)
 				.await?;
 			Ok(true)
+		} else {
+			Ok(false)
+		}
+	}
+
+	pub async fn expire(
+		&self,
+		key: Bytes,
+		expire_time: u64,
+	) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+		let user_key = key.clone();
+		let skey = StringKey::new(key);
+		let encoded_key = skey.encode();
+
+		if let Some(bytes) = self.string_db.get(encoded_key.clone()).await? {
+			if bytes.is_empty() {
+				return Ok(false);
+			}
+
+			let encoded_val = match DataType::from_u8(bytes[0]) {
+				Some(DataType::String) => {
+					let mut val = StringValue::decode(&bytes)?;
+					val.expire_at(expire_time);
+					val.encode()
+				}
+				Some(DataType::Hash) => {
+					let mut val = crate::string::meta::HashMetaValue::decode(&bytes)?;
+					val.expire_at(expire_time);
+					val.encode()
+				}
+				_ => return Ok(false),
+			};
+
+			// Check if already expired immediately
+			// We can verify by decoding again, but we know the expire_time we just set.
+			let now = chrono::Utc::now().timestamp_millis() as u64;
+			if expire_time > 0 && expire_time <= now {
+				self.del(user_key).await?;
+				return Ok(true);
+			}
+
+			let ttl = if expire_time > 0 {
+				slatedb::config::Ttl::ExpireAfter(expire_time.saturating_sub(now))
+			} else {
+				slatedb::config::Ttl::NoExpiry
+			};
+
+			let write_opts = WriteOptions {
+				await_durable: false,
+			};
+
+			let put_opts = PutOptions { ttl };
+
+			self.string_db
+				.put_with_options(encoded_key, encoded_val, &put_opts, &write_opts)
+				.await?;
+			Ok(true)
+		} else {
+			Ok(false)
+		}
+	}
+
+	pub async fn ttl(
+		&self,
+		key: Bytes,
+	) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+		let skey = StringKey::new(key);
+		let encoded_key = skey.encode();
+
+		if let Some(bytes) = self.string_db.get(encoded_key).await? {
+			if bytes.is_empty() {
+				return Ok(None);
+			}
+
+			let remaining_ttl = match DataType::from_u8(bytes[0]) {
+				Some(DataType::String) => StringValue::decode(&bytes)?.remaining_ttl(),
+				Some(DataType::Hash) => {
+					crate::string::meta::HashMetaValue::decode(&bytes)?.remaining_ttl()
+				}
+				_ => return Ok(None),
+			};
+
+			match remaining_ttl {
+				Some(duration) => Ok(Some(duration.as_millis() as i64)),
+				None => Ok(Some(-1)),
+			}
+		} else {
+			Ok(None)
+		}
+	}
+
+	pub async fn exists(
+		&self,
+		key: Bytes,
+	) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+		let user_key = key.clone();
+		let skey = StringKey::new(key);
+		let encoded_key = skey.encode();
+
+		if let Some(bytes) = self.string_db.get(encoded_key).await? {
+			if bytes.is_empty() {
+				return Ok(false);
+			}
+
+			let is_expired = match DataType::from_u8(bytes[0]) {
+				Some(DataType::String) => StringValue::decode(&bytes)?.is_expired(),
+				Some(DataType::Hash) => {
+					crate::string::meta::HashMetaValue::decode(&bytes)?.is_expired()
+				}
+				_ => return Ok(false),
+			};
+
+			if is_expired {
+				self.del(user_key).await?; // Lazy delete
+				Ok(false)
+			} else {
+				Ok(true)
+			}
 		} else {
 			Ok(false)
 		}

@@ -151,3 +151,13 @@ This suite ensures Nimbis behaves correctly (like Redis) when multiple data type
 - **Edge Cases**:
   - Empty string values.
   - Keys with special characters (Unicode, Emoji).
+
+### 4.6 Expire and TTL (`expire_test.go`)
+- **Basic Expiration**: Verifies that String and Hash keys are deleted after the specified timeout.
+- **TTL Return Values**: 
+  - Returns remaining seconds for active keys.
+  - Returns `-1` for keys without an expiration.
+  - Returns `-2` for non-existent keys.
+- **Expiration Updates**: Verifies that setting a new expiration on an existing key updates the timeout.
+- **Lazy Delete Verification**: Ensures that keys become inaccessible immediately upon expiration.
+

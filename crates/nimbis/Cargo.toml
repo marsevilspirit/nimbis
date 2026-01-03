@@ -12,6 +12,8 @@ telemetry = { workspace = true }
 storage = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
+
 async-trait = { workspace = true }
 tracing = { workspace = true }
 arc-swap = { workspace = true }

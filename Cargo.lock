@@ -1539,6 +1539,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "bytes",
+ "chrono",
  "config",
  "resp",
  "storage",
@@ -2590,6 +2591,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "chrono",
  "futures",
  "object_store 0.13.0",
  "rstest",

@@ -14,6 +14,8 @@ tokio = { workspace = true }
 slatedb = { workspace = true }
 object_store = { workspace = true }
 futures = { workspace = true }
+chrono = { workspace = true }
+
 
 [dev-dependencies]
 tokio = { workspace = true }

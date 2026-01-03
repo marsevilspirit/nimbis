@@ -60,7 +60,7 @@ impl Storage {
 		let meta_key = MetaKey::new(key.clone());
 		let field_key = HashFieldKey::new(key.clone(), field);
 
-		// 1. Valid type check (Must be Hash or None)
+		// Valid type check (Must be Hash or None)
 		// We read from string_db which holds ALL metadata (StringValue or HashMetaValue)
 		let meta_encoded_key = meta_key.encode();
 		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
@@ -88,33 +88,45 @@ impl Storage {
 			HashMetaValue::new(0)
 		};
 
-		// 2. Check if field exists in hash_db
+		// Check expiration in meta_val
+		if meta_val.is_expired() {
+			// TODO: Expired. Treat as new.
+			// We should clean up old hash fields?
+			// Yes, if we are overwriting, we should probably delete old fields if we consider the key gone.
+			// But `hset` adds to existing.
+			// If key is expired, `hset` should start a FRESH hash (empty).
+			// So we need to delete old hash fields first.
+			self.delete_hash_fields(key.clone()).await?;
+			meta_val = HashMetaValue::new(0);
+		}
+
+		// Check if field exists in hash_db
 		let existing_field = self.hash_db.get(field_key.encode()).await?;
 		let is_new_field = existing_field.is_none();
 
-		// 3. Set the field in hash_db
+		// Set the field in hash_db
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
+		let put_opts = PutOptions::default();
 		self.hash_db
-			.put_with_options(
-				field_key.encode(),
-				value,
-				&PutOptions::default(),
-				&write_opts,
-			)
+			.put_with_options(field_key.encode(), value, &put_opts, &write_opts)
 			.await?;
 
-		// 4. Update metadata in string_db if needed
+		// Update metadata in string_db if needed
 		if is_new_field {
 			meta_val.len += 1;
+
+			let ttl = meta_val
+				.remaining_ttl()
+				.map(|d| d.as_millis() as u64)
+				.map(slatedb::config::Ttl::ExpireAfter)
+				.unwrap_or(slatedb::config::Ttl::NoExpiry);
+
+			let put_opts = PutOptions { ttl };
+
 			self.string_db
-				.put_with_options(
-					meta_encoded_key,
-					meta_val.encode(),
-					&PutOptions::default(),
-					&write_opts,
-				)
+				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
 				.await?;
 			Ok(1)
 		} else {
@@ -128,11 +140,21 @@ impl Storage {
 		field: Bytes,
 	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await?
-			&& !meta_bytes.is_empty()
-			&& meta_bytes[0] != DataType::Hash as u8
-		{
-			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
+			if meta_bytes.is_empty() {
+				return Ok(None);
+			}
+			if meta_bytes[0] != DataType::Hash as u8 {
+				return Err(
+					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+				);
+			}
+			let meta_val = HashMetaValue::decode(&meta_bytes)?;
+			if meta_val.is_expired() {
+				return Ok(None);
+			}
+		} else {
+			return Ok(None);
 		}
 
 		let field_key = HashFieldKey::new(key, field);
@@ -150,6 +172,9 @@ impl Storage {
 				);
 			}
 			let meta_val = HashMetaValue::decode(&meta_bytes)?;
+			if meta_val.is_expired() {
+				return Ok(0);
+			}
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
@@ -163,11 +188,21 @@ impl Storage {
 	) -> Result<Vec<Option<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
 		// Optimization: Check meta once
 		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await?
-			&& !meta_bytes.is_empty()
-			&& meta_bytes[0] != DataType::Hash as u8
-		{
-			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
+			if meta_bytes.is_empty() {
+				return Ok(vec![None; fields.len()]);
+			}
+			if meta_bytes[0] != DataType::Hash as u8 {
+				return Err(
+					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+				);
+			}
+			let meta_val = HashMetaValue::decode(&meta_bytes)?;
+			if meta_val.is_expired() {
+				return Ok(vec![None; fields.len()]);
+			}
+		} else {
+			return Ok(vec![None; fields.len()]);
 		}
 
 		// Create a future for each field lookup to enable concurrent execution
@@ -207,11 +242,21 @@ impl Storage {
 
 		// Check type
 		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await?
-			&& !meta_bytes.is_empty()
-			&& meta_bytes[0] != DataType::Hash as u8
-		{
-			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
+			if meta_bytes.is_empty() {
+				return Ok(Vec::new());
+			}
+			if meta_bytes[0] != DataType::Hash as u8 {
+				return Err(
+					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+				);
+			}
+			let meta_val = HashMetaValue::decode(&meta_bytes)?;
+			if meta_val.is_expired() {
+				return Ok(Vec::new());
+			}
+		} else {
+			return Ok(Vec::new());
 		}
 
 		let range = key.as_ref()..;
