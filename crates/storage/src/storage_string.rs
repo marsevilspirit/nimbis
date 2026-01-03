@@ -16,26 +16,21 @@ impl Storage {
 		let key = StringKey::new(key);
 		let result = self.string_db.get(key.encode()).await?;
 
-		if let Some(bytes) = result {
-			if bytes.is_empty() {
-				return Ok(None);
-			}
+		let bytes = match result {
+			Some(b) if !b.is_empty() => b,
+			_ => return Ok(None),
+		};
 
-			match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => {
-					let string_val = StringValue::decode(&bytes)?;
-					if string_val.is_expired() {
-						self.del(key.encode()).await?;
-						return Ok(None);
-					}
-					Ok(Some(string_val.value))
+		match DataType::from_u8(bytes[0]) {
+			Some(DataType::String) => {
+				let string_val = StringValue::decode(&bytes)?;
+				if string_val.is_expired() {
+					self.del(key.encode()).await?;
+					return Ok(None);
 				}
-				_ => {
-					Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
-				}
+				Ok(Some(string_val.value))
 			}
-		} else {
-			Ok(None)
+			_ => Err("WRONGTYPE Operation against a key holding the wrong kind of value".into()),
 		}
 	}
 
