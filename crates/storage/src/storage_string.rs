@@ -25,8 +25,7 @@ impl Storage {
 				Some(DataType::String) => {
 					let string_val = StringValue::decode(&bytes)?;
 					if string_val.is_expired() {
-						// TODO: Lazy expire: return None.
-						// We could allow Slatedb to clean it up eventually.
+						self.del(key.encode()).await?;
 						return Ok(None);
 					}
 					Ok(Some(string_val.value))

@@ -33,6 +33,7 @@ impl Storage {
 			}
 			let meta_val = HashMetaValue::decode(&meta_bytes)?;
 			if meta_val.is_expired() {
+				self.del(key.clone()).await?;
 				return Ok(None);
 			}
 			Ok(Some(meta_val))
