@@ -335,6 +335,10 @@ impl Storage {
 				results.push(val);
 			} else {
 				// Should not happen if consistency is maintained
+				tracing::warn!(
+					"List element missing for key {:?} at sequence. Potential data inconsistency.",
+					key
+				);
 			}
 		}
 
