@@ -24,6 +24,7 @@ check:
     cargo clippy --workspace -- -D warnings
 
 # Check workspace dependencies
+[private]
 check-workspace:
     rust-script scripts/check_workspace_deps.rs
 
