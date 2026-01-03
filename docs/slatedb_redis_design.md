@@ -70,6 +70,27 @@ user_key
 
 **Note on Expiration:** Both `StringValue` and `HashMetaValue` implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`), which provides a unified interface for managing TTL/expiration logic. This ensures consistent expiration behavior across different data types and eliminates code duplication.
 
+### 4. List Type
+
+**Meta Stored in String DB, Elements in List DB.**
+
+**Meta (String DB):**
+*   **Key**: `user_key`
+*   **Value**: `['l']` + `[len (u64)]` + `[head (u64)]` + `[tail (u64)]` + `[expire_time (u64)]`
+*   **Logic**: Implemented as a deque. `head` and `tail` start at `2^63` (middle of u64 range).
+    *   `LPUSH`: Decrement `head`, store at new `head`.
+    *   `RPUSH`: Store at `tail`, increment `tail`.
+    *   Elements are in range `[head, tail)`.
+
+**Elements (List DB):**
+*   **Key**: `user_key` + `sequence (u64 BigEndian)`
+*   **Value**: `raw_element_bytes`
+
+**Example:**
+*   Redis Command: `RPUSH mylist A`
+*   **String DB**: Key=`mylist`, Meta=`len=1, head=mid, tail=mid+1`
+*   **List DB**: Key=`mylist` + `mid`, Value=`A`
+
 ---
 
 ## Future Implementations (Tentative)
@@ -79,10 +100,6 @@ The following designs are placeholders and subject to change.
 ### Set (in Set DB)
 *   **Meta Key**: `user_key`
 *   **Member Key**: `user_key` + `member` -> `(empty)`
-
-### List (in List DB)
-*   **Meta Key**: `user_key` -> Metadata
-*   **Node Key**: `user_key` + `seq_id` -> `value`
 
 ### ZSet (in ZSet DB)
 *   **Meta Key**: `user_key`

@@ -12,13 +12,12 @@ test:
     cargo nextest run
 
 # Run e2e tests
-e2e-test:
-	rm -rf nimbis_data
-	cd tests && go test -timeout 15m --ginkgo.v
-    
+e2e-test: build
+    rm -rf nimbis_data
+    cd tests && go test -timeout 15m --ginkgo.v
+
 # Check all crates
-check:
-    just check-workspace
+check: check-workspace
     cargo check --workspace
     cargo fmt -- --check
     cargo clippy --workspace -- -D warnings

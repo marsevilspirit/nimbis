@@ -76,6 +76,75 @@ impl Expirable for HashMetaValue {
 	}
 }
 
+#[derive(Debug, PartialEq)]
+pub struct ListMetaValue {
+	pub len: u64,
+	pub head: u64,
+	pub tail: u64,
+	pub expire_time: u64,
+}
+
+impl ListMetaValue {
+	pub fn new() -> Self {
+		// Initialize head and tail at the middle of u64 range to allow expansion in both directions
+		let mid = u64::MAX / 2;
+		Self {
+			len: 0,
+			head: mid,
+			tail: mid,
+			expire_time: 0,
+		}
+	}
+
+	pub fn encode(&self) -> Bytes {
+		let mut bytes = BytesMut::with_capacity(1 + 8 + 8 + 8 + 8);
+		bytes.put_u8(DataType::List as u8);
+		bytes.put_u64(self.len);
+		bytes.put_u64(self.head);
+		bytes.put_u64(self.tail);
+		bytes.put_u64(self.expire_time);
+		bytes.freeze()
+	}
+
+	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		if bytes.len() < 33 {
+			return Err(DecoderError::InvalidLength);
+		}
+
+		let mut buf = bytes;
+		let type_code = buf.get_u8();
+		if type_code != DataType::List as u8 {
+			return Err(DecoderError::InvalidType);
+		}
+		let len = buf.get_u64();
+		let head = buf.get_u64();
+		let tail = buf.get_u64();
+		let expire_time = buf.get_u64();
+		Ok(Self {
+			len,
+			head,
+			tail,
+			expire_time,
+		})
+	}
+}
+
+impl Default for ListMetaValue {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl Expirable for ListMetaValue {
+	fn expire_time(&self) -> u64 {
+		self.expire_time
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		self.expire_time = timestamp;
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use rstest::rstest;
@@ -118,5 +187,27 @@ mod tests {
 		let decoded = HashMetaValue::decode(&encoded).unwrap();
 		assert_eq!(decoded, val);
 		assert_eq!(decoded.expire_time, 0);
+	}
+
+	#[test]
+	fn test_list_meta_value_encode_decode() {
+		let mut val = ListMetaValue::new();
+		val.len = 5;
+		val.head = 100;
+		val.tail = 105;
+		val.expire_time = 123456789;
+
+		let encoded = val.encode();
+		let decoded = ListMetaValue::decode(&encoded).unwrap();
+		assert_eq!(decoded, val);
+	}
+
+	#[test]
+	fn test_list_meta_value_new() {
+		let val = ListMetaValue::new();
+		assert_eq!(val.len, 0);
+		// Approx checking mid range
+		assert!(val.head > 0);
+		assert_eq!(val.head, val.tail);
 	}
 }

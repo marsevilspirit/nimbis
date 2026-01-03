@@ -77,6 +77,25 @@ impl Storage {
 - **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` as u32 BigEndian + `field`).
 - **Strict Metadata Check**: Hash read operations (`hget`, `hmget`, `hgetall`, `hlen`) perform a strict metadata check. If the metadata in `string_db` is missing (due to expiration or key deletion), the command treats the hash as non-existent, even if orphaned fields remain in `hash_db`. This ensures consistent lazy expiration behavior.
 
+### List Operations
+
+List operations are implemented in `crates/storage/src/storage_list.rs`.
+
+```rust
+impl Storage {
+    pub async fn lpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, ...>;
+    pub async fn rpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, ...>;
+    pub async fn lpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, ...>;
+    pub async fn rpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, ...>;
+    pub async fn llen(&self, key: Bytes) -> Result<u64, ...>;
+    pub async fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Result<Vec<Bytes>, ...>;
+}
+```
+
+- **Metadata**: Stored in `string_db` using `ListMetaValue` (`len`, `head`, `tail`, `expire_time`).
+- **Elements**: Stored in `list_db` using `ListElementKey` (`user_key` + `sequence`).
+- **Deque Implementation**: Uses `head` and `tail` pointers to support efficient `push` and `pop` from both ends. `ListMetaValue` tracks the valid range of sequence numbers.
+
 ### Expiration Trait
 
 To ensure consistent TTL/expiration behavior across different value types, the storage layer implements an `Expirable` trait in `crates/storage/src/expirable.rs`.

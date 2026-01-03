@@ -13,8 +13,8 @@ Nimbis aims to be a cloud-native, cost-effective alternative to Redis for datase
 - **Version**: `v0.1.0`
 - **Core**: RESP protocol implementation, async server architecture.
 - **Storage**: Basic object storage backend via `SlateDB`.
-- **Commands**: `GET`, `SET`, `DEL`, `PING`, `EXISTS`, `EXPIRE`, `TTL`, `CONFIG GET`, `CONFIG SET`.
-- **Data Types**: String, Hash.
+- **Commands**: `GET`, `SET`, `DEL`, `PING`, `EXISTS`, `EXPIRE`, `TTL`, `CONFIG GET`, `CONFIG SET`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`.
+- **Data Types**: String, Hash, List.
 
 ## 🗺️ Development Phases
 
@@ -39,9 +39,9 @@ The goal of this phase is to make Nimbis usable for basic caching scenarios.
 Expand utility beyond simple key-value pairs.
 
 - **Lists**:
-  - [ ] `LPUSH`, `RPUSH`
-  - [ ] `LPOP`, `RPOP`
-  - [ ] `LRANGE`
+  - [x] `LPUSH`, `RPUSH`
+  - [x] `LPOP`, `RPOP`
+  - [x] `LRANGE`, `LLEN`
 - **Hashes**:
   - [x] `HSET`, `HGET`, `HGETALL`
   - [x] `HMGET`, `HLEN`

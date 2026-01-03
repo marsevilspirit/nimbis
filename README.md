@@ -11,6 +11,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 - **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `CONFIG GET`, `CONFIG SET`
 - **Hash Commands**: `HSET`, `HGET`, `HMGET`, `HGETALL`, `HLEN`
+- **List Commands**: `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates via `CONFIG SET`.
 

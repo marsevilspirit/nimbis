@@ -35,6 +35,13 @@ impl CmdTable {
 		inner.insert("HLEN".to_string(), Arc::new(super::HLenCmd::new()));
 		inner.insert("HMGET".to_string(), Arc::new(super::HMGetCmd::new()));
 		inner.insert("HGETALL".to_string(), Arc::new(super::HGetAllCmd::new()));
+		// list type cmd
+		inner.insert("LPUSH".to_string(), Arc::new(super::LPushCmd::new()));
+		inner.insert("RPUSH".to_string(), Arc::new(super::RPushCmd::new()));
+		inner.insert("LPOP".to_string(), Arc::new(super::LPopCmd::new()));
+		inner.insert("RPOP".to_string(), Arc::new(super::RPopCmd::new()));
+		inner.insert("LLEN".to_string(), Arc::new(super::LLenCmd::new()));
+		inner.insert("LRANGE".to_string(), Arc::new(super::LRangeCmd::new()));
 		// expire type cmd
 		inner.insert("EXPIRE".to_string(), Arc::new(super::ExpireCmd::default()));
 		inner.insert("TTL".to_string(), Arc::new(super::TtlCmd::default()));
