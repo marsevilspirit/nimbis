@@ -215,26 +215,28 @@ impl Storage {
 
 		for _ in 0..loop_count {
 			let seq = if is_left {
-				let s = meta_val.head;
-				meta_val.head += 1;
-				s
+				meta_val.head
 			} else {
-				meta_val.tail -= 1;
-				meta_val.tail
+				meta_val.tail - 1
 			};
 
 			let element_key = ListElementKey::new(key.clone(), seq);
 			// Get element
 			if let Some(val) = self.list_db.get(element_key.encode()).await? {
 				results.push(val);
+
+				// Only update meta and delete if element exists
+				if is_left {
+					meta_val.head += 1;
+				} else {
+					meta_val.tail -= 1;
+				}
+				meta_val.len -= 1;
+
+				self.list_db
+					.delete_with_options(element_key.encode(), &write_opts)
+					.await?;
 			}
-
-			// Delete element from list_db
-			self.list_db
-				.delete_with_options(element_key.encode(), &write_opts)
-				.await?;
-
-			meta_val.len -= 1;
 		}
 
 		// Update metadata
