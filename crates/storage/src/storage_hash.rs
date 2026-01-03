@@ -5,6 +5,7 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
+use crate::expirable::Expirable;
 use crate::hash::field_key::HashFieldKey;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;

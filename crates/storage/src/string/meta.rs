@@ -5,6 +5,7 @@ use bytes::BytesMut;
 
 use crate::data_type::DataType;
 use crate::error::DecoderError;
+use crate::expirable::Expirable;
 
 #[derive(Debug, PartialEq)]
 pub struct MetaKey {
@@ -63,33 +64,15 @@ impl HashMetaValue {
 		let expire_time = buf.get_u64();
 		Ok(Self::new_with_ttl(len, expire_time))
 	}
+}
 
-	pub fn is_expired(&self) -> bool {
-		if self.expire_time == 0 {
-			return false;
-		}
-		let now = chrono::Utc::now().timestamp_millis() as u64;
-		now >= self.expire_time
+impl Expirable for HashMetaValue {
+	fn expire_time(&self) -> u64 {
+		self.expire_time
 	}
 
-	pub fn expire_at(&mut self, timestamp: u64) {
+	fn set_expire_time(&mut self, timestamp: u64) {
 		self.expire_time = timestamp;
-	}
-
-	pub fn expire_after(&mut self, duration: std::time::Duration) {
-		let now = chrono::Utc::now().timestamp_millis() as u64;
-		self.expire_time = now + duration.as_millis() as u64;
-	}
-
-	pub fn remaining_ttl(&self) -> Option<std::time::Duration> {
-		if self.expire_time == 0 {
-			return None;
-		}
-		let now = chrono::Utc::now().timestamp_millis() as u64;
-		if now >= self.expire_time {
-			return Some(std::time::Duration::ZERO);
-		}
-		Some(std::time::Duration::from_millis(self.expire_time - now))
 	}
 }
 

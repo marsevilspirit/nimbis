@@ -3,6 +3,7 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
+use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::value::StringValue;

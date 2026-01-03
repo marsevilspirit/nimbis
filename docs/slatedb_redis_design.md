@@ -68,6 +68,8 @@ user_key
 *   **String DB**: Key=`myhash`, Value=`['h']` + `1`
 *   **Hash DB**: Key=`myhash` + `...field1...`, Value=`value1`
 
+**Note on Expiration:** Both `StringValue` and `HashMetaValue` implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`), which provides a unified interface for managing TTL/expiration logic. This ensures consistent expiration behavior across different data types and eliminates code duplication.
+
 ---
 
 ## Future Implementations (Tentative)

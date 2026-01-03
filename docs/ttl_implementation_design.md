@@ -30,6 +30,33 @@ Hashes use a "Master Expiration" pattern:
 - Individual fields in `hash_db` do NOT store their own expiration.
 - **Strict Check**: Any operation on a hash (`HGET`, `HMGET`, `HGETALL`, `HLEN`) MUST first check the metadata in `string_db`. If the metadata is missing or expired, the hash is treated as non-existent, even if orphaned fields remain in the `hash_db`.
 
+### Expirable Trait (Code Organization)
+To avoid code duplication across different value types, the expiration logic is centralized in the `Expirable` trait defined in [`crates/storage/src/expirable.rs`](../crates/storage/src/expirable.rs).
+
+#### Trait Definition
+```rust
+pub trait Expirable {
+    fn expire_time(&self) -> u64;
+    fn set_expire_time(&mut self, timestamp: u64);
+    
+    // Default implementations provided:
+    fn is_expired(&self) -> bool { ... }
+    fn expire_at(&mut self, timestamp: u64) { ... }
+    fn expire_after(&mut self, duration: Duration) { ... }
+    fn remaining_ttl(&self) -> Option<Duration> { ... }
+}
+```
+
+#### Implementations
+Both `StringValue` and `HashMetaValue` implement this trait:
+- **StringValue** ([`crates/storage/src/string/value.rs`](../crates/storage/src/string/value.rs)): Stores expiration alongside the string value.
+- **HashMetaValue** ([`crates/storage/src/string/meta.rs`](../crates/storage/src/string/meta.rs)): Stores expiration in the hash metadata.
+
+#### Benefits
+- **DRY Principle**: Expiration logic (`is_expired`, `expire_at`, `expire_after`, `remaining_ttl`) is defined once.
+- **Type Safety**: Trait bounds ensure consistent expiration behavior across all value types.
+- **Extensibility**: Future data types (e.g., Lists, Sets) can easily adopt expiration by implementing `Expirable`.
+
 ## 4. Key Logic Points
 
 ### Lazy Deletion
