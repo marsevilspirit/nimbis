@@ -17,7 +17,7 @@ impl Default for ExpireCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
-				name: "expire".to_string(),
+				name: "EXPIRE".to_string(),
 				arity: 3, // EXPIRE key seconds
 			},
 		}

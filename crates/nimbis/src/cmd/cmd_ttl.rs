@@ -17,7 +17,7 @@ impl Default for TtlCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
-				name: "ttl".to_string(),
+				name: "TTL".to_string(),
 				arity: 2, // TTL key
 			},
 		}
