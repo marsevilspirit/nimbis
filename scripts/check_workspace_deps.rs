@@ -95,19 +95,51 @@ fn 忽视_none<T>(opt: Option<T>) -> Option<T> {
 }
 
 fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Vec<String>) {
-	let mut names = Vec::new();
 	let is_workspace_root = section == "workspace.dependencies";
 
-	for (name, value) in table.iter() {
-		names.push(name.to_string());
-
-		// Check workspace = true (except for workspace.dependencies itself and local paths)
-		if !is_workspace_root {
+	// Validate workspace = true for all external dependencies first
+	if !is_workspace_root {
+		for (name, value) in table.iter() {
 			check_workspace_usage(path, section, name, value, issues);
 		}
 	}
 
-	check_order(path, section, &names, issues);
+	// Use raw text to identify blocks separated by blank lines
+	let content = fs::read_to_string(path).unwrap_or_default();
+	let section_header = if is_workspace_root {
+		"[workspace.dependencies]".to_string()
+	} else {
+		format!("[{}]", section)
+	};
+
+	if let Some(start) = content.find(&section_header) {
+		let section_content = &content[start + section_header.len()..];
+		// Find the end of this section (either next [header] or EOF)
+		let end = section_content.find("\n[").unwrap_or(section_content.len());
+		let active_content = &section_content[..end];
+
+		let mut current_block = Vec::new();
+		for line in active_content.lines() {
+			let line = line.trim();
+			if line.is_empty() {
+				if !current_block.is_empty() {
+					check_order(path, section, &current_block, issues);
+					current_block.clear();
+				}
+				continue;
+			}
+			if line.starts_with('#') {
+				continue;
+			}
+			if let Some(eq_idx) = line.find('=') {
+				let name = line[..eq_idx].trim().to_string();
+				current_block.push(name);
+			}
+		}
+		if !current_block.is_empty() {
+			check_order(path, section, &current_block, issues);
+		}
+	}
 }
 
 fn check_order(path: &Path, section: &str, names: &[String], issues: &mut Vec<String>) {
@@ -116,7 +148,7 @@ fn check_order(path: &Path, section: &str, names: &[String], issues: &mut Vec<St
 
 	if names != sorted_names {
 		issues.push(format!(
-			"{}:[{}] dependencies are not in alphabetical order",
+			"{}:[{}] dependencies within a block are not in alphabetical order",
 			path.display(),
 			section
 		));
