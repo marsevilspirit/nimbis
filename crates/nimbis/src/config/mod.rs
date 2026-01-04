@@ -4,12 +4,17 @@ use std::sync::OnceLock;
 use arc_swap::ArcSwap;
 use config::OnlineConfig;
 
-#[derive(Debug, OnlineConfig)]
+#[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub addr: String,
 	#[online_config(immutable)]
 	pub data_path: String,
+	// Support redis-benchmark
+	#[online_config(immutable)]
+	pub save: String,
+	#[online_config(immutable)]
+	pub appendonly: String,
 }
 
 impl Default for ServerConfig {
@@ -17,6 +22,8 @@ impl Default for ServerConfig {
 		Self {
 			addr: "127.0.0.1:6379".to_string(),
 			data_path: "./nimbis_data".to_string(),
+			save: "".to_string(),
+			appendonly: "no".to_string(),
 		}
 	}
 }

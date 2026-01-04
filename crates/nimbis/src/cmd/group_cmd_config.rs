@@ -161,10 +161,7 @@ impl Cmd for ConfigSetCommand {
 
 		// Load current config, clone it, and modify
 		let current = crate::config::SERVER_CONF.load();
-		let mut new_config = crate::config::ServerConfig {
-			addr: current.addr.clone(),
-			data_path: current.data_path.clone(),
-		};
+		let mut new_config = (**current).clone();
 
 		// Try to set the field
 		match new_config.set_field(&field_name, &value) {
