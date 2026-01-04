@@ -5,3 +5,7 @@ pub const LOGO: &str = r#"
  / /|  /   / /   / / / / / /  / /_/ /  / /   (__  )
 /_/ |_/   /_/   /_/ /_/ /_/  /_.___/  /_/   /____/
 "#;
+
+pub fn show_logo() {
+	println!("{}\tv{}", LOGO.trim_end(), env!("CARGO_PKG_VERSION"));
+}
