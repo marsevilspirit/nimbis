@@ -17,14 +17,16 @@ The core interface is defined by the `Storage` struct in `crates/storage/src/sto
 pub struct Storage {
     pub(crate) string_db: Arc<Db>,
     pub(crate) hash_db: Arc<Db>,
+    pub(crate) list_db: Arc<Db>,
     // TODO: add more type db
 }
 ```
 
 It leverages multiple `SlateDB` instances:
-- **String DB**: Stores actual String values AND Metadata for all other types.
-- **Hash DB**: Stores Hash fields.
-- **Unified Key Space**: `String DB` uses a type code prefix (e.g. `s`, `h`) in the Value to resolve type collisions.
+- **String DB**: Stores actual String values AND Metadata for all data types (Hash, List, etc.).
+- **Hash DB**: Stores Hash fields exclusively.
+- **List DB**: Stores List elements exclusively.
+- **Isolated Storage**: Each data type has its own database instance for better isolation and performance.
 
 ### String Operations
 
@@ -120,13 +122,16 @@ pub trait Expirable {
 
 - **StringValue** implements `Expirable` to manage expiration for String type keys.
 - **HashMetaValue** implements `Expirable` to manage expiration for Hash type keys.
+- **ListMetaValue** implements `Expirable` to manage expiration for List type keys.
 
 This design:
 - Eliminates code duplication (previously ~54 lines of identical expiration logic)
 - Ensures type-safe and consistent expiration behavior
-- Makes it easy to add expiration support to future data types (Lists, Sets, etc.)
+- Makes it easy to add expiration support to future data types (Sets, Sorted Sets, etc.)
 
-## Usage
+## Usage and Initialization
+
+### Storage Initialization
 
 The server initializes the storage in `Storage::open`:
 
@@ -135,4 +140,37 @@ The server initializes the storage in `Storage::open`:
 let storage = Storage::open("./nimbis_data").await?;
 ```
 
-Commands interact with the storage via `Arc<Storage>`.
+This method:
+1. Creates a local file system backend using the provided path
+2. Initializes three separate SlateDB instances for String, Hash, and List data
+3. Returns an `Arc<Storage>` that can be shared across threads
+
+### Directory Structure
+
+When you call `Storage::open("./nimbis_data")`, it creates the following structure:
+
+```
+nimbis_data/
+├── string/          # String key-value and metadata storage
+├── hash/            # Hash fields storage
+└── list/            # List elements storage
+```
+
+Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.).
+
+### Usage in Commands
+
+Commands interact with the storage via `Arc<Storage>`:
+
+```rust
+// Example: String operation
+let value = storage.get(key).await?;
+
+// Example: Hash operation
+storage.hset(key, field, value).await?;
+
+// Example: List operation
+storage.lpush(key, elements).await?;
+```
+
+The `Arc<Storage>` is cloned and passed to command handlers, ensuring thread-safe access to all databases.
