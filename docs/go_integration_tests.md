@@ -93,17 +93,9 @@ var _ = Describe("List Commands", func() {
 ```
 
 ### 3. Run Tests
-Run in the `tests` directory:
+Use the Justfile in the project root:
 ```bash
-go test -v
-```
-Or use the ginkgo CLI (if installed):
-```bash
-ginkgo -v
-```
-Or use the Justfile in the project root (if integration-test command is configured):
-```bash
-just test-int
+just e2e-test
 ```
 
 ## 4. Current Test Coverage
