@@ -10,15 +10,17 @@ pub struct Storage {
 	pub(crate) string_db: Arc<Db>,
 	pub(crate) hash_db: Arc<Db>,
 	pub(crate) list_db: Arc<Db>,
+	pub(crate) set_db: Arc<Db>,
 	// TODO: add more type db
 }
 
 impl Storage {
-	pub fn new(string_db: Arc<Db>, hash_db: Arc<Db>, list_db: Arc<Db>) -> Self {
+	pub fn new(string_db: Arc<Db>, hash_db: Arc<Db>, list_db: Arc<Db>, set_db: Arc<Db>) -> Self {
 		Self {
 			string_db,
 			hash_db,
 			list_db,
+			set_db,
 		}
 	}
 
@@ -44,11 +46,17 @@ impl Storage {
 			object_store.clone(),
 		)
 		.await?;
+		let set_db = Db::open(
+			slatedb::object_store::path::Path::from("/set"),
+			object_store.clone(),
+		)
+		.await?;
 
 		Ok(Self::new(
 			Arc::new(string_db),
 			Arc::new(hash_db),
 			Arc::new(list_db),
+			Arc::new(set_db),
 		))
 	}
 }

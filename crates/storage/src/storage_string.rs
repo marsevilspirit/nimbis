@@ -50,6 +50,14 @@ impl Storage {
 				}
 				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
 			}
+			Some(DataType::Set) => {
+				let meta_val = meta::SetMetaValue::decode(&bytes)?;
+				if meta_val.is_expired() {
+					self.del(key.encode()).await?;
+					return Ok(None);
+				}
+				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
+			}
 			_ => Err("WRONGTYPE Operation against a key holding the wrong kind of value".into()),
 		}
 	}
@@ -74,6 +82,9 @@ impl Storage {
 				Some(DataType::List) => {
 					let meta_val = meta::ListMetaValue::decode(&meta)?;
 					self.delete_list_elements(user_key, &meta_val).await?;
+				}
+				Some(DataType::Set) => {
+					self.delete_set_members(user_key).await?;
 				}
 				_ => {}
 			}
@@ -106,6 +117,9 @@ impl Storage {
 				DataType::List => {
 					let meta_val = meta::ListMetaValue::decode(&meta)?;
 					self.delete_list_elements(user_key, &meta_val).await?;
+				}
+				DataType::Set => {
+					self.delete_set_members(user_key).await?;
 				}
 				_ => {}
 			}
@@ -148,6 +162,11 @@ impl Storage {
 				}
 				Some(DataType::List) => {
 					let mut val = meta::ListMetaValue::decode(&bytes)?;
+					val.expire_at(expire_time);
+					val.encode()
+				}
+				Some(DataType::Set) => {
+					let mut val = meta::SetMetaValue::decode(&bytes)?;
 					val.expire_at(expire_time);
 					val.encode()
 				}
@@ -199,6 +218,7 @@ impl Storage {
 				Some(DataType::String) => StringValue::decode(&bytes)?.remaining_ttl(),
 				Some(DataType::Hash) => meta::HashMetaValue::decode(&bytes)?.remaining_ttl(),
 				Some(DataType::List) => meta::ListMetaValue::decode(&bytes)?.remaining_ttl(),
+				Some(DataType::Set) => meta::SetMetaValue::decode(&bytes)?.remaining_ttl(),
 				_ => return Ok(None),
 			};
 
@@ -228,6 +248,7 @@ impl Storage {
 				Some(DataType::String) => StringValue::decode(&bytes)?.is_expired(),
 				Some(DataType::Hash) => meta::HashMetaValue::decode(&bytes)?.is_expired(),
 				Some(DataType::List) => meta::ListMetaValue::decode(&bytes)?.is_expired(),
+				Some(DataType::Set) => meta::SetMetaValue::decode(&bytes)?.is_expired(),
 				_ => return Ok(false),
 			};
 
