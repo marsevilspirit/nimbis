@@ -4,7 +4,10 @@ This document describes the purpose and usage of all scripts in the `scripts/` d
 
 ## check_workspace_deps.rs
 
-**Purpose**: Verifies that all crate dependencies use `workspace = true` instead of hardcoded version numbers.
+**Purpose**: Verifies workspace integrity by checking that:
+1. All dependencies use `workspace = true` instead of hardcoded version numbers
+2. Dependencies are sorted alphabetically
+3. No tabs are used (spaces preferred)
 
 **Usage**:
 
@@ -12,18 +15,21 @@ This document describes the purpose and usage of all scripts in the `scripts/` d
 # Run via just command (recommended)
 just check-workspace
 
-# Or run directly
+# Or run directly with rust-script
 rust-script scripts/check_workspace_deps.rs
 ```
 
 **How it works**:
-1. Scans all `Cargo.toml` files in the `crates/` directory
+1. Scans `Cargo.toml` in root directory and all files in `crates/` directory
 2. Checks `[dependencies]` and `[dev-dependencies]` sections
-3. Reports any dependencies not using `workspace = true`
-4. Automatically skips local path dependencies (workspace members)
+3. Verifies dependencies use `workspace = true` pattern
+4. Checks alphabetical ordering of dependencies
+5. Validates formatting (no tabs)
+6. Automatically skips local path dependencies (workspace members)
 
 **Requirements**:
-- Requires `rust-script` to be installed: `cargo install rust-script`
+- `rust-script` installed: `cargo install rust-script`
+- Rust toolchain (as specified in `rust-toolchain.toml`)
 
 **CI Integration Example**:
 
