@@ -249,6 +249,56 @@ var _ = Describe("Type Conflict & Persistence", func() {
 			// Old list gone
 			Expect(rdb.LLen(ctx, key).Err()).To(HaveOccurred())
 		})
+
+	})
+
+	Context("Set Conflicts", func() {
+		It("should return WRONGTYPE when performing Set operations on a String key", func() {
+			key := "s_set_key"
+			// 1. Setup String
+			rdb.Set(ctx, key, "value", 0)
+
+			// 2. Set operations should fail
+			Expect(rdb.SAdd(ctx, key, "m1").Err()).To(HaveOccurred())
+			Expect(rdb.SAdd(ctx, key, "m1").Err().Error()).To(ContainSubstring("WRONGTYPE"))
+
+			Expect(rdb.SMembers(ctx, key).Err()).To(HaveOccurred())
+			Expect(rdb.SIsMember(ctx, key, "m1").Err()).To(HaveOccurred())
+			Expect(rdb.SRem(ctx, key, "m1").Err()).To(HaveOccurred())
+			Expect(rdb.SCard(ctx, key).Err()).To(HaveOccurred())
+		})
+
+		It("should return WRONGTYPE when performing String/Hash/List operations on a Set key", func() {
+			key := "set_other_key"
+			// 1. Setup Set
+			rdb.SAdd(ctx, key, "m1")
+
+			// 2. String operations should fail
+			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
+			Expect(rdb.Get(ctx, key).Err().Error()).To(ContainSubstring("WRONGTYPE"))
+
+			// 3. Hash operations should fail
+			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
+			Expect(rdb.HGet(ctx, key, "f").Err()).To(HaveOccurred())
+
+			// 4. List operations should fail
+			Expect(rdb.LPush(ctx, key, "v").Err()).To(HaveOccurred())
+			Expect(rdb.LPop(ctx, key).Err()).To(HaveOccurred())
+		})
+
+		It("should overwrite Set with SET", func() {
+			key := "set_overwrite_key"
+			rdb.SAdd(ctx, key, "m1")
+			Expect(rdb.SCard(ctx, key).Val()).To(Equal(int64(1)))
+
+			// Overwrite
+			rdb.Set(ctx, key, "new_val", 0)
+			expectVal, _ := rdb.Get(ctx, key).Result()
+			Expect(expectVal).To(Equal("new_val"))
+
+			// Old set gone
+			Expect(rdb.SCard(ctx, key).Err()).To(HaveOccurred())
+		})
 	})
 
 	Context("Edge Cases", func() {

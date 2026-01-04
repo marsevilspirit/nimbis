@@ -42,6 +42,15 @@ impl CmdTable {
 		inner.insert("RPOP".to_string(), Arc::new(super::RPopCmd::new()));
 		inner.insert("LLEN".to_string(), Arc::new(super::LLenCmd::new()));
 		inner.insert("LRANGE".to_string(), Arc::new(super::LRangeCmd::new()));
+		// set type cmd
+		inner.insert("SADD".to_string(), Arc::new(super::SaddCmd::new()));
+		inner.insert("SMEMBERS".to_string(), Arc::new(super::SmembersCmd::new()));
+		inner.insert(
+			"SISMEMBER".to_string(),
+			Arc::new(super::SismemberCmd::new()),
+		);
+		inner.insert("SREM".to_string(), Arc::new(super::SremCmd::new()));
+		inner.insert("SCARD".to_string(), Arc::new(super::ScardCmd::new()));
 		// expire type cmd
 		inner.insert("EXPIRE".to_string(), Arc::new(super::ExpireCmd::default()));
 		inner.insert("TTL".to_string(), Arc::new(super::TtlCmd::default()));

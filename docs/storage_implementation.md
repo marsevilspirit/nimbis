@@ -18,6 +18,7 @@ pub struct Storage {
     pub(crate) string_db: Arc<Db>,
     pub(crate) hash_db: Arc<Db>,
     pub(crate) list_db: Arc<Db>,
+    pub(crate) set_db: Arc<Db>,
     // TODO: add more type db
 }
 ```
@@ -26,6 +27,7 @@ It leverages multiple `SlateDB` instances:
 - **String DB**: Stores actual String values AND Metadata for all data types (Hash, List, etc.).
 - **Hash DB**: Stores Hash fields exclusively.
 - **List DB**: Stores List elements exclusively.
+- **Set DB**: Stores Set members exclusively.
 - **Isolated Storage**: Each data type has its own database instance for better isolation and performance.
 
 ### String Operations
@@ -98,6 +100,25 @@ impl Storage {
 - **Elements**: Stored in `list_db` using `ListElementKey` (`user_key` + `sequence`).
 - **Deque Implementation**: Uses `head` and `tail` pointers to support efficient `push` and `pop` from both ends. `ListMetaValue` tracks the valid range of sequence numbers.
 
+### Set Operations
+
+Set operations are implemented in `crates/storage/src/storage_set.rs`.
+
+```rust
+impl Storage {
+    pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, ...>;
+    pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, ...>;
+    pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, ...>;
+    pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, ...>;
+    pub async fn scard(&self, key: Bytes) -> Result<u64, ...>;
+}
+```
+
+- **Metadata**: Stored in `string_db` using `SetMetaValue` (`len`, `expire_time`).
+- **Members**: Stored in `set_db` using `SetMemberKey` (`user_key` + `len(member)` + `member`).
+- **Efficiency**: `SCARD` works in O(1) by reading metadata. `SMEMBERS` scans a range in `set_db`.
+
+
 ### Expiration Trait
 
 To ensure consistent TTL/expiration behavior across different value types, the storage layer implements an `Expirable` trait in `crates/storage/src/expirable.rs`.
@@ -123,6 +144,7 @@ pub trait Expirable {
 - **StringValue** implements `Expirable` to manage expiration for String type keys.
 - **HashMetaValue** implements `Expirable` to manage expiration for Hash type keys.
 - **ListMetaValue** implements `Expirable` to manage expiration for List type keys.
+- **SetMetaValue** implements `Expirable` to manage expiration for Set type keys.
 
 This design:
 - Eliminates code duplication (previously ~54 lines of identical expiration logic)
@@ -153,7 +175,8 @@ When you call `Storage::open("./nimbis_data")`, it creates the following structu
 nimbis_data/
 ├── string/          # String key-value and metadata storage
 ├── hash/            # Hash fields storage
-└── list/            # List elements storage
+├── list/            # List elements storage
+└── set/             # Set members storage
 ```
 
 Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.).
