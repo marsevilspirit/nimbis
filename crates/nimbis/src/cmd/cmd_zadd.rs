@@ -40,12 +40,11 @@ impl Cmd for ZAddCmd {
 		let key = args[0].clone();
 		let remaining_args = &args[1..];
 
-        if remaining_args.len() % 2 != 0 {
-            return RespValue::error("ERR syntax error");
-        }
+		if !remaining_args.len().is_multiple_of(2) {
+			return RespValue::error("ERR syntax error");
+		}
 
-
-        let mut elements = Vec::with_capacity(remaining_args.len() / 2);
+		let mut elements = Vec::with_capacity(remaining_args.len() / 2);
 		for chunk in remaining_args.chunks_exact(2) {
 			let score_str = String::from_utf8_lossy(&chunk[0]);
 			let score = match score_str.parse::<f64>() {
