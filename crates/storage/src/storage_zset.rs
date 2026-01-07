@@ -1,6 +1,7 @@
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -125,6 +126,9 @@ impl Storage {
 		};
 		let put_opts = PutOptions::default();
 
+		// Use WriteBatch to ensure atomicity of all zset operations
+		let mut batch = WriteBatch::new();
+
 		for (score, member) in elements {
 			let member_key = MemberKey::new(key.clone(), member.clone());
 			let encoded_member_key = member_key.encode();
@@ -138,32 +142,21 @@ impl Storage {
 				let old_score =
 					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
 				if old_score != score {
+					// 1. Delete old ScoreKey
 					let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
-					self.zset_db
-						.delete_with_options(old_score_key.encode(), &write_opts)
-						.await?;
+					batch.delete(old_score_key.encode());
 
 					// 2. Add new ScoreKey
 					let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
-					self.zset_db
-						.put_with_options(
-							new_score_key.encode(),
-							Bytes::new(),
-							&put_opts,
-							&write_opts,
-						)
-						.await?;
+					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
 
 					// 3. Update MemberKey
 					let encoded_score = ScoreKey::encode_score(score);
-					self.zset_db
-						.put_with_options(
-							encoded_member_key.clone(),
-							Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
-							&put_opts,
-							&write_opts,
-						)
-						.await?;
+					batch.put_with_options(
+						encoded_member_key.clone(),
+						Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
+						&put_opts,
+					);
 				}
 			} else {
 				// New member
@@ -171,22 +164,20 @@ impl Storage {
 
 				// Add MemberKey
 				let encoded_score = ScoreKey::encode_score(score);
-				self.zset_db
-					.put_with_options(
-						encoded_member_key,
-						Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
-						&put_opts,
-						&write_opts,
-					)
-					.await?;
+				batch.put_with_options(
+					encoded_member_key,
+					Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
+					&put_opts,
+				);
 
 				// Add ScoreKey
 				let score_key = ScoreKey::new(key.clone(), score, member);
-				self.zset_db
-					.put_with_options(score_key.encode(), Bytes::new(), &put_opts, &write_opts)
-					.await?;
+				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
+
+		// Execute all operations atomically
+		self.zset_db.write(batch).await?;
 
 		if added_count > 0 {
 			meta_val.len += added_count;
@@ -318,27 +309,29 @@ impl Storage {
 			await_durable: false,
 		};
 
+		// Use WriteBatch to ensure atomicity of all delete operations
+		let mut batch = WriteBatch::new();
+
 		for member in members {
 			let member_key = MemberKey::new(key.clone(), member.clone());
 			let encoded_member_key = member_key.encode();
 
 			if let Some(val) = self.zset_db.get(encoded_member_key.clone()).await? {
 				// Delete MemberKey
-				self.zset_db
-					.delete_with_options(encoded_member_key, &write_opts)
-					.await?;
+				batch.delete(encoded_member_key);
 
 				// Delete ScoreKey
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
 				let score = ScoreKey::decode_score(encoded_score);
 				let score_key = ScoreKey::new(key.clone(), score, member);
-				self.zset_db
-					.delete_with_options(score_key.encode(), &write_opts)
-					.await?;
+				batch.delete(score_key.encode());
 
 				removed_count += 1;
 			}
 		}
+
+		// Execute all delete operations atomically
+		self.zset_db.write(batch).await?;
 
 		if removed_count > 0 {
 			meta_val.len -= removed_count;
