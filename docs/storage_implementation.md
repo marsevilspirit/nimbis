@@ -19,7 +19,7 @@ pub struct Storage {
     pub(crate) hash_db: Arc<Db>,
     pub(crate) list_db: Arc<Db>,
     pub(crate) set_db: Arc<Db>,
-    // TODO: add more type db
+    pub(crate) zset_db: Arc<Db>,
 }
 ```
 
@@ -28,6 +28,7 @@ It leverages multiple `SlateDB` instances:
 - **Hash DB**: Stores Hash fields exclusively.
 - **List DB**: Stores List elements exclusively.
 - **Set DB**: Stores Set members exclusively.
+- **ZSet DB**: Stores Sorted Set members and score indices exclusively.
 - **Isolated Storage**: Each data type has its own database instance for better isolation and performance.
 
 ### String Operations
@@ -118,6 +119,28 @@ impl Storage {
 - **Members**: Stored in `set_db` using `SetMemberKey` (`user_key` + `len(member)` + `member`).
 - **Efficiency**: `SCARD` works in O(1) by reading metadata. `SMEMBERS` scans a range in `set_db`.
 
+### Sorted Set (ZSet) Operations
+
+Sorted Set operations are implemented in `crates/storage/src/storage_zset.rs`.
+
+```rust
+impl Storage {
+    pub async fn zadd(&self, key: Bytes, members: Vec<(f64, Bytes)>) -> Result<u64, ...>;
+    pub async fn zrange(&self, key: Bytes, start: i64, stop: i64, with_scores: bool) -> Result<Vec<ZRangeMember>, ...>;
+    pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, ...>;
+    pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, ...>;
+    pub async fn zcard(&self, key: Bytes) -> Result<u64, ...>;
+}
+```
+
+- **Metadata**: Stored in `string_db` using `ZSetMetaValue` (`member_count`, `expire_time`).
+- **Binary Format (Metadata)**:
+  - `[DataType::ZSet (1 byte)] [member_count (8 bytes BE)] [expire_time (8 bytes BE)]`
+- **Dual Index Structure**:
+  - **MemberKey**: `user_key` + `len(member)` as u32 BigEndian + `member` → stores the score (8 bytes f64 BE)
+  - **ScoreKey**: `user_key` + `score` (8 bytes f64 BE) + `member` → empty value (for ordered iteration)
+- **Atomic Operations**: Uses `WriteBatch` to ensure atomicity when updating both indices and metadata.
+- **Score Encoding**: Scores are encoded as big-endian f64 bytes to maintain correct lexicographic ordering in the key-value store.
 
 ### Expiration Trait
 
@@ -145,6 +168,7 @@ pub trait Expirable {
 - **HashMetaValue** implements `Expirable` to manage expiration for Hash type keys.
 - **ListMetaValue** implements `Expirable` to manage expiration for List type keys.
 - **SetMetaValue** implements `Expirable` to manage expiration for Set type keys.
+- **ZSetMetaValue** implements `Expirable` to manage expiration for Sorted Set type keys.
 
 This design:
 - Eliminates code duplication (previously ~54 lines of identical expiration logic)
@@ -164,7 +188,7 @@ let storage = Storage::open("./nimbis_data").await?;
 
 This method:
 1. Creates a local file system backend using the provided path
-2. Initializes three separate SlateDB instances for String, Hash, and List data
+2. Initializes separate SlateDB instances for String, Hash, List, Set, and ZSet data
 3. Returns an `Arc<Storage>` that can be shared across threads
 
 ### Directory Structure
@@ -176,7 +200,8 @@ nimbis_data/
 ├── string/          # String key-value and metadata storage
 ├── hash/            # Hash fields storage
 ├── list/            # List elements storage
-└── set/             # Set members storage
+├── set/             # Set members storage
+└── zset/            # Sorted Set members and score indices
 ```
 
 Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.).
@@ -194,6 +219,9 @@ storage.hset(key, field, value).await?;
 
 // Example: List operation
 storage.lpush(key, elements).await?;
+
+// Example: ZSet operation
+storage.zadd(key, vec![(1.0, member1), (2.0, member2)]).await?;
 ```
 
 The `Arc<Storage>` is cloned and passed to command handlers, ensuring thread-safe access to all databases.

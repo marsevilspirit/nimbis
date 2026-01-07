@@ -143,6 +143,16 @@ The following table lists the currently implemented Redis commands and their sta
 | **List**    | `RPOP`       | `-2`  | Remove and get the last element in a list.          |
 | **List**    | `LLEN`       | `2`   | Get the length of a list.                           |
 | **List**    | `LRANGE`     | `4`   | Get a range of elements from a list.                |
+| **Set**     | `SADD`       | `-3`  | Add one or more members to a set.                   |
+| **Set**     | `SREM`       | `-3`  | Remove one or more members from a set.              |
+| **Set**     | `SMEMBERS`   | `2`   | Get all members in a set.                           |
+| **Set**     | `SISMEMBER`  | `3`   | Check if a member is in a set.                      |
+| **Set**     | `SCARD`      | `2`   | Get the number of members in a set.                 |
+| **ZSet**    | `ZADD`       | `-4`  | Add members with scores to a sorted set.            |
+| **ZSet**    | `ZRANGE`     | `-4`  | Get members in a sorted set by score range.         |
+| **ZSet**    | `ZSCORE`     | `3`   | Get the score of a member in a sorted set.          |
+| **ZSet**    | `ZREM`       | `-3`  | Remove members from a sorted set.                   |
+| **ZSet**    | `ZCARD`      | `2`   | Get the number of members in a sorted set.          |
 | **Config**  | `CONFIG GET` | `-3`  | Get the value of a configuration parameter.         |
 | **Config**  | `CONFIG SET` | `4`   | Set a configuration parameter to a given value.     |
 

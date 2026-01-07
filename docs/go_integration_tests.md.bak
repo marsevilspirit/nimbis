@@ -136,19 +136,8 @@ This suite ensures Nimbis behaves correctly (like Redis) when multiple data type
   - `HSET` on an existing String key -> Returns `WRONGTYPE` error (does not overwrite).
   - `GET` on an existing Hash key -> Returns `WRONGTYPE` error.
 - **Type Overwrite (SET)**:
-- **String vs List Conflicts**:
-  - `LPUSH` on an existing String key -> Returns `WRONGTYPE` error.
-  - `GET` on an existing List key -> Returns `WRONGTYPE` error.
-- **String vs Set Conflicts**:
-  - `SADD` on an existing String key -> Returns `WRONGTYPE` error.
-  - `GET` on an existing Set key -> Returns `WRONGTYPE` error.
-- **String vs ZSet Conflicts**:
-  - `ZADD` on an existing String key -> Returns `WRONGTYPE` error.
-  - `GET` on an existing ZSet key -> Returns `WRONGTYPE` error.
-- **Cross-Type Conflicts**:
-  - Hash/List/Set/ZSet operations on keys of different types return `WRONGTYPE` errors.
-  - `SET` command forces overwrite of any existing key type (Hash, List, Set, ZSet).
-  - Verifies that when a complex type is overwritten by a String, the old data structures are properly cleaned up and inaccessible.
+  - `SET` command forces overwrite of any existing key type (including Hash).
+  - Verifies that when a Hash is overwritten by a String, the old Hash fields are properly cleaned up and inaccessible.
 - **DEL and Type Reuse**:
   - Verifies a key can be reused for a different type after being deleted (e.g., String -> DEL -> Hash).
 - **Edge Cases**:

@@ -13,6 +13,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 - **Hash Commands**: `HSET`, `HGET`, `HMGET`, `HGETALL`, `HLEN`
 - **List Commands**: `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`
 - **Set Commands**: `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`, `SCARD`
+- **Sorted Set Commands**: `ZADD`, `ZRANGE`, `ZSCORE`, `ZREM`, `ZCARD`
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates via `CONFIG SET`.
 
