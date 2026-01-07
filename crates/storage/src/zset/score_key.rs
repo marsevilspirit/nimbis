@@ -70,3 +70,83 @@ impl ScoreKey {
 		f64::from_bits(bits)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case(f64::NEG_INFINITY)]
+	#[case(-1e308)]
+	#[case(-1000.0)]
+	#[case(-1.0)]
+	#[case(-0.1)]
+	#[case(-0.0)]
+	#[case(0.0)]
+	#[case(0.1)]
+	#[case(1.0)]
+	#[case(1000.0)]
+	#[case(1e308)]
+	#[case(f64::INFINITY)]
+	#[case(f64::MIN)]
+	#[case(f64::MAX)]
+	fn test_encode_decode_roundtrip(#[case] score: f64) {
+		let encoded = ScoreKey::encode_score(score);
+		let decoded = ScoreKey::decode_score(encoded);
+		assert_eq!(score, decoded);
+	}
+
+	#[test]
+	fn test_byte_sortable_order() {
+		// Verify encoded values maintain correct ascending order
+		let scores = vec![
+			f64::NEG_INFINITY,
+			-1000.0,
+			-100.0,
+			-1.0,
+			-0.5,
+			0.0,
+			0.5,
+			1.0,
+			100.0,
+			1000.0,
+			f64::INFINITY,
+		];
+
+		let encoded: Vec<u64> = scores.iter().map(|&s| ScoreKey::encode_score(s)).collect();
+
+		for i in 1..encoded.len() {
+			assert!(
+				encoded[i - 1] < encoded[i],
+				"Order broken: {} ({}) >= {} ({})",
+				scores[i - 1],
+				encoded[i - 1],
+				scores[i],
+				encoded[i]
+			);
+		}
+	}
+
+	#[rstest]
+	#[case(0.0)]
+	#[case(1.0)]
+	#[case(100.0)]
+	#[case(f64::MAX)]
+	#[case(f64::INFINITY)]
+	fn test_positive_has_msb_set(#[case] score: f64) {
+		let encoded = ScoreKey::encode_score(score);
+		assert_ne!(encoded & 0x8000_0000_0000_0000, 0);
+	}
+
+	#[rstest]
+	#[case(-1.0)]
+	#[case(-100.0)]
+	#[case(f64::MIN)]
+	#[case(f64::NEG_INFINITY)]
+	fn test_negative_has_msb_unset(#[case] score: f64) {
+		let encoded = ScoreKey::encode_score(score);
+		assert_eq!(encoded & 0x8000_0000_0000_0000, 0);
+	}
+}
