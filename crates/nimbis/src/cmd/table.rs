@@ -6,6 +6,7 @@ use super::ConfigGroupCmd;
 use super::DelCmd;
 use super::ExistsCmd;
 use super::ExpireCmd;
+use super::FlushDbCmd;
 use super::GetCmd;
 use super::HGetAllCmd;
 use super::HGetCmd;
@@ -81,6 +82,8 @@ impl CmdTable {
 		inner.insert("TTL".to_string(), Arc::new(TtlCmd::default()));
 		// config type cmd
 		inner.insert("CONFIG".to_string(), Arc::new(ConfigGroupCmd::new()));
+		// other type cmd
+		inner.insert("FLUSHDB".to_string(), Arc::new(FlushDbCmd::new()));
 		Self { inner }
 	}
 

@@ -44,17 +44,37 @@ impl Storage {
 		&self,
 		key: Bytes,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let range = key.as_ref()..;
+		// Scan range starts with len(user_key) + user_key
+		let range_start = {
+			let mut p = BytesMut::with_capacity(2 + key.len());
+			p.put_u16(key.len() as u16);
+			p.extend_from_slice(&key);
+			p.freeze()
+		};
+		let range = range_start.as_ref()..;
 		let mut stream = self.zset_db.scan(range).await?;
 		let mut keys_to_delete = Vec::new();
 
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
-			if !k.starts_with(&key) {
+			// Check if key matches len(user_key) + user_key
+			// To avoid allocations, check manually
+			if k.len() < 2 + key.len() {
+				break;
+			}
+			let k_len_prefix = u16::from_be_bytes(k[0..2].try_into().unwrap());
+			if k_len_prefix as usize != key.len() {
+				// Length mismatch means different key (since SlateDB is sorted)
+				// Actually, if we just scan, subsequent keys might have different lengths.
+				// But we require strict prefix match of (len + key).
+				// If lengths differ, it's not our key.
+				break;
+			}
+			if k[2..2 + key.len()] != key[..] {
 				break;
 			}
 			// Just delete everything starting with the key in zset_db
-			// This covers both MemberKey and ScoreKey because they both start with user_key
+			// This covers both MemberKey and ScoreKey because they both start with len + user_key
 			keys_to_delete.push(k);
 		}
 
@@ -221,7 +241,8 @@ impl Storage {
 			// Key format: user_key + b'S' + ...
 
 			let prefix = {
-				let mut p = BytesMut::with_capacity(key.len() + 1);
+				let mut p = BytesMut::with_capacity(2 + key.len() + 1);
+				p.put_u16(key.len() as u16);
 				p.extend_from_slice(&key);
 				p.put_u8(b'S');
 				p.freeze()
@@ -241,14 +262,14 @@ impl Storage {
 
 				if current_idx >= start && current_idx <= stop {
 					// Extract member and score
-					// Key: user_key + b'S' + score (8 bytes) + member
-					let header_len = key.len() + 1 + 8;
+					// Key: len(user_key) + user_key + b'S' + score (8 bytes) + member
+					let header_len = 2 + key.len() + 1 + 8;
 					if k.len() > header_len {
 						let member = k.slice(header_len..);
 						result.push(member);
 						if with_scores {
 							let score_bytes: [u8; 8] =
-								k[key.len() + 1..key.len() + 9].try_into()?;
+								k[2 + key.len() + 1..2 + key.len() + 9].try_into()?;
 							let encoded_score = u64::from_be_bytes(score_bytes);
 							let score = ScoreKey::decode_score(encoded_score);
 							// Format score as string? Or return bytes of string representation?
@@ -454,6 +475,37 @@ mod tests {
 		let members = storage.zrange(key.clone(), 0, -1, false).await.unwrap();
 		assert_eq!(members.len(), 1);
 		assert_eq!(members[0], Bytes::from("two"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+	#[tokio::test]
+	async fn test_zset_collision_repro() {
+		let (storage, path) = get_storage().await;
+		let key1 = Bytes::from("user1");
+
+		// 1. Add to user1
+		storage
+			.zadd(key1.clone(), vec![(1.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+
+		// 2. Simulate FLUSHDB
+		storage.flush_all().await.unwrap();
+
+		// 3. Re-Add to user1
+		storage
+			.zadd(key1.clone(), vec![(1.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+
+		// 4. ZCard user1
+		let card = storage.zcard(key1.clone()).await.unwrap();
+		assert_eq!(card, 1, "ZCard user1 should be 1");
+
+		// 5. ZRange user1
+		let members = storage.zrange(key1.clone(), 0, -1, false).await.unwrap();
+		assert_eq!(members.len(), 1, "ZRange user1 should have 1 member");
+		assert_eq!(members[0], Bytes::from("m1"));
 
 		let _ = std::fs::remove_dir_all(path);
 	}

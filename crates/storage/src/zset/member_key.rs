@@ -17,10 +17,13 @@ impl MemberKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: user_key + b'M' + len(member) (u32 BE) + member
+		// Key format: len(user_key) (u16 BE) + user_key + b'M' + len(member) (u32 BE) + member
+		let user_key_len = self.user_key.len() as u16;
 		let member_len = self.member.len() as u32;
 
-		let mut bytes = BytesMut::with_capacity(self.user_key.len() + 1 + 4 + self.member.len());
+		let mut bytes =
+			BytesMut::with_capacity(2 + self.user_key.len() + 1 + 4 + self.member.len());
+		bytes.put_u16(user_key_len);
 		bytes.extend_from_slice(&self.user_key);
 		bytes.put_u8(b'M');
 		bytes.put_u32(member_len);

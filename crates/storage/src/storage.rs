@@ -73,4 +73,34 @@ impl Storage {
 			Arc::new(zset_db),
 		))
 	}
+
+	pub async fn flush_all(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+		// Iterate over all DBs and delete all keys
+		// Since we don't have atomic flush_all, we do best effort sequential
+		// Scanning and deleting everything is slow but correct for tests.
+		// For production this is blocking and bad, but it's FLUSHDB.
+
+		// Helper to clear a DB
+		async fn clear_db(
+			db: &slatedb::Db,
+		) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+			let scan_range = ..;
+			let mut stream = db.scan::<bytes::Bytes, _>(scan_range).await?;
+			let write_opts = slatedb::config::WriteOptions {
+				await_durable: false,
+			};
+			while let Some(kv) = stream.next().await? {
+				db.delete_with_options(kv.key, &write_opts).await?;
+			}
+			Ok(())
+		}
+
+		clear_db(&self.string_db).await?;
+		clear_db(&self.hash_db).await?;
+		clear_db(&self.list_db).await?;
+		clear_db(&self.set_db).await?;
+		clear_db(&self.zset_db).await?;
+
+		Ok(())
+	}
 }

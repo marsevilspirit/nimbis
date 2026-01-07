@@ -17,10 +17,11 @@ impl SetMemberKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: user_key + len(member) (u32 BE) + member
+		// Key format: len(user_key) (u16 BE) + user_key + len(member) (u32 BE) + member
 		let member_len = self.member.len() as u32;
 
-		let mut bytes = BytesMut::with_capacity(self.user_key.len() + 4 + self.member.len());
+		let mut bytes = BytesMut::with_capacity(2 + self.user_key.len() + 4 + self.member.len());
+		bytes.put_u16(self.user_key.len() as u16);
 		bytes.extend_from_slice(&self.user_key);
 		bytes.put_u32(member_len);
 		bytes.extend_from_slice(&self.member);
@@ -35,8 +36,8 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("user", "member", b"user\x00\x00\x00\x06member")]
-	#[case("key", "m", b"key\x00\x00\x00\x01m")]
+	#[case("user", "member", b"\x00\x04user\x00\x00\x00\x06member")]
+	#[case("key", "m", b"\x00\x03key\x00\x00\x00\x01m")]
 	fn test_set_member_key_encode(
 		#[case] key: &str,
 		#[case] member: &str,

@@ -20,7 +20,10 @@ impl MetaKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		self.user_key.clone()
+		let mut buf = BytesMut::with_capacity(2 + self.user_key.len());
+		buf.put_u16(self.user_key.len() as u16);
+		buf.extend_from_slice(&self.user_key);
+		buf.freeze()
 	}
 }
 
@@ -256,8 +259,8 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("mykey", b"mykey")]
-	#[case("", b"")]
+	#[case("mykey", b"\x00\x05mykey")]
+	#[case("", b"\x00\x00")]
 	fn test_meta_key_encode(#[case] key: &str, #[case] expected: &[u8]) {
 		let meta_key = MetaKey::new(Bytes::copy_from_slice(key.as_bytes()));
 		assert_eq!(&meta_key.encode()[..], expected);

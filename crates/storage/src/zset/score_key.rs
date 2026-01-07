@@ -39,7 +39,11 @@ impl ScoreKey {
 			!bits
 		};
 
-		let mut bytes = BytesMut::with_capacity(self.user_key.len() + 1 + 8 + self.member.len());
+		let user_key_len = self.user_key.len() as u16;
+
+		let mut bytes =
+			BytesMut::with_capacity(2 + self.user_key.len() + 1 + 8 + self.member.len());
+		bytes.put_u16(user_key_len);
 		bytes.extend_from_slice(&self.user_key);
 		bytes.put_u8(b'S');
 		bytes.put_u64(encoded_score);

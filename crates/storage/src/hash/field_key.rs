@@ -17,10 +17,11 @@ impl HashFieldKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: user_key + len(field) (u32 BE) + field
+		// Key format: len(user_key) (u16 BE) + user_key + len(field) (u32 BE) + field
 		let field_len = self.field.len() as u32;
 
-		let mut bytes = BytesMut::with_capacity(self.user_key.len() + 4 + self.field.len());
+		let mut bytes = BytesMut::with_capacity(2 + self.user_key.len() + 4 + self.field.len());
+		bytes.put_u16(self.user_key.len() as u16);
 		bytes.extend_from_slice(&self.user_key);
 		bytes.put_u32(field_len);
 		bytes.extend_from_slice(&self.field);
@@ -35,8 +36,8 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("user", "field", b"user\x00\x00\x00\x05field")]
-	#[case("key", "f", b"key\x00\x00\x00\x01f")]
+	#[case("user", "field", b"\x00\x04user\x00\x00\x00\x05field")]
+	#[case("key", "f", b"\x00\x03key\x00\x00\x00\x01f")]
 	fn test_hash_field_key_encode(#[case] key: &str, #[case] field: &str, #[case] expected: &[u8]) {
 		let field_key = HashFieldKey::new(
 			Bytes::copy_from_slice(key.as_bytes()),
