@@ -32,12 +32,7 @@ impl ScoreKey {
 		// Negative numbers -> 0x00... to 0x7F... (ascending)
 		// Positive numbers -> 0x80... to 0xFF... (ascending)
 
-		let bits = self.score.to_bits();
-		let encoded_score = if self.score >= 0.0 {
-			bits | 0x8000_0000_0000_0000
-		} else {
-			!bits
-		};
+		let encoded_score = Self::encode_score(self.score);
 
 		let user_key_len = self.user_key.len() as u16;
 
@@ -51,6 +46,21 @@ impl ScoreKey {
 		bytes.freeze()
 	}
 
+	/// Encode an f64 score into a u64 for byte-sortable storage.
+	/// IEEE 754 floats don't sort correctly when treated as bytes (especially negative numbers).
+	/// This flips bits to ensure correct byte-level ordering:
+	/// - Positive numbers: set sign bit to 1
+	/// - Negative numbers: flip all bits
+	pub fn encode_score(score: f64) -> u64 {
+		let bits = score.to_bits();
+		if score >= 0.0 {
+			bits | 0x8000_0000_0000_0000
+		} else {
+			!bits
+		}
+	}
+
+	/// Decode a u64 back into an f64 score.
 	pub fn decode_score(encoded: u64) -> f64 {
 		let bits = if (encoded & 0x8000_0000_0000_0000) != 0 {
 			encoded & !0x8000_0000_0000_0000

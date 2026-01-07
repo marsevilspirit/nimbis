@@ -155,12 +155,7 @@ impl Storage {
 						.await?;
 
 					// 3. Update MemberKey
-					let bits = score.to_bits();
-					let encoded_score = if score >= 0.0 {
-						bits | 0x8000_0000_0000_0000
-					} else {
-						!bits
-					};
+					let encoded_score = ScoreKey::encode_score(score);
 					self.zset_db
 						.put_with_options(
 							encoded_member_key.clone(),
@@ -175,12 +170,7 @@ impl Storage {
 				added_count += 1;
 
 				// Add MemberKey
-				let bits = score.to_bits();
-				let encoded_score = if score >= 0.0 {
-					bits | 0x8000_0000_0000_0000
-				} else {
-					!bits
-				};
+				let encoded_score = ScoreKey::encode_score(score);
 				self.zset_db
 					.put_with_options(
 						encoded_member_key,
