@@ -30,7 +30,8 @@ impl Storage {
 			}
 			let meta_val = ZSetMetaValue::decode(&meta_bytes)?;
 			if meta_val.is_expired() {
-				self.del(key.clone()).await?;
+				self.delete_zset_content(key.clone()).await?;
+				self.string_db.delete(meta_key.encode()).await?;
 				return Ok(None);
 			}
 			Ok(Some(meta_val))
