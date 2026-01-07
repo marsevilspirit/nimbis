@@ -41,8 +41,8 @@ pub fn init() {
 				.with_timer(CustomTimeFormat)
 				.with_target(true)
 				.with_thread_ids(true)
-				.with_line_number(true)
-				.with_file(true),
+				.with_line_number(false)
+				.with_file(false),
 		)
 		.init();
 }
