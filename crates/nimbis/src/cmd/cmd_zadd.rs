@@ -45,7 +45,7 @@ impl Cmd for ZAddCmd {
         }
 
 
-		let mut elements = Vec::new();
+        let mut elements = Vec::with_capacity(remaining_args.len() / 2);
 		for chunk in remaining_args.chunks_exact(2) {
 			let score_str = String::from_utf8_lossy(&chunk[0]);
 			let score = match score_str.parse::<f64>() {
