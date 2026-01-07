@@ -149,28 +149,6 @@ impl Storage {
 							&write_opts,
 						)
 						.await?;
-					// Actually, MemberKey value should just store the raw bits of f64 or the encoded u64?
-					// Let's store the raw bits (u64 BE) of the encoded score for consistency, so we can easily clean up ScoreKey.
-					// Wait, ScoreKey uses bit-flipped encoding. MemberKey -> ScoreKey lookup needs that encoded value.
-					// So MemberKey value = encoded score (u64 BE).
-
-					// Let's reconstruct consistent encoding.
-					// ScoreKey logic:
-					let bits = score.to_bits();
-					let encoded_score = if score >= 0.0 {
-						bits | 0x8000_0000_0000_0000
-					} else {
-						!bits
-					};
-
-					self.zset_db
-						.put_with_options(
-							encoded_member_key,
-							Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
-							&put_opts,
-							&write_opts,
-						)
-						.await?;
 				}
 			} else {
 				// New member
