@@ -26,6 +26,11 @@ use super::SismemberCmd;
 use super::SmembersCmd;
 use super::SremCmd;
 use super::TtlCmd;
+use super::ZAddCmd;
+use super::ZCardCmd;
+use super::ZRangeCmd;
+use super::ZRemCmd;
+use super::ZScoreCmd;
 
 pub struct CmdTable {
 	inner: HashMap<String, Arc<dyn Cmd>>,
@@ -57,9 +62,14 @@ impl CmdTable {
 		inner.insert("LPUSH".to_string(), Arc::new(LPushCmd::new()));
 		inner.insert("RPUSH".to_string(), Arc::new(RPushCmd::new()));
 		inner.insert("LPOP".to_string(), Arc::new(LPopCmd::new()));
-		inner.insert("RPOP".to_string(), Arc::new(RPopCmd::new()));
+		inner.insert("ZADD".to_string(), Arc::new(ZAddCmd::new()));
+		inner.insert("ZRANGE".to_string(), Arc::new(ZRangeCmd::new()));
+		inner.insert("ZSCORE".to_string(), Arc::new(ZScoreCmd::new()));
+		inner.insert("ZREM".to_string(), Arc::new(ZRemCmd::new()));
+		inner.insert("ZCARD".to_string(), Arc::new(ZCardCmd::new()));
 		inner.insert("LLEN".to_string(), Arc::new(LLenCmd::new()));
 		inner.insert("LRANGE".to_string(), Arc::new(LRangeCmd::new()));
+		inner.insert("RPOP".to_string(), Arc::new(RPopCmd::new()));
 		// set type cmd
 		inner.insert("SADD".to_string(), Arc::new(SaddCmd::new()));
 		inner.insert("SMEMBERS".to_string(), Arc::new(SmembersCmd::new()));

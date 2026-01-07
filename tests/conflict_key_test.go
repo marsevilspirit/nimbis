@@ -338,4 +338,53 @@ var _ = Describe("Type Conflict & Persistence", func() {
 			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
 		})
 	})
+	Context("ZSet Conflicts", func() {
+		It("should return WRONGTYPE when performing ZSet operations on a String key", func() {
+			key := "s_zset_key"
+			// 1. Setup String
+			rdb.Set(ctx, key, "value", 0)
+
+			// 2. ZSet operations should fail
+			Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"}).Err()).To(HaveOccurred())
+			Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"}).Err().Error()).To(ContainSubstring("WRONGTYPE"))
+
+			Expect(rdb.ZRange(ctx, key, 0, -1).Err()).To(HaveOccurred())
+			Expect(rdb.ZScore(ctx, key, "m1").Err()).To(HaveOccurred())
+			Expect(rdb.ZRem(ctx, key, "m1").Err()).To(HaveOccurred())
+			Expect(rdb.ZCard(ctx, key).Err()).To(HaveOccurred())
+		})
+
+		It("should return WRONGTYPE when performing String/Hash/List/Set operations on a ZSet key", func() {
+			key := "zset_other_key"
+			// 1. Setup ZSet
+			rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"})
+
+			// 2. String operations should fail
+			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
+			Expect(rdb.Get(ctx, key).Err().Error()).To(ContainSubstring("WRONGTYPE"))
+
+			// 3. Hash operations should fail
+			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
+
+			// 4. List operations should fail
+			Expect(rdb.LPush(ctx, key, "v").Err()).To(HaveOccurred())
+
+			// 5. Set operations should fail
+			Expect(rdb.SAdd(ctx, key, "m").Err()).To(HaveOccurred())
+		})
+
+		It("should overwrite ZSet with SET", func() {
+			key := "zset_overwrite_key"
+			rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"})
+			Expect(rdb.ZCard(ctx, key).Val()).To(Equal(int64(1)))
+
+			// Overwrite
+			rdb.Set(ctx, key, "new_val", 0)
+			expectVal, _ := rdb.Get(ctx, key).Result()
+			Expect(expectVal).To(Equal("new_val"))
+
+			// Old zset gone
+			Expect(rdb.ZCard(ctx, key).Err()).To(HaveOccurred())
+		})
+	})
 })

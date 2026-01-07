@@ -9,6 +9,8 @@ pub mod storage_hash;
 pub mod storage_list;
 pub mod storage_set;
 pub mod storage_string;
+pub mod storage_zset;
 pub mod string;
+pub mod zset;
 
 pub use crate::storage::Storage;

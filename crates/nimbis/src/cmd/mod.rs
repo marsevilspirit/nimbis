@@ -145,3 +145,14 @@ pub use cmd_srem::SremCmd;
 pub use cmd_ttl::TtlCmd;
 pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;
+
+mod cmd_zadd;
+pub use cmd_zadd::ZAddCmd;
+mod cmd_zrange;
+pub use cmd_zrange::ZRangeCmd;
+mod cmd_zscore;
+pub use cmd_zscore::ZScoreCmd;
+mod cmd_zrem;
+pub use cmd_zrem::ZRemCmd;
+mod cmd_zcard;
+pub use cmd_zcard::ZCardCmd;
