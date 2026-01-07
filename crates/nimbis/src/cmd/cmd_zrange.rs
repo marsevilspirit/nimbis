@@ -37,21 +37,22 @@ impl Cmd for ZRangeCmd {
 
 	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[Bytes]) -> RespValue {
 		let key = args[0].clone();
-		let start_str = String::from_utf8_lossy(&args[1]);
-		let stop_str = String::from_utf8_lossy(&args[2]);
 
-		let start = match start_str.parse::<isize>() {
-			Ok(v) => v,
-			Err(_) => {
-				return RespValue::error("ERR value is not an integer or out of range");
-			}
+		// Helper closure to parse integer arguments
+		let parse_int = |arg: &Bytes| -> Result<isize, RespValue> {
+			String::from_utf8_lossy(arg)
+				.parse::<isize>()
+				.map_err(|_| RespValue::error("ERR value is not an integer or out of range"))
 		};
 
-		let stop = match stop_str.parse::<isize>() {
+		let start = match parse_int(&args[1]) {
 			Ok(v) => v,
-			Err(_) => {
-				return RespValue::error("ERR value is not an integer or out of range");
-			}
+			Err(e) => return e,
+		};
+
+		let stop = match parse_int(&args[2]) {
+			Ok(v) => v,
+			Err(e) => return e,
 		};
 
 		let mut with_scores = false;
