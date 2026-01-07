@@ -62,7 +62,7 @@ impl Storage {
 			if k.len() < 2 + key.len() {
 				break;
 			}
-			let k_len_prefix = u16::from_be_bytes(k[0..2].try_into().unwrap());
+            let k_len_prefix = u16::from_be_bytes(k[0..2].try_into()?);
 			if k_len_prefix as usize != key.len() {
 				// Length mismatch means different key (since SlateDB is sorted)
 				// Actually, if we just scan, subsequent keys might have different lengths.
