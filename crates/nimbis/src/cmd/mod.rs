@@ -93,9 +93,12 @@ impl TryFrom<RespValue> for ParsedCmd {
 	}
 }
 
+pub mod utils;
+
 mod cmd_del;
 mod cmd_exists;
 mod cmd_expire;
+mod cmd_flushdb;
 mod cmd_get;
 mod cmd_hget;
 mod cmd_hgetall;
@@ -116,13 +119,18 @@ mod cmd_sismember;
 mod cmd_smembers;
 mod cmd_srem;
 mod cmd_ttl;
+mod cmd_zadd;
+mod cmd_zcard;
+mod cmd_zrange;
+mod cmd_zrem;
+mod cmd_zscore;
 mod group_cmd_config;
 mod table;
-pub mod utils;
 
 pub use cmd_del::DelCmd;
 pub use cmd_exists::ExistsCmd;
 pub use cmd_expire::ExpireCmd;
+pub use cmd_flushdb::FlushDbCmd;
 pub use cmd_get::GetCmd;
 pub use cmd_hget::HGetCmd;
 pub use cmd_hgetall::HGetAllCmd;
@@ -143,5 +151,10 @@ pub use cmd_sismember::SismemberCmd;
 pub use cmd_smembers::SmembersCmd;
 pub use cmd_srem::SremCmd;
 pub use cmd_ttl::TtlCmd;
+pub use cmd_zadd::ZAddCmd;
+pub use cmd_zcard::ZCardCmd;
+pub use cmd_zrange::ZRangeCmd;
+pub use cmd_zrem::ZRemCmd;
+pub use cmd_zscore::ZScoreCmd;
 pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;

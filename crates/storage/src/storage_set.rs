@@ -1,5 +1,7 @@
 use bytes::Buf;
+use bytes::BufMut;
 use bytes::Bytes;
+use bytes::BytesMut;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -41,17 +43,23 @@ impl Storage {
 		&self,
 		key: Bytes,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let range = key.as_ref()..;
+		// Construct prefix: len(user_key) + user_key
+		let mut prefix = BytesMut::with_capacity(2 + key.len());
+		prefix.put_u16(key.len() as u16);
+		prefix.extend_from_slice(&key);
+		let prefix = prefix.freeze();
+
+		let range = prefix.clone()..;
 		let mut stream = self.set_db.scan(range).await?;
 		let mut keys_to_delete = Vec::new();
 
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
-			if !k.starts_with(&key) {
+			if !k.starts_with(&prefix) {
 				break;
 			}
-			// Verify suffix
-			let suffix = &k[key.len()..];
+			// Verify suffix (should be at least 4 bytes for member_len)
+			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
 			}
@@ -155,17 +163,24 @@ impl Storage {
 			return Ok(Vec::new());
 		}
 
-		let range = key.as_ref()..;
+		// Construct prefix: len(user_key) + user_key
+		let mut prefix = BytesMut::with_capacity(2 + key.len());
+		prefix.put_u16(key.len() as u16);
+		prefix.extend_from_slice(&key);
+		let prefix = prefix.freeze();
+
+		let range = prefix.clone()..;
 		let mut stream = self.set_db.scan(range).await?;
 		let mut members = Vec::new();
 
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
-			if !k.starts_with(&key) {
+			if !k.starts_with(&prefix) {
 				break;
 			}
 
-			let suffix = &k[key.len()..];
+			// Parse member: prefix + len(u32) + member
+			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
 			}
