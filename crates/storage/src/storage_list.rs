@@ -11,34 +11,36 @@ use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	// Helper to get and validate list metadata.
-	// Returns:
-	// - Ok(Some(meta)) if the key is a valid, non-expired List
-	// - Ok(None) if the key doesn't exist or is expired
-	// - Err if the key exists but is of wrong type
+	/// Helper to get and validate list metadata.
+	/// Returns:
+	/// - Ok(Some(meta)) if the key is a valid, non-expired List
+	/// - Ok(None) if the key doesn't exist or is expired
+	/// - Err if the key exists but is of wrong type
 	async fn get_valid_list_meta(
 		&self,
 		key: &Bytes,
 	) -> Result<Option<ListMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
-			if meta_bytes.is_empty() {
-				return Ok(None);
-			}
-			if meta_bytes[0] != DataType::List as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
-			}
-			let meta_val = ListMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				self.del(key.clone()).await?;
-				return Ok(None);
-			}
-			Ok(Some(meta_val))
-		} else {
-			Ok(None)
+		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
+			Some(bytes) => bytes,
+			None => return Ok(None),
+		};
+
+		if meta_bytes.is_empty() {
+			return Ok(None);
 		}
+
+		if meta_bytes[0] != DataType::List as u8 {
+			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		}
+
+		let meta_val = ListMetaValue::decode(&meta_bytes)?;
+		if meta_val.is_expired() {
+			self.del(key.clone()).await?;
+			return Ok(None);
+		}
+
+		Ok(Some(meta_val))
 	}
 
 	// Helper to delete all elements of a list.
