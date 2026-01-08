@@ -284,6 +284,64 @@ impl Storage {
 
 		Ok(results)
 	}
+	pub async fn hdel(
+		&self,
+		key: Bytes,
+		fields: &[Bytes],
+	) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+		let meta_key = MetaKey::new(key.clone());
+		let meta_encoded_key = meta_key.encode();
+
+		// check meta
+		let mut meta_val = match self.get_valid_hash_meta(&key).await? {
+			Some(meta) => meta,
+			None => return Ok(0),
+		};
+
+		let mut deleted_count = 0;
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+
+		for field in fields {
+			let field_key = HashFieldKey::new(key.clone(), field.clone());
+			let encoded_field_key = field_key.encode();
+
+			// check if field exists
+			if self.hash_db.get(encoded_field_key.clone()).await?.is_some() {
+				self.hash_db
+					.delete_with_options(encoded_field_key, &write_opts)
+					.await?;
+				deleted_count += 1;
+			}
+		}
+
+		if deleted_count > 0 {
+			if meta_val.len <= deleted_count as u64 {
+				// Hash is empty, delete meta
+				self.string_db
+					.delete_with_options(meta_encoded_key, &write_opts)
+					.await?;
+			} else {
+				// Update meta
+				meta_val.len -= deleted_count as u64;
+
+				let ttl = meta_val
+					.remaining_ttl()
+					.map(|d| d.as_millis() as u64)
+					.map(slatedb::config::Ttl::ExpireAfter)
+					.unwrap_or(slatedb::config::Ttl::NoExpiry);
+
+				let put_opts = PutOptions { ttl };
+
+				self.string_db
+					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
+					.await?;
+			}
+		}
+
+		Ok(deleted_count)
+	}
 }
 
 #[cfg(test)]
@@ -371,6 +429,59 @@ mod tests {
 		assert_eq!(sorted[0], (field.clone(), val2));
 		assert_eq!(sorted[1], (field2.clone(), val2_initial));
 
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_hdel() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("myhash_del");
+		let f1 = Bytes::from("f1");
+		let f2 = Bytes::from("f2");
+		let v1 = Bytes::from("v1");
+		let v2 = Bytes::from("v2");
+
+		// Setup
+		storage
+			.hset(key.clone(), f1.clone(), v1.clone())
+			.await
+			.unwrap();
+		storage
+			.hset(key.clone(), f2.clone(), v2.clone())
+			.await
+			.unwrap();
+
+		// HDEL one field
+		let count = storage.hdel(key.clone(), &[f1.clone()]).await.unwrap();
+		assert_eq!(count, 1);
+
+		// Verify f1 gone, f2 remains
+		let val1 = storage.hget(key.clone(), f1.clone()).await.unwrap();
+		assert_eq!(val1, None);
+		let val2 = storage.hget(key.clone(), f2.clone()).await.unwrap();
+		assert_eq!(val2, Some(v2.clone()));
+		let len = storage.hlen(key.clone()).await.unwrap();
+		assert_eq!(len, 1);
+
+		// HDEL missing field
+		let count = storage
+			.hdel(key.clone(), &[Bytes::from("missing")])
+			.await
+			.unwrap();
+		assert_eq!(count, 0);
+
+		// HDEL remaining field (should delete hash meta)
+		let count = storage.hdel(key.clone(), &[f2.clone()]).await.unwrap();
+		assert_eq!(count, 1);
+
+		// Verify empty
+		let len = storage.hlen(key.clone()).await.unwrap();
+		assert_eq!(len, 0);
+
+		let exists = storage.exists(key.clone()).await.unwrap();
+		assert!(!exists);
+
+		// Cleanup
 		let _ = std::fs::remove_dir_all(path);
 	}
 }

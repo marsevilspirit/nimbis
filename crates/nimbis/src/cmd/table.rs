@@ -8,6 +8,7 @@ use super::ExistsCmd;
 use super::ExpireCmd;
 use super::FlushDbCmd;
 use super::GetCmd;
+use super::HDelCmd;
 use super::HGetAllCmd;
 use super::HGetCmd;
 use super::HLenCmd;
@@ -55,6 +56,7 @@ impl CmdTable {
 		inner.insert("EXISTS".to_string(), Arc::new(ExistsCmd::default()));
 		// hash type cmd
 		inner.insert("HSET".to_string(), Arc::new(HSetCmd::new()));
+		inner.insert("HDEL".to_string(), Arc::new(HDelCmd::new()));
 		inner.insert("HGET".to_string(), Arc::new(HGetCmd::new()));
 		inner.insert("HLEN".to_string(), Arc::new(HLenCmd::new()));
 		inner.insert("HMGET".to_string(), Arc::new(HMGetCmd::new()));

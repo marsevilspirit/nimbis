@@ -95,4 +95,32 @@ var _ = Describe("Hash Commands", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all).To(BeEmpty())
 	})
+	It("should HDEL fields correctly from a hash", func() {
+		key := "hash:del"
+		rdb.HSet(ctx, key, "f1", "v1", "f2", "v2")
+
+		// HDEL one field
+		n, err := rdb.HDel(ctx, key, "f1").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(int64(1)))
+
+		// Verify deletion
+		Expect(rdb.HGet(ctx, key, "f1").Err()).To(Equal(redis.Nil))
+		Expect(rdb.HLen(ctx, key).Val()).To(Equal(int64(1)))
+
+		// HDEL missing field
+		n, err = rdb.HDel(ctx, key, "missing").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(int64(0)))
+
+		// HDEL remaining
+		n, err = rdb.HDel(ctx, key, "f2").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(int64(1)))
+
+		// Verify key gone
+		exists, err := rdb.Exists(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(Equal(int64(0)))
+	})
 })
