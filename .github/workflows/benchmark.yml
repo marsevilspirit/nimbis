@@ -1,0 +1,98 @@
+name: Benchmark
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Install redis-tools and rust-script
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-tools
+          cargo install rust-script
+
+      - name: Checkout Main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main_branch
+
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+        with:
+          path: pr_branch
+
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            main_branch -> target
+            pr_branch -> target
+          shared-key: benchmark
+
+      - name: Build and Run Main
+        working-directory: main_branch
+        run: |
+          cargo build --release
+          ./target/release/nimbis &
+          NIMBIS_PID=$!
+          echo "Nimbis (Main) started with PID $NIMBIS_PID"
+          sleep 10 # Wait for server start
+          
+          echo "Warmup on Main..."
+          redis-benchmark -p 6379 -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on Main..."
+          redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -c 50 -n 100000 > ../benchmark_main.txt || true
+          
+          kill $NIMBIS_PID
+
+      - name: Build and Run PR
+        working-directory: pr_branch
+        run: |
+          cargo build --release
+          ./target/release/nimbis &
+          NIMBIS_PID=$!
+          echo "Nimbis (PR) started with PID $NIMBIS_PID"
+          sleep 10 # Wait for server start
+          
+          echo "Warmup on PR..."
+          redis-benchmark -p 6379 -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on PR..."
+          redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -c 50 -n 100000 > ../benchmark_pr.txt || true
+          
+          kill $NIMBIS_PID
+
+      - name: Compare Results
+        id: compare
+        working-directory: pr_branch
+        run: |
+          # The script is in pr_branch/scripts/compare_benchmarks.rs
+          # benchmark files are in ../ (root of workspace)
+          
+          # output to a file to handle newlines easily in github-script or step output
+          rust-script scripts/compare_benchmarks.rs ../benchmark_main.txt ../benchmark_pr.txt > ../benchmark_report.md
+          
+          cat ../benchmark_report.md
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('benchmark_report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            })
