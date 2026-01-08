@@ -36,9 +36,7 @@ fn main() {
 	println!("|---|---|---|---|");
 
 	// Collect all commands
-	let mut commands: Vec<&String> = main_map.keys().chain(pr_map.keys()).collect();
-	commands.sort();
-	commands.dedup();
+	let commands: std::collections::BTreeSet<_> = main_map.keys().chain(pr_map.keys()).collect();
 
 	for cmd in commands {
 		let main_rps = main_map.get(cmd).copied().unwrap_or(0.0);

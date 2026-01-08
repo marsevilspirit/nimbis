@@ -24,6 +24,19 @@ jobs:
           ref: main
           path: main_branch
 
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+        with:
+          path: pr_branch
+
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            main_branch -> target
+            pr_branch -> target
+          shared-key: benchmark
+
       - name: Build and Run Main
         working-directory: main_branch
         run: |
@@ -37,11 +50,6 @@ jobs:
           redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -c 50 -n 10000 > ../benchmark_main.txt || true
           
           kill $NIMBIS_PID
-
-      - name: Checkout PR Branch
-        uses: actions/checkout@v4
-        with:
-          path: pr_branch
 
       - name: Build and Run PR
         working-directory: pr_branch
