@@ -83,8 +83,8 @@ fn parse_benchmark(content: &str) -> HashMap<String, f64> {
 
 	for line in content.lines() {
 		if let Some(caps) = re.captures(line) {
-			let cmd = caps.get(1).map_or("", |m| m.as_str());
-			let rps_str = caps.get(2).map_or("0", |m| m.as_str());
+			let cmd = caps.get(1).unwrap().as_str();
+			let rps_str = caps.get(2).unwrap().as_str();
 			if let Ok(rps) = rps_str.parse::<f64>() {
 				map.insert(cmd.to_string(), rps);
 			}
