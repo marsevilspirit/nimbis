@@ -47,7 +47,7 @@ jobs:
           sleep 10 # Wait for server start
           
           echo "Warmup on Main..."
-          redis-benchmark -p 6379 -q -n 1000 -c 10 > /dev/null 2>&1 || true
+          redis-benchmark -p 6379 -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on Main..."
           redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -c 50 -n 100000 > ../benchmark_main.txt || true
@@ -64,7 +64,7 @@ jobs:
           sleep 10 # Wait for server start
           
           echo "Warmup on PR..."
-          redis-benchmark -p 6379 -q -n 1000 -c 10 > /dev/null 2>&1 || true
+          redis-benchmark -p 6379 -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on PR..."
           redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -c 50 -n 100000 > ../benchmark_pr.txt || true
