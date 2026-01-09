@@ -147,41 +147,41 @@ impl Storage {
 
 			if let Some(old_score_bytes) = old_score_bytes {
 				// Update existing member
-			let old_score =
-				ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
-			if old_score != score {
-				// 1. Delete old ScoreKey
-				let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
-				batch.delete(old_score_key.encode());
+				let old_score =
+					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
+				if old_score != score {
+					// 1. Delete old ScoreKey
+					let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
+					batch.delete(old_score_key.encode());
 
-				// 2. Add new ScoreKey
-				let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
-				batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
+					// 2. Add new ScoreKey
+					let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
+					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
 
-				// 3. Update MemberKey
+					// 3. Update MemberKey
+					let encoded_score = ScoreKey::encode_score(score);
+					batch.put_with_options(
+						encoded_member_key.clone(),
+						Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
+						&put_opts,
+					);
+				}
+			} else {
+				// New member
+				added_count += 1;
+
+				// Add MemberKey
 				let encoded_score = ScoreKey::encode_score(score);
 				batch.put_with_options(
 					encoded_member_key.clone(),
 					Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
 					&put_opts,
 				);
+
+				// Add ScoreKey
+				let score_key = ScoreKey::new(key.clone(), score, member);
+				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
-		} else {
-			// New member
-			added_count += 1;
-
-			// Add MemberKey
-			let encoded_score = ScoreKey::encode_score(score);
-			batch.put_with_options(
-				encoded_member_key.clone(),
-				Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
-				&put_opts,
-			);
-
-			// Add ScoreKey
-			let score_key = ScoreKey::new(key.clone(), score, member);
-			batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
-		}
 		}
 		self.zset_db.write(batch).await?;
 
