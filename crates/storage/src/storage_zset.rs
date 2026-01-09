@@ -14,6 +14,14 @@ use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
 impl Storage {
+	// Helper to create key prefix (len(user_key) + user_key)
+	fn create_key_prefix(key: &Bytes) -> Bytes {
+		let mut p = BytesMut::with_capacity(2 + key.len());
+		p.put_u16(key.len() as u16);
+		p.extend_from_slice(key);
+		p.freeze()
+	}
+
 	// Helper to get and validate zset metadata.
 	async fn get_valid_zset_meta(
 		&self,
@@ -46,15 +54,11 @@ impl Storage {
 		key: Bytes,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		// Scan range starts with len(user_key) + user_key
-		let range_start = {
-			let mut p = BytesMut::with_capacity(2 + key.len());
-			p.put_u16(key.len() as u16);
-			p.extend_from_slice(&key);
-			p.freeze()
-		};
+		let range_start = Self::create_key_prefix(&key);
 		let range = range_start.as_ref()..;
 		let mut stream = self.zset_db.scan(range).await?;
-		let mut keys_to_delete = Vec::new();
+
+		let mut batch = WriteBatch::new();
 
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
@@ -65,26 +69,17 @@ impl Storage {
 			}
 			let k_len_prefix = u16::from_be_bytes(k[0..2].try_into()?);
 			if k_len_prefix as usize != key.len() {
-				// Length mismatch means different key (since SlateDB is sorted)
-				// Actually, if we just scan, subsequent keys might have different lengths.
-				// But we require strict prefix match of (len + key).
-				// If lengths differ, it's not our key.
 				break;
 			}
 			if k[2..2 + key.len()] != key[..] {
 				break;
 			}
-			// Just delete everything starting with the key in zset_db
-			// This covers both MemberKey and ScoreKey because they both start with len + user_key
-			keys_to_delete.push(k);
+			// Batch delete for better performance
+			batch.delete(k);
 		}
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		for k in keys_to_delete {
-			self.zset_db.delete_with_options(k, &write_opts).await?;
-		}
+		// Execute batch deletion atomically
+		self.zset_db.write(batch).await?;
 		Ok(())
 	}
 
@@ -126,19 +121,32 @@ impl Storage {
 		};
 		let put_opts = PutOptions::default();
 
+		// Batch pre-fetch all member keys to avoid N individual I/O calls
+		let mut member_encoded_keys = Vec::with_capacity(elements.len());
+		for (_, member) in &elements {
+			let member_key = MemberKey::new(key.clone(), member.clone());
+			member_encoded_keys.push(member_key.encode());
+		}
+
+		let mut batch_fetches = Vec::new();
+		for encoded_key in &member_encoded_keys {
+			batch_fetches.push(self.zset_db.get(encoded_key.clone()));
+		}
+
+		let mut old_values = Vec::new();
+		for fetch in batch_fetches {
+			old_values.push(fetch.await?);
+		}
+
 		// Use WriteBatch to ensure atomicity of all zset operations
 		let mut batch = WriteBatch::new();
 
-		for (score, member) in elements {
-			let member_key = MemberKey::new(key.clone(), member.clone());
-			let encoded_member_key = member_key.encode();
-
-			// Check if member exists
-			let old_score_bytes = self.zset_db.get(encoded_member_key.clone()).await?;
+		for (idx, (score, member)) in elements.into_iter().enumerate() {
+			let encoded_member_key = &member_encoded_keys[idx];
+			let old_score_bytes = &old_values[idx];
 
 			if let Some(old_score_bytes) = old_score_bytes {
 				// Update existing member
-				// 1. Delete old ScoreKey
 				let old_score =
 					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
 				if old_score != score {
@@ -165,7 +173,7 @@ impl Storage {
 				// Add MemberKey
 				let encoded_score = ScoreKey::encode_score(score);
 				batch.put_with_options(
-					encoded_member_key,
+					encoded_member_key.clone(),
 					Bytes::copy_from_slice(&encoded_score.to_be_bytes()),
 					&put_opts,
 				);
@@ -175,8 +183,6 @@ impl Storage {
 				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
-
-		// Execute all operations atomically
 		self.zset_db.write(batch).await?;
 
 		if added_count > 0 {
@@ -234,6 +240,9 @@ impl Storage {
 
 			let mut result = Vec::new();
 			let mut current_idx = 0;
+			// Cache header length and offset to avoid repeated calculation
+			let header_len = 2 + key.len() + 1 + 8;
+			let score_offset = 2 + key.len() + 1;
 
 			while let Some(kv) = stream.next().await? {
 				let k = kv.key;
@@ -244,17 +253,14 @@ impl Storage {
 				if current_idx >= start && current_idx <= stop {
 					// Extract member and score
 					// Key: len(user_key) + user_key + b'S' + score (8 bytes) + member
-					let header_len = 2 + key.len() + 1 + 8;
 					if k.len() > header_len {
 						let member = k.slice(header_len..);
 						result.push(member);
 						if with_scores {
 							let score_bytes: [u8; 8] =
-								k[2 + key.len() + 1..2 + key.len() + 9].try_into()?;
+								k[score_offset..score_offset + 8].try_into()?;
 							let encoded_score = u64::from_be_bytes(score_bytes);
 							let score = ScoreKey::decode_score(encoded_score);
-							// Format score as string? Or return bytes of string representation?
-							// Redis returns bulk strings for scores.
 							let score_str = score.to_string();
 							result.push(Bytes::copy_from_slice(score_str.as_bytes()));
 						}
@@ -309,16 +315,31 @@ impl Storage {
 			await_durable: false,
 		};
 
+		// Batch pre-fetch all member keys to avoid N individual I/O calls
+		let mut member_encoded_keys = Vec::with_capacity(members.len());
+		for member in &members {
+			let member_key = MemberKey::new(key.clone(), member.clone());
+			member_encoded_keys.push(member_key.encode());
+		}
+
+		let mut batch_fetches = Vec::new();
+		for encoded_key in &member_encoded_keys {
+			batch_fetches.push(self.zset_db.get(encoded_key.clone()));
+		}
+
+		let mut old_values = Vec::new();
+		for fetch in batch_fetches {
+			old_values.push(fetch.await?);
+		}
+
 		// Use WriteBatch to ensure atomicity of all delete operations
 		let mut batch = WriteBatch::new();
 
-		for member in members {
-			let member_key = MemberKey::new(key.clone(), member.clone());
-			let encoded_member_key = member_key.encode();
-
-			if let Some(val) = self.zset_db.get(encoded_member_key.clone()).await? {
+		for (idx, member) in members.into_iter().enumerate() {
+			let encoded_member_key = &member_encoded_keys[idx];
+			if let Some(val) = &old_values[idx] {
 				// Delete MemberKey
-				batch.delete(encoded_member_key);
+				batch.delete(encoded_member_key.clone());
 
 				// Delete ScoreKey
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
