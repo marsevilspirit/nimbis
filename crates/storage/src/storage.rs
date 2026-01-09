@@ -12,7 +12,6 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
-	// TODO: add more type db
 }
 
 impl Storage {
