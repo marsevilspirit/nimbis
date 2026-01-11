@@ -14,12 +14,6 @@ pub struct GetCmd {
 
 impl Default for GetCmd {
 	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl GetCmd {
-	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "GET".to_string(),

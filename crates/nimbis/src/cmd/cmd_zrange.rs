@@ -12,20 +12,14 @@ pub struct ZRangeCmd {
 	meta: CmdMeta,
 }
 
-impl ZRangeCmd {
-	pub fn new() -> Self {
+impl Default for ZRangeCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "ZRANGE".to_string(),
 				arity: -4, // ZRANGE key start stop [WITHSCORES]
 			},
 		}
-	}
-}
-
-impl Default for ZRangeCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

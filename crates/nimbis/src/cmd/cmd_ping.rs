@@ -14,12 +14,6 @@ pub struct PingCmd {
 
 impl Default for PingCmd {
 	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl PingCmd {
-	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "PING".to_string(),

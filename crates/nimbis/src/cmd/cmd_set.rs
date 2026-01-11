@@ -14,12 +14,6 @@ pub struct SetCmd {
 
 impl Default for SetCmd {
 	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl SetCmd {
-	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SET".to_string(),

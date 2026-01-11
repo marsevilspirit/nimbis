@@ -12,20 +12,14 @@ pub struct RPushCmd {
 	meta: CmdMeta,
 }
 
-impl RPushCmd {
-	pub fn new() -> Self {
+impl Default for RPushCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "RPUSH".to_string(),
 				arity: -3, // RPUSH key element [element ...]
 			},
 		}
-	}
-}
-
-impl Default for RPushCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

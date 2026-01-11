@@ -13,12 +13,6 @@ pub struct HSetCmd {
 
 impl Default for HSetCmd {
 	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl HSetCmd {
-	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "HSET".to_string(),

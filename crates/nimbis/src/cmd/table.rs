@@ -35,7 +35,7 @@ use super::ZRemCmd;
 use super::ZScoreCmd;
 
 pub struct CmdTable {
-	inner: HashMap<String, Arc<dyn Cmd>>,
+	inner: HashMap<&'static str, Arc<dyn Cmd>>,
 }
 
 impl Default for CmdTable {
@@ -46,46 +46,46 @@ impl Default for CmdTable {
 
 impl CmdTable {
 	pub fn new() -> Self {
-		let mut inner: HashMap<String, Arc<dyn Cmd>> = HashMap::new();
+		let mut inner: HashMap<&'static str, Arc<dyn Cmd>> = HashMap::new();
 		// ping cmd
-		inner.insert("PING".to_string(), Arc::new(PingCmd::new()));
+		inner.insert("PING", Arc::new(PingCmd::default()));
 		// string type cmd
-		inner.insert("SET".to_string(), Arc::new(SetCmd::new()));
-		inner.insert("GET".to_string(), Arc::new(GetCmd::new()));
-		inner.insert("DEL".to_string(), Arc::new(DelCmd::default()));
-		inner.insert("EXISTS".to_string(), Arc::new(ExistsCmd::default()));
+		inner.insert("SET", Arc::new(SetCmd::default()));
+		inner.insert("GET", Arc::new(GetCmd::default()));
+		inner.insert("DEL", Arc::new(DelCmd::default()));
+		inner.insert("EXISTS", Arc::new(ExistsCmd::default()));
 		// hash type cmd
-		inner.insert("HSET".to_string(), Arc::new(HSetCmd::new()));
-		inner.insert("HDEL".to_string(), Arc::new(HDelCmd::new()));
-		inner.insert("HGET".to_string(), Arc::new(HGetCmd::new()));
-		inner.insert("HLEN".to_string(), Arc::new(HLenCmd::new()));
-		inner.insert("HMGET".to_string(), Arc::new(HMGetCmd::new()));
-		inner.insert("HGETALL".to_string(), Arc::new(HGetAllCmd::new()));
+		inner.insert("HSET", Arc::new(HSetCmd::default()));
+		inner.insert("HDEL", Arc::new(HDelCmd::default()));
+		inner.insert("HGET", Arc::new(HGetCmd::default()));
+		inner.insert("HLEN", Arc::new(HLenCmd::default()));
+		inner.insert("HMGET", Arc::new(HMGetCmd::default()));
+		inner.insert("HGETALL", Arc::new(HGetAllCmd::default()));
 		// list type cmd
-		inner.insert("LPUSH".to_string(), Arc::new(LPushCmd::new()));
-		inner.insert("RPUSH".to_string(), Arc::new(RPushCmd::new()));
-		inner.insert("LPOP".to_string(), Arc::new(LPopCmd::new()));
-		inner.insert("ZADD".to_string(), Arc::new(ZAddCmd::new()));
-		inner.insert("ZRANGE".to_string(), Arc::new(ZRangeCmd::new()));
-		inner.insert("ZSCORE".to_string(), Arc::new(ZScoreCmd::new()));
-		inner.insert("ZREM".to_string(), Arc::new(ZRemCmd::new()));
-		inner.insert("ZCARD".to_string(), Arc::new(ZCardCmd::new()));
-		inner.insert("LLEN".to_string(), Arc::new(LLenCmd::new()));
-		inner.insert("LRANGE".to_string(), Arc::new(LRangeCmd::new()));
-		inner.insert("RPOP".to_string(), Arc::new(RPopCmd::new()));
+		inner.insert("LPUSH", Arc::new(LPushCmd::default()));
+		inner.insert("RPUSH", Arc::new(RPushCmd::default()));
+		inner.insert("LPOP", Arc::new(LPopCmd::default()));
+		inner.insert("ZADD", Arc::new(ZAddCmd::default()));
+		inner.insert("ZRANGE", Arc::new(ZRangeCmd::default()));
+		inner.insert("ZSCORE", Arc::new(ZScoreCmd::default()));
+		inner.insert("ZREM", Arc::new(ZRemCmd::default()));
+		inner.insert("ZCARD", Arc::new(ZCardCmd::default()));
+		inner.insert("LLEN", Arc::new(LLenCmd::default()));
+		inner.insert("LRANGE", Arc::new(LRangeCmd::default()));
+		inner.insert("RPOP", Arc::new(RPopCmd::default()));
 		// set type cmd
-		inner.insert("SADD".to_string(), Arc::new(SaddCmd::new()));
-		inner.insert("SMEMBERS".to_string(), Arc::new(SmembersCmd::new()));
-		inner.insert("SISMEMBER".to_string(), Arc::new(SismemberCmd::new()));
-		inner.insert("SREM".to_string(), Arc::new(SremCmd::new()));
-		inner.insert("SCARD".to_string(), Arc::new(ScardCmd::new()));
+		inner.insert("SADD", Arc::new(SaddCmd::default()));
+		inner.insert("SMEMBERS", Arc::new(SmembersCmd::default()));
+		inner.insert("SISMEMBER", Arc::new(SismemberCmd::default()));
+		inner.insert("SREM", Arc::new(SremCmd::default()));
+		inner.insert("SCARD", Arc::new(ScardCmd::default()));
 		// expire type cmd
-		inner.insert("EXPIRE".to_string(), Arc::new(ExpireCmd::default()));
-		inner.insert("TTL".to_string(), Arc::new(TtlCmd::default()));
+		inner.insert("EXPIRE", Arc::new(ExpireCmd::default()));
+		inner.insert("TTL", Arc::new(TtlCmd::default()));
 		// config type cmd
-		inner.insert("CONFIG".to_string(), Arc::new(ConfigGroupCmd::new()));
+		inner.insert("CONFIG", Arc::new(ConfigGroupCmd::default()));
 		// other type cmd
-		inner.insert("FLUSHDB".to_string(), Arc::new(FlushDbCmd::new()));
+		inner.insert("FLUSHDB", Arc::new(FlushDbCmd::default()));
 		Self { inner }
 	}
 

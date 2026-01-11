@@ -12,20 +12,14 @@ pub struct ZCardCmd {
 	meta: CmdMeta,
 }
 
-impl ZCardCmd {
-	pub fn new() -> Self {
+impl Default for ZCardCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "ZCARD".to_string(),
 				arity: 2, // ZCARD key
 			},
 		}
-	}
-}
-
-impl Default for ZCardCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

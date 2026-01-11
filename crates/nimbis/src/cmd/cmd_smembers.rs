@@ -12,20 +12,14 @@ pub struct SmembersCmd {
 	meta: CmdMeta,
 }
 
-impl SmembersCmd {
-	pub fn new() -> Self {
+impl Default for SmembersCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SMEMBERS".to_string(),
 				arity: 2,
 			},
 		}
-	}
-}
-
-impl Default for SmembersCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

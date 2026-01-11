@@ -13,20 +13,14 @@ pub struct LRangeCmd {
 	meta: CmdMeta,
 }
 
-impl LRangeCmd {
-	pub fn new() -> Self {
+impl Default for LRangeCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "LRANGE".to_string(),
 				arity: 4, // LRANGE key start stop
 			},
 		}
-	}
-}
-
-impl Default for LRangeCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

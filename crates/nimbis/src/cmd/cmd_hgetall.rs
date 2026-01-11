@@ -13,12 +13,6 @@ pub struct HGetAllCmd {
 
 impl Default for HGetAllCmd {
 	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl HGetAllCmd {
-	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "HGETALL".to_string(),

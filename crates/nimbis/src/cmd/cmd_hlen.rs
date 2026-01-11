@@ -13,12 +13,6 @@ pub struct HLenCmd {
 
 impl Default for HLenCmd {
 	fn default() -> Self {
-		Self::new()
-	}
-}
-
-impl HLenCmd {
-	pub fn new() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "HLEN".to_string(),

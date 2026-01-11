@@ -12,20 +12,14 @@ pub struct SaddCmd {
 	meta: CmdMeta,
 }
 
-impl SaddCmd {
-	pub fn new() -> Self {
+impl Default for SaddCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SADD".to_string(),
 				arity: -3,
 			},
 		}
-	}
-}
-
-impl Default for SaddCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

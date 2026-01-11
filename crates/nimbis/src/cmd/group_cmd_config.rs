@@ -15,12 +15,12 @@ pub struct ConfigGroupCmd {
 	sub_cmds: HashMap<String, Box<dyn Cmd>>,
 }
 
-impl ConfigGroupCmd {
-	pub fn new() -> Self {
+impl Default for ConfigGroupCmd {
+	fn default() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
-		sub_cmds.insert("GET".to_string(), Box::new(ConfigGetCommand::new()));
-		sub_cmds.insert("SET".to_string(), Box::new(ConfigSetCommand::new()));
+		sub_cmds.insert("GET".to_string(), Box::new(ConfigGetCommand::default()));
+		sub_cmds.insert("SET".to_string(), Box::new(ConfigSetCommand::default()));
 
 		Self {
 			meta: CmdMeta {
@@ -29,12 +29,6 @@ impl ConfigGroupCmd {
 			},
 			sub_cmds,
 		}
-	}
-}
-
-impl Default for ConfigGroupCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 
@@ -69,8 +63,8 @@ pub struct ConfigGetCommand {
 	meta: CmdMeta,
 }
 
-impl ConfigGetCommand {
-	pub fn new() -> Self {
+impl Default for ConfigGetCommand {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "GET".to_string(),
@@ -132,20 +126,14 @@ pub struct ConfigSetCommand {
 	meta: CmdMeta,
 }
 
-impl ConfigSetCommand {
-	pub fn new() -> Self {
+impl Default for ConfigSetCommand {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SET".to_string(),
 				arity: 3, // CONFIG SET key value
 			},
 		}
-	}
-}
-
-impl Default for ConfigSetCommand {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

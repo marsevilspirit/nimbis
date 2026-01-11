@@ -12,20 +12,14 @@ pub struct LLenCmd {
 	meta: CmdMeta,
 }
 
-impl LLenCmd {
-	pub fn new() -> Self {
+impl Default for LLenCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "LLEN".to_string(),
 				arity: 2, // LLEN key
 			},
 		}
-	}
-}
-
-impl Default for LLenCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

@@ -12,20 +12,14 @@ pub struct SismemberCmd {
 	meta: CmdMeta,
 }
 
-impl SismemberCmd {
-	pub fn new() -> Self {
+impl Default for SismemberCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SISMEMBER".to_string(),
 				arity: 3,
 			},
 		}
-	}
-}
-
-impl Default for SismemberCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

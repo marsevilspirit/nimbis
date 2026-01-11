@@ -12,20 +12,14 @@ pub struct ZAddCmd {
 	meta: CmdMeta,
 }
 
-impl ZAddCmd {
-	pub fn new() -> Self {
+impl Default for ZAddCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "ZADD".to_string(),
 				arity: -4, // ZADD key score member [score member ...]
 			},
 		}
-	}
-}
-
-impl Default for ZAddCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

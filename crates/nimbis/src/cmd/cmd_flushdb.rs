@@ -12,20 +12,14 @@ pub struct FlushDbCmd {
 	meta: CmdMeta,
 }
 
-impl FlushDbCmd {
-	pub fn new() -> Self {
+impl Default for FlushDbCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "FLUSHDB".to_string(),
 				arity: 1, // FLUSHDB
 			},
 		}
-	}
-}
-
-impl Default for FlushDbCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

@@ -23,12 +23,6 @@ impl Default for HDelCmd {
 	}
 }
 
-impl HDelCmd {
-	pub fn new() -> Self {
-		Self::default()
-	}
-}
-
 #[async_trait]
 impl Cmd for HDelCmd {
 	fn meta(&self) -> &CmdMeta {

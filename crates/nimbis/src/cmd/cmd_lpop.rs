@@ -13,20 +13,14 @@ pub struct LPopCmd {
 	meta: CmdMeta,
 }
 
-impl LPopCmd {
-	pub fn new() -> Self {
+impl Default for LPopCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "LPOP".to_string(),
 				arity: -2, // LPOP key [count]
 			},
 		}
-	}
-}
-
-impl Default for LPopCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

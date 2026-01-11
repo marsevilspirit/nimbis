@@ -12,20 +12,14 @@ pub struct ZScoreCmd {
 	meta: CmdMeta,
 }
 
-impl ZScoreCmd {
-	pub fn new() -> Self {
+impl Default for ZScoreCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "ZSCORE".to_string(),
 				arity: 3, // ZSCORE key member
 			},
 		}
-	}
-}
-
-impl Default for ZScoreCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

@@ -12,20 +12,14 @@ pub struct LPushCmd {
 	meta: CmdMeta,
 }
 
-impl LPushCmd {
-	pub fn new() -> Self {
+impl Default for LPushCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "LPUSH".to_string(),
 				arity: -3, // LPUSH key element [element ...]
 			},
 		}
-	}
-}
-
-impl Default for LPushCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

@@ -12,20 +12,14 @@ pub struct ScardCmd {
 	meta: CmdMeta,
 }
 
-impl ScardCmd {
-	pub fn new() -> Self {
+impl Default for ScardCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SCARD".to_string(),
 				arity: 2,
 			},
 		}
-	}
-}
-
-impl Default for ScardCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 

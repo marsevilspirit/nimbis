@@ -12,20 +12,14 @@ pub struct SremCmd {
 	meta: CmdMeta,
 }
 
-impl SremCmd {
-	pub fn new() -> Self {
+impl Default for SremCmd {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SREM".to_string(),
 				arity: -3,
 			},
 		}
-	}
-}
-
-impl Default for SremCmd {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 
