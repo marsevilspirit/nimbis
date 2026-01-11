@@ -1,3 +1,6 @@
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -10,6 +13,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::sync::oneshot;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -17,10 +21,11 @@ use tracing::info;
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
 use crate::config::SERVER_CONF;
+use crate::worker::CmdRequest;
+use crate::worker::Worker;
 
 pub struct Server {
-	storage: Arc<Storage>,
-	cmd_table: Arc<CmdTable>,
+	workers: Vec<Worker>,
 }
 
 impl Server {
@@ -29,29 +34,32 @@ impl Server {
 		// Ensure data directory exists
 		let data_path = &SERVER_CONF.load().data_path;
 		std::fs::create_dir_all(data_path)?;
+		let storage = Arc::new(Storage::open(data_path).await?);
+		let cmd_table = Arc::new(CmdTable::new());
 
-		// Open database
-		let storage = Storage::open(data_path).await?;
-		Ok(Self {
-			storage: Arc::new(storage),
-			cmd_table: Arc::new(CmdTable::new()),
-		})
+		let workers_num = num_cpus::get();
+		let mut workers = Vec::with_capacity(workers_num);
+		for _ in 0..workers_num {
+			workers.push(Worker::new(storage.clone(), cmd_table.clone()));
+		}
+
+		Ok(Self { workers })
 	}
 
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let addr = &SERVER_CONF.load().addr;
 		let listener = TcpListener::bind(addr).await?;
+		let workers = Arc::new(self.workers);
 		info!("Nimbis server listening on {}", addr);
 
 		loop {
 			match listener.accept().await {
 				Ok((socket, addr)) => {
 					debug!("New client connected from {}", addr);
-					let storage = self.storage.clone();
-					let cmd_table = self.cmd_table.clone();
+					let clone_workers = workers.clone();
 
 					tokio::spawn(async move {
-						if let Err(e) = handle_client(socket, storage, cmd_table).await {
+						if let Err(e) = handle_client(socket, clone_workers).await {
 							error!("Error handling client: {}", e);
 						}
 					});
@@ -66,8 +74,7 @@ impl Server {
 
 async fn handle_client(
 	mut socket: TcpStream,
-	storage: Arc<Storage>,
-	cmd_table: Arc<CmdTable>,
+	workers: Arc<Vec<Worker>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	let mut parser = RespParser::new();
 	let mut buffer = BytesMut::with_capacity(4096);
@@ -98,20 +105,21 @@ async fn handle_client(
 				RespParseResult::Complete(value) => {
 					let parsed_cmd: ParsedCmd = value.try_into()?;
 
-					// Log the command being executed
-					tracing::debug!(
-						command = %parsed_cmd.name,
-						args = ?parsed_cmd.args,
-						"Executing command"
-					);
+					let hash_key = parsed_cmd.args.first().cloned().unwrap_or_default();
 
-					let response = match cmd_table.get_cmd(&parsed_cmd.name) {
-						Some(cmd) => cmd.execute(&storage, &parsed_cmd.args).await,
-						None => RespValue::error(format!(
-							"ERR unknown command '{}'",
-							parsed_cmd.name.to_lowercase()
-						)),
-					};
+					let mut hasher = DefaultHasher::new();
+					hash_key.hash(&mut hasher);
+					let worker_idx = (hasher.finish() as usize) % workers.len();
+
+					let (resp_tx, resp_rx) = oneshot::channel();
+
+					workers[worker_idx].tx.send(CmdRequest {
+						cmd_name: parsed_cmd.name,
+						args: parsed_cmd.args,
+						resp_tx,
+					})?;
+
+					let response = resp_rx.await.map_err(|_| "worker dropped request")?;
 
 					let encoded = response.encode()?;
 					if let Err(e) = socket.write_all(&encoded).await {
