@@ -9,11 +9,12 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `CONFIG GET`, `CONFIG SET`
-- **Hash Commands**: `HSET`, `HGET`, `HMGET`, `HGETALL`, `HLEN`
+- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `FLUSHDB`
+- **Hash Commands**: `HSET`, `HGET`, `HGETALL`, `HMGET`, `HLEN`, `HDEL`
 - **List Commands**: `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`
 - **Set Commands**: `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`, `SCARD`
 - **Sorted Set Commands**: `ZADD`, `ZRANGE`, `ZSCORE`, `ZREM`, `ZCARD`
+- **Configuration Commands**: `CONFIG GET`, `CONFIG SET`
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates via `CONFIG SET`.
 
