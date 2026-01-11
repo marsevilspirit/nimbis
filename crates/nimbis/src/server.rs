@@ -43,7 +43,6 @@ impl Server {
 			let my_tx = senders.get(&i).unwrap().clone();
 			// workers need full map of senders to communicate with peers
 			workers.push(Worker::new(
-				i,
 				my_tx,
 				rx,
 				senders.clone(),
