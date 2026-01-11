@@ -137,6 +137,7 @@ The following table lists the currently implemented Redis commands and their sta
 | **Hash**    | `HLEN`       | `2`   | Returns the number of fields in the hash.           |
 | **Hash**    | `HMGET`      | `-3`  | Returns the values of specified fields in the hash. |
 | **Hash**    | `HGETALL`    | `2`   | Returns all fields and values in the hash.          |
+| **Hash**    | `HDEL`       | `-3`  | Delete one or more fields from a hash.              |
 | **List**    | `LPUSH`      | `-3`  | Prepend one or multiple elements to a list.         |
 | **List**    | `RPUSH`      | `-3`  | Append one or multiple elements to a list.          |
 | **List**    | `LPOP`       | `-2`  | Remove and get the first element in a list.         |
@@ -155,6 +156,7 @@ The following table lists the currently implemented Redis commands and their sta
 | **ZSet**    | `ZCARD`      | `2`   | Get the number of members in a sorted set.          |
 | **Config**  | `CONFIG GET` | `-3`  | Get the value of a configuration parameter.         |
 | **Config**  | `CONFIG SET` | `4`   | Set a configuration parameter to a given value.     |
+| **Generic** | `FLUSHDB`    | `1`   | Remove all keys from the current database.          |
 
 ## Parsing and Dispatch
 
@@ -181,8 +183,10 @@ crates/nimbis/src/cmd/
 ├── cmd_set.rs           # SET command
 ├── cmd_ping.rs          # PING command
 ├── cmd_hset.rs          # HSET command
+├── cmd_hdel.rs          # HDEL command
 ├── cmd_lpush.rs         # LPUSH command
 ├── cmd_rpush.rs         # RPUSH command
+├── cmd_flushdb.rs       # FLUSHDB command
 ├── ...                  # Other commands
 ├── group_cmd_config.rs  # CONFIG command group
 ├── mod.rs               # Core types: CmdMeta, Cmd trait, ParsedCmd

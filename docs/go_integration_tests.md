@@ -112,6 +112,10 @@ The current integration tests cover the following functional areas of the Nimbis
 - **HMGET**: Retrieval of multiple field values in one command.
 - **HGETALL**: Retrieval of all fields and values in a hash.
 - **HLEN**: Correct calculation of the number of fields in a hash.
+- **HDEL**: Deletion of specific fields from a hash.
+  - Single and multiple field deletion.
+  - Return value verification (count of deleted fields).
+  - Metadata cleanup when all fields are deleted.
 - **Updates**: Verifies that updating existing fields overwrites values but maintains field count.
 
 ### 4.3 Key Deletion (`delele_test.go`)
@@ -155,7 +159,7 @@ This suite ensures Nimbis behaves correctly (like Redis) when multiple data type
   - Empty string values.
   - Keys with special characters (Unicode, Emoji).
 
-### 4.6 Expire and TTL (`expire_test.go`)
+### 4.6 Expire and TTL (`ttl_test.go`)
 - **Basic Expiration**: Verifies that String and Hash keys are deleted after the specified timeout.
 - **TTL Return Values**: 
   - Returns remaining seconds for active keys.

@@ -25,8 +25,9 @@ All keys start in the `String DB`, which acts as the source of truth for the key
 
 **Key Format:**
 ```
-user_key
+[len(user_key) (u16 BE)] [user_key]
 ```
+*   The key is length-prefixed with a 16-bit big-endian length to prevent prefix collisions.
 
 **Value Format:**
 ```
@@ -46,7 +47,7 @@ user_key
 
 **Example:**
 *   Redis Command: `SET mykey "hello"`
-*   String DB Key: `mykey`
+*   String DB Key: `\x00\x05mykey` (5-byte length prefix + "mykey")
 *   String DB Value: `['s', 0, 0, 0, 0, 0, 0, 0, 0, 'h', 'e', 'l', 'l', 'o']` (Example with no TTL)
 
 
@@ -55,18 +56,18 @@ user_key
 **Meta Stored in String DB, Fields in Hash DB.**
 
 **Meta (String DB):**
-*   **Key**: `user_key`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key`
 *   **Value**: `['h']` + `[count (u64 BE)]` + `[expire_time (u64 BE)]`
 *   **Payload**: 1 byte type code + 8 bytes field count + 8 bytes expiration timestamp.
 
 **Fields (Hash DB):**
-*   **Key**: `len(user_key) (u16 BE)` + `user_key` + `len(field) (u32 BE)` + `field`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key` + `[len(field) (u32 BE)]` + `field`
 *   **Value**: `raw_value_bytes`
 
 **Example:**
 *   Redis Command: `HSET myhash field1 value1`
-*   **String DB**: Key=`myhash`, Value=`['h']` + `1`
-*   **Hash DB**: Key=`myhash` + `...field1...`, Value=`value1`
+*   **String DB**: Key=`\x00\x06myhash`, Value=`['h']` + `1`
+*   **Hash DB**: Key=`\x00\x06myhash\x00\x00\x00\x06field1`, Value=`value1`
 
 **Note on Expiration:** Both `StringValue` and `HashMetaValue` implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`), which provides a unified interface for managing TTL/expiration logic. This ensures consistent expiration behavior across different data types and eliminates code duplication.
 
@@ -75,7 +76,7 @@ user_key
 **Meta Stored in String DB, Elements in List DB.**
 
 **Meta (String DB):**
-*   **Key**: `user_key`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key`
 *   **Value**: `['l']` + `[len (u64)]` + `[head (u64)]` + `[tail (u64)]` + `[expire_time (u64)]`
 *   **Logic**: Implemented as a deque. `head` and `tail` start at `2^63` (middle of u64 range).
     *   `LPUSH`: Decrement `head`, store at new `head`.
@@ -83,31 +84,31 @@ user_key
     *   Elements are in range `[head, tail)`.
 
 **Elements (List DB):**
-*   **Key**: `len(user_key) (u16 BE)` + `user_key` + `seq (u64 BE)`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key` + `[seq (u64 BE)]`
 *   **Value**: `raw_element_bytes`
 
 **Example:**
 *   Redis Command: `RPUSH mylist A`
-*   **String DB**: Key=`mylist`, Meta=`len=1, head=mid, tail=mid+1`
-*   **List DB**: Key=`mylist` + `mid`, Value=`A`
+*   **String DB**: Key=`\x00\x06mylist`, Meta=`len=1, head=mid, tail=mid+1`
+*   **List DB**: Key=`\x00\x06mylist` + `mid`, Value=`A`
 
 ### 5. Set Type
 
 **Meta Stored in String DB, Members in Set DB.**
 
 **Meta (String DB):**
-*   **Key**: `user_key`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key`
 *   **Value**: `['S']` + `[member_count (u64 BE)]` + `[expire_time (u64 BE)]`
 *   **Payload**: 1 byte type code + 8 bytes member count + 8 bytes expiration timestamp.
 
 **Members (Set DB):**
-*   **Key**: `len(user_key) (u16 BE)` + `user_key` + `len(member) (u32 BE)` + `member`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key` + `[len(member) (u32 BE)]` + `member`
 *   **Value**: Empty (existence indicates membership)
 
 **Example:**
 *   Redis Command: `SADD myset member1`
-*   **String DB**: Key=`myset`, Value=`['S']` + `1` + `expire_time`
-*   **Set DB**: Key=`myset` + `...member1...`, Value=`(empty)`
+*   **String DB**: Key=`\x00\x05myset`, Value=`['S']` + `1` + `expire_time`
+*   **Set DB**: Key=`\x00\x05myset\x00\x00\x00\x08member1`, Value=`(empty)`
 
 **Operations:**
 *   `SADD`: Check/update metadata in String DB, add member key to Set DB
@@ -120,19 +121,19 @@ user_key
 **Meta Stored in String DB, Dual Index in ZSet DB.**
 
 **Meta (String DB):**
-*   **Key**: `user_key`
+*   **Key**: `[len(user_key) (u16 BE)]` + `user_key`
 *   **Value**: `['z']` + `[member_count (u64 BE)]` + `[expire_time (u64 BE)]`
 *   **Payload**: 1 byte type code + 8 bytes member count + 8 bytes expiration timestamp.
 
 **Dual Index Structure (ZSet DB):**
 
 1. **Member → Score Index:**
-   *   **Key**: `len(user_key) (u16 BE)` + `user_key` + `'M'` + `len(member) (u32 BE)` + `member`
+   *   **Key**: `[len(user_key) (u16 BE)]` + `user_key` + `'M'` + `[len(member) (u32 BE)]` + `member`
    *   **Value**: `score (f64)` stored as 8 bytes
    *   **Purpose**: Fast O(1) lookup of member score (for `ZSCORE`)
 
 2. **Score → Member Index:**
-   *   **Key**: `len(user_key) (u16 BE)` + `user_key` + `'S'` + `encoded_score (u64 BE)` + `member`
+   *   **Key**: `[len(user_key) (u16 BE)]` + `user_key` + `'S'` + `[encoded_score (u64 BE)]` + `member`
    *   **Value**: Empty
    *   **Purpose**: Ordered iteration by score (for `ZRANGE`)
 
@@ -149,12 +150,12 @@ user_key
 
 **Example:**
 *   Redis Command: `ZADD myzset 1.5 member1`
-*   **String DB**: Key=`myzset`, Value=`['z']` + `1` + `expire_time`
-*   **ZSet DB (Member Index)**: 
-    - Key: `\x00\x06myzset` + `M` + `\x00\x00\x00\x07member1`
+*   **String DB**: Key=`\x00\x06myzset`, Value=`['z']` + `1` + `expire_time`
+*   **ZSet DB (Member Index)**:
+    - Key: `\x00\x06myzsetM\x00\x00\x00\x07member1`
     - Value: `1.5` (8 bytes)
-*   **ZSet DB (Score Index)**: 
-    - Key: `\x00\x06myzset` + `S` + `<encoded_score>` + `member1`
+*   **ZSet DB (Score Index)**:
+    - Key: `\x00\x06myzsetS\x<encoded_score>\x00\x00\x00\x07member1`
     - Value: `(empty)`
 
 **Operations:**

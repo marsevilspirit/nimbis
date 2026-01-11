@@ -69,6 +69,7 @@ Hash operations are implemented in `crates/storage/src/storage_hash.rs`.
 ```rust
 impl Storage {
     pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, ...>;
+    pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, ...>;
     pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, ...>;
     pub async fn hlen(&self, key: Bytes) -> Result<u64, ...>;
     pub async fn hmget(&self, key: Bytes, fields: &[Bytes]) -> Result<Vec<Option<Bytes>>, ...>;

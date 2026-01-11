@@ -35,6 +35,8 @@ Nimbis follows standard Redis command arity rules. The `arity` field in command 
 | **SMEMBERS**  | `2`   | Positive (Exact) | Exactly 2 arguments  | `SMEMBERS <key>` (2 args)                                         |
 | **SISMEMBER** | `3`   | Positive (Exact) | Exactly 3 arguments  | `SISMEMBER <key> <member>` (3 args)                               |
 | **SCARD**     | `2`   | Positive (Exact) | Exactly 2 arguments  | `SCARD <key>` (2 args)                                            |
+| **HDEL**      | `-3`  | Negative (Min)   | At least 3 arguments | `HDEL <key> <field>` (3 args) <br> `HDEL <k> <f1> <f2>` (>3 args) |
+| **FLUSHDB**   | `1`   | Positive (Exact) | Exactly 1 argument   | `FLUSHDB` (1 arg)                                                 |
 
 ## Implementation Details
 
