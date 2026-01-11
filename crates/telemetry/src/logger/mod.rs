@@ -11,7 +11,7 @@ impl FormatTime for CustomTimeFormat {
 	fn format_time(&self, w: &mut fmt::format::Writer<'_>) -> std::fmt::Result {
 		let now = std::time::SystemTime::now();
 		let datetime: chrono::DateTime<chrono::Local> = now.into();
-		write!(w, "{}", datetime.format("%Y-%m-%d %H:%M:%S%.6f"))
+		write!(w, "{}", datetime.format("[%Y-%m-%d %H:%M:%S%.6f]"))
 	}
 }
 
