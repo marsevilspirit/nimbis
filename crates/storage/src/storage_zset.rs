@@ -79,7 +79,10 @@ impl Storage {
 		}
 
 		// Execute batch deletion atomically
-		self.zset_db.write(batch).await?;
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		self.zset_db.write_with_options(batch, &write_opts).await?;
 		Ok(())
 	}
 
@@ -183,7 +186,7 @@ impl Storage {
 				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
-		self.zset_db.write(batch).await?;
+		self.zset_db.write_with_options(batch, &write_opts).await?;
 
 		if added_count > 0 {
 			meta_val.len += added_count;
@@ -352,7 +355,7 @@ impl Storage {
 		}
 
 		// Execute all delete operations atomically
-		self.zset_db.write(batch).await?;
+		self.zset_db.write_with_options(batch, &write_opts).await?;
 
 		if removed_count > 0 {
 			meta_val.len -= removed_count;
