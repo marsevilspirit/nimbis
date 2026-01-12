@@ -29,9 +29,6 @@ jobs:
         with:
           path: pr_branch
 
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
-
       - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
         with:

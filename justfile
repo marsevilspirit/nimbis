@@ -5,8 +5,8 @@ default:
 
 # Build all crates
 [group: 'misc']
-build:
-    cargo build
+build profile='release':
+    cargo build {{ if profile == 'release' { "--release" } else { "" } }}
 
 # Run unit tests
 [group: 'test']
