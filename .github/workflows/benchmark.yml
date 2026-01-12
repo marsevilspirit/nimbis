@@ -50,7 +50,7 @@ jobs:
           redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on Main..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_pr.txt || true
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_main.txt || true
           
           kill $NIMBIS_PID
 
