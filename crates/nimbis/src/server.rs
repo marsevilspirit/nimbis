@@ -4,6 +4,7 @@ use std::sync::Arc;
 use storage::Storage;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 
@@ -65,7 +66,7 @@ impl Server {
 		loop {
 			match listener.accept().await {
 				Ok((socket, addr)) => {
-					info!("New client connected from {}", addr);
+					debug!("New client connected from {}", addr);
 
 					// Round-robin dispatch
 					let worker = &self.workers[next_worker_idx];
@@ -80,6 +81,7 @@ impl Server {
 				}
 				Err(e) => {
 					error!("Error accepting connection: {}", e);
+					tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 				}
 			}
 		}
