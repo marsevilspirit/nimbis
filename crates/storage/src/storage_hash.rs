@@ -102,12 +102,19 @@ impl Storage {
 		// Valid type check (Must be Hash or None)
 		// We read from string_db which holds ALL metadata (StringValue or HashMetaValue)
 		let meta_encoded_key = meta_key.encode();
-		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
+		let encoded_field_key = field_key.encode();
+
+		// Parallel fetch meta and field
+		let (meta_res, field_res) = tokio::join!(
+			self.string_db.get(meta_encoded_key.clone()),
+			self.hash_db.get(encoded_field_key.clone())
+		);
+
+		let current_meta_bytes = meta_res?;
+		let existing_field_raw = field_res?;
 
 		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
-			// Check type
 			if meta_bytes.is_empty() {
-				// Should not happen for valid keys, but treat as new
 				HashMetaValue::new(0)
 			} else {
 				match DataType::from_u8(meta_bytes[0]) {
@@ -117,31 +124,21 @@ impl Storage {
 								.into(),
 						);
 					}
-					_ => {
-						// It should be a Hash (or valid meta), decode it
-						HashMetaValue::decode(&meta_bytes)?
-					}
+					_ => HashMetaValue::decode(&meta_bytes)?,
 				}
 			}
 		} else {
 			HashMetaValue::new(0)
 		};
 
-		// Check expiration in meta_val
+		// Check expiration
+		let mut is_new_field = existing_field_raw.is_none();
+
 		if meta_val.is_expired() {
-			// TODO: Expired. Treat as new.
-			// We should clean up old hash fields?
-			// Yes, if we are overwriting, we should probably delete old fields if we consider the key gone.
-			// But `hset` adds to existing.
-			// If key is expired, `hset` should start a FRESH hash (empty).
-			// So we need to delete old hash fields first.
 			self.delete_hash_fields(key.clone()).await?;
 			meta_val = HashMetaValue::new(0);
+			is_new_field = true;
 		}
-
-		// Check if field exists in hash_db
-		let existing_field = self.hash_db.get(field_key.encode()).await?;
-		let is_new_field = existing_field.is_none();
 
 		// Set the field in hash_db
 		let write_opts = WriteOptions {
@@ -149,7 +146,7 @@ impl Storage {
 		};
 		let put_opts = PutOptions::default();
 		self.hash_db
-			.put_with_options(field_key.encode(), value, &put_opts, &write_opts)
+			.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
 			.await?;
 
 		// Update metadata in string_db if needed

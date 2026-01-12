@@ -1,6 +1,7 @@
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::future;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
@@ -93,7 +94,29 @@ impl Storage {
 	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
+
+		// Prepare member fetch futures
+		let mut member_encoded_keys = Vec::with_capacity(elements.len());
+		let mut member_futs = Vec::with_capacity(elements.len());
+		for (_, member) in &elements {
+			let member_key = MemberKey::new(key.clone(), member.clone());
+			let enc = member_key.encode();
+			member_encoded_keys.push(enc.clone());
+			member_futs.push(self.zset_db.get(enc));
+		}
+
+		// Parallel fetch meta and members
+		let (meta_res, members_res) = tokio::join!(
+			self.string_db.get(meta_encoded_key.clone()),
+			future::join_all(member_futs)
+		);
+
+		let current_meta_bytes = meta_res?;
+
+		let mut old_values = Vec::with_capacity(members_res.len());
+		for res in members_res {
+			old_values.push(res?);
+		}
 
 		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
 			if meta_bytes.is_empty() {
@@ -116,6 +139,10 @@ impl Storage {
 		if meta_val.is_expired() {
 			self.delete_zset_content(key.clone()).await?;
 			meta_val = ZSetMetaValue::new(0);
+			// Key expired, so old members are conceptually gone
+			for val in &mut old_values {
+				*val = None;
+			}
 		}
 
 		let mut added_count = 0;
@@ -123,23 +150,6 @@ impl Storage {
 			await_durable: false,
 		};
 		let put_opts = PutOptions::default();
-
-		// Batch pre-fetch all member keys to avoid N individual I/O calls
-		let mut member_encoded_keys = Vec::with_capacity(elements.len());
-		for (_, member) in &elements {
-			let member_key = MemberKey::new(key.clone(), member.clone());
-			member_encoded_keys.push(member_key.encode());
-		}
-
-		let mut batch_fetches = Vec::new();
-		for encoded_key in &member_encoded_keys {
-			batch_fetches.push(self.zset_db.get(encoded_key.clone()));
-		}
-
-		let mut old_values = Vec::new();
-		for fetch in batch_fetches {
-			old_values.push(fetch.await?);
-		}
 
 		// Use WriteBatch to ensure atomicity of all zset operations
 		let mut batch = WriteBatch::new();

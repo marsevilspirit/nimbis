@@ -38,18 +38,9 @@ impl Storage {
 		let path = path.as_ref();
 		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
 
-		let db_opts = slatedb::config::DbOptions {
-			l0_sst_size_bytes: 64 * 1024 * 1024,   // 64MB
-			max_unflushed_bytes: 64 * 1024 * 1024, // 64MB
-			..Default::default()
-		};
-
 		let open_db = |name: &'static str| {
 			let store = object_store.clone();
-			let opts = db_opts.clone();
-			async move {
-				Db::open_with_opts(slatedb::object_store::path::Path::from(name), opts, store).await
-			}
+			async move { Db::open(slatedb::object_store::path::Path::from(name), store).await }
 		};
 
 		let (string_db, hash_db, list_db, set_db, zset_db) = tokio::try_join!(
