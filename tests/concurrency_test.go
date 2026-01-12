@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/marsevilspirit/nimbis/tests/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -48,6 +49,8 @@ var _ = Describe("Concurrency Tests", func() {
 		var wg sync.WaitGroup
 		wg.Add(numGoroutines)
 
+		var errorCount int64
+
 		// Start concurrent increments
 		for i := 0; i < numGoroutines; i++ {
 			go func() {
@@ -66,13 +69,16 @@ var _ = Describe("Concurrency Tests", func() {
 					// The final value check is what matters.
 					// Ideally we should track errors.
 					if err != nil {
-						fmt.Printf("Error incrementing: %v\n", err)
+						atomic.AddInt64(&errorCount, 1)
+						GinkgoWriter.Printf("Error incrementing: %v\n", err)
 					}
 				}
 			}()
 		}
 
 		wg.Wait()
+
+		Expect(atomic.LoadInt64(&errorCount)).To(Equal(int64(0)), "Errors occurred during concurrent increments")
 
 		// Verify final value
 		val, err = client.Get(ctx, key).Int64()
@@ -93,6 +99,7 @@ var _ = Describe("Concurrency Tests", func() {
 
 		var wg sync.WaitGroup
 		wg.Add(numKeys * numGoroutines)
+		var errorCount int64
 
 		// Initialize keys
 		for k := 0; k < numKeys; k++ {
@@ -110,7 +117,8 @@ var _ = Describe("Concurrency Tests", func() {
 					for j := 0; j < numIncrements; j++ {
 						err := client.Incr(ctx, targetKey).Err()
 						if err != nil {
-							fmt.Printf("Error incrementing %s: %v\n", targetKey, err)
+							atomic.AddInt64(&errorCount, 1)
+							GinkgoWriter.Printf("Error incrementing %s: %v\n", targetKey, err)
 						}
 					}
 				}(key)
@@ -118,6 +126,7 @@ var _ = Describe("Concurrency Tests", func() {
 		}
 
 		wg.Wait()
+		Expect(atomic.LoadInt64(&errorCount)).To(Equal(int64(0)), "Errors occurred during concurrent multi-key increments")
 
 		// Verify all keys
 		for k := 0; k < numKeys; k++ {
@@ -139,6 +148,7 @@ var _ = Describe("Concurrency Tests", func() {
 
 		var wg sync.WaitGroup
 		wg.Add(numGoroutines)
+		var errorCount int64
 
 		for i := 0; i < numGoroutines; i++ {
 			go func(id int) {
@@ -147,13 +157,15 @@ var _ = Describe("Concurrency Tests", func() {
 					val := fmt.Sprintf("item-%d-%d", id, j)
 					err := client.LPush(ctx, key, val).Err()
 					if err != nil {
-						fmt.Printf("Error pushing to list: %v\n", err)
+						atomic.AddInt64(&errorCount, 1)
+						GinkgoWriter.Printf("Error pushing to list: %v\n", err)
 					}
 				}
 			}(i)
 		}
 
 		wg.Wait()
+		Expect(atomic.LoadInt64(&errorCount)).To(Equal(int64(0)), "Errors occurred during concurrent LPush")
 
 		lenVal, err := client.LLen(ctx, key).Result()
 		Expect(err).NotTo(HaveOccurred())
@@ -170,6 +182,7 @@ var _ = Describe("Concurrency Tests", func() {
 
 		var wg sync.WaitGroup
 		wg.Add(numGoroutines)
+		var errorCount int64
 
 		for i := 0; i < numGoroutines; i++ {
 			go func(id int) {
@@ -179,13 +192,15 @@ var _ = Describe("Concurrency Tests", func() {
 					val := fmt.Sprintf("member-%d-%d", id, j)
 					err := client.SAdd(ctx, key, val).Err()
 					if err != nil {
-						fmt.Printf("Error adding to set: %v\n", err)
+						atomic.AddInt64(&errorCount, 1)
+						GinkgoWriter.Printf("Error adding to set: %v\n", err)
 					}
 				}
 			}(i)
 		}
 
 		wg.Wait()
+		Expect(atomic.LoadInt64(&errorCount)).To(Equal(int64(0)), "Errors occurred during concurrent SAdd")
 
 		cardVal, err := client.SCard(ctx, key).Result()
 		Expect(err).NotTo(HaveOccurred())
