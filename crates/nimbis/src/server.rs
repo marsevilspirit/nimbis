@@ -59,7 +59,6 @@ impl Server {
 		let listener = TcpListener::bind(addr).await?;
 		info!("Nimbis server listening on {}", addr);
 
-		// We don't need Arc<Vec<Worker>> anymore because we are just dispatching messages
 		let workers_len = self.workers.len();
 		let mut next_worker_idx = 0;
 
