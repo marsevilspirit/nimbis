@@ -14,6 +14,7 @@ use super::HGetCmd;
 use super::HLenCmd;
 use super::HMGetCmd;
 use super::HSetCmd;
+use super::IncrCmd;
 use super::LLenCmd;
 use super::LPopCmd;
 use super::LPushCmd;
@@ -54,6 +55,7 @@ impl CmdTable {
 		inner.insert("GET", Arc::new(GetCmd::default()));
 		inner.insert("DEL", Arc::new(DelCmd::default()));
 		inner.insert("EXISTS", Arc::new(ExistsCmd::default()));
+		inner.insert("INCR", Arc::new(IncrCmd::default()));
 		// hash type cmd
 		inner.insert("HSET", Arc::new(HSetCmd::default()));
 		inner.insert("HDEL", Arc::new(HDelCmd::default()));
