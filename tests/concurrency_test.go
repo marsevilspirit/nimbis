@@ -120,7 +120,7 @@ var _ = Describe("Concurrency Tests", func() {
 			key := fmt.Sprintf("concurrent_multi_incr_key_%d", k)
 			val, err := client.Get(ctx, key).Int64()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal(expectedValue), "Key %s mismatch", key)
+			Expect(val).To(Equal(expectedValue), fmt.Sprintf("Key %s mismatch", key))
 		}
 	})
 

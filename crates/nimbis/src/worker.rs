@@ -17,7 +17,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::task::LocalSet;
 use tracing::debug;
 use tracing::error;
 use tracing::warn;
@@ -56,14 +55,12 @@ impl Worker {
 				.build()
 				.unwrap();
 
-			let local = LocalSet::new();
-
-			local.block_on(&rt, async move {
+			rt.block_on(async move {
 				while let Some(msg) = rx.recv().await {
 					match msg {
 						WorkerMessage::NewConnection(socket) => {
 							let peers = peers.clone();
-							tokio::task::spawn_local(async move {
+							tokio::spawn(async move {
 								if let Err(e) = handle_client(socket, peers).await {
 									error!("Error handling client: {}", e);
 								}
