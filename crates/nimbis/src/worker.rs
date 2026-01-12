@@ -76,7 +76,13 @@ impl Worker {
 									req.cmd_name.to_lowercase()
 								)),
 							};
-							let _ = req.resp_tx.send(response);
+							if let Err(resp) = req.resp_tx.send(response) {
+								debug!(
+									"Failed to send response for command '{}'; receiver dropped. Dropped response: {:?}",
+									req.cmd_name,
+									resp
+								);
+							}
 						}
 					}
 				}
