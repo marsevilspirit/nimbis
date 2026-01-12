@@ -41,7 +41,7 @@ impl Server {
 		// Second pass: create workers
 		for (i, rx) in receivers.into_iter().enumerate() {
 			let my_tx = senders.get(&i).unwrap().clone();
-			// workers need full map of senders to communicate with peers
+			// workers need the full map of senders to route commands to the appropriate worker based on consistent hashing of the command's key
 			workers.push(Worker::new(
 				my_tx,
 				rx,
@@ -59,7 +59,6 @@ impl Server {
 		let listener = TcpListener::bind(addr).await?;
 		info!("Nimbis server listening on {}", addr);
 
-		// We don't need Arc<Vec<Worker>> anymore because we are just dispatching messages
 		let workers_len = self.workers.len();
 		let mut next_worker_idx = 0;
 
