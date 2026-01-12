@@ -20,6 +20,7 @@ use tokio::sync::oneshot;
 use tokio::task::LocalSet;
 use tracing::debug;
 use tracing::error;
+use tracing::warn;
 
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
@@ -77,10 +78,9 @@ impl Worker {
 								)),
 							};
 							if let Err(resp) = req.resp_tx.send(response) {
-								debug!(
+								warn!(
 									"Failed to send response for command '{}'; receiver dropped. Dropped response: {:?}",
-									req.cmd_name,
-									resp
+									req.cmd_name, resp
 								);
 							}
 						}
