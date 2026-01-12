@@ -46,7 +46,7 @@ impl Worker {
 	pub fn new(
 		tx: mpsc::UnboundedSender<WorkerMessage>,
 		mut rx: mpsc::UnboundedReceiver<WorkerMessage>,
-		peers: HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>,
+		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 		storage: Arc<Storage>,
 		cmd_table: Arc<CmdTable>,
 	) -> Self {
@@ -98,7 +98,7 @@ impl Worker {
 
 async fn handle_client(
 	mut socket: TcpStream,
-	peers: HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>,
+	peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	let mut parser = RespParser::new();
 	let mut buffer = BytesMut::with_capacity(4096);
