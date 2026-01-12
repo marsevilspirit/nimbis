@@ -25,7 +25,6 @@ The goal of this phase is to make Nimbis usable for basic caching scenarios.
 - **String Operations**:
   - [x] `DEL`
   - [x] `EXISTS`
-  - [ ] `MGET` / `MSET`
   - [ ] `INCR` / `DECR`
   - [ ] `APPEND`
 - **Key Expiration (TTL)**:
@@ -79,3 +78,11 @@ Leverage the unique architecture of Nimbis.
 - **Advanced Features**:
   - [ ] Data tiering (Hot/Warm/Cold)
   - [ ] Serverless deployment guides
+
+### Phase 5: Multi-Key Operations (Cross-Worker)
+
+Due to the sharded architecture, these commands require cross-worker coordination.
+
+- [ ] `MGET` / `MSET`
+- [ ] `SINTER` / `SUNION` / `SDIFF`
+- [ ] Transactions (`MULTI` / `EXEC`)
