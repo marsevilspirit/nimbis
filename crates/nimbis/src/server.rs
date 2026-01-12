@@ -39,6 +39,9 @@ impl Server {
 			receivers.push(rx);
 		}
 
+		// Wrap senders in Arc to avoid deep cloning for each worker
+		let senders = Arc::new(senders);
+
 		// Second pass: create workers
 		for (i, rx) in receivers.into_iter().enumerate() {
 			let my_tx = senders.get(&i).unwrap().clone();
