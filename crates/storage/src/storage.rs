@@ -31,7 +31,6 @@ impl Storage {
 		}
 	}
 
-	/// Open a new SlateDB storage backed by local file system
 	pub async fn open(
 		path: impl AsRef<Path>,
 	) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
