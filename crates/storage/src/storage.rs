@@ -38,31 +38,27 @@ impl Storage {
 		let path = path.as_ref();
 		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
 
-		let string_db = Db::open(
-			slatedb::object_store::path::Path::from("/string"),
-			object_store.clone(),
-		)
-		.await?;
-		let hash_db = Db::open(
-			slatedb::object_store::path::Path::from("/hash"),
-			object_store.clone(),
-		)
-		.await?;
-		let list_db = Db::open(
-			slatedb::object_store::path::Path::from("/list"),
-			object_store.clone(),
-		)
-		.await?;
-		let set_db = Db::open(
-			slatedb::object_store::path::Path::from("/set"),
-			object_store.clone(),
-		)
-		.await?;
-		let zset_db = Db::open(
-			slatedb::object_store::path::Path::from("/zset"),
-			object_store.clone(),
-		)
-		.await?;
+		let db_opts = slatedb::config::DbOptions {
+			l0_sst_size_bytes: 64 * 1024 * 1024,   // 64MB
+			max_unflushed_bytes: 64 * 1024 * 1024, // 64MB
+			..Default::default()
+		};
+
+		let open_db = |name: &'static str| {
+			let store = object_store.clone();
+			let opts = db_opts.clone();
+			async move {
+				Db::open_with_opts(slatedb::object_store::path::Path::from(name), opts, store).await
+			}
+		};
+
+		let (string_db, hash_db, list_db, set_db, zset_db) = tokio::try_join!(
+			open_db("/string"),
+			open_db("/hash"),
+			open_db("/list"),
+			open_db("/set"),
+			open_db("/zset")
+		)?;
 
 		Ok(Self::new(
 			Arc::new(string_db),
