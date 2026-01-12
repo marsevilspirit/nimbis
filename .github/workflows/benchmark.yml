@@ -47,10 +47,10 @@ jobs:
           sleep 10 # Wait for server start
           
           echo "Warmup on Main..."
-          redis-benchmark -p 6379 -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on Main..."
-          redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem,zrange -c 50 -n 100000 > ../benchmark_main.txt || true
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_pr.txt || true
           
           kill $NIMBIS_PID
 
@@ -64,10 +64,10 @@ jobs:
           sleep 10 # Wait for server start
           
           echo "Warmup on PR..."
-          redis-benchmark -p 6379 -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on PR..."
-          redis-benchmark -p 6379 -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -c 50 -n 100000 > ../benchmark_pr.txt || true
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_pr.txt || true
           
           kill $NIMBIS_PID
 
