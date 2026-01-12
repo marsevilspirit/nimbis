@@ -113,10 +113,7 @@ impl Storage {
 
 		let current_meta_bytes = meta_res?;
 
-		let mut old_values = Vec::with_capacity(members_res.len());
-		for res in members_res {
-			old_values.push(res?);
-		}
+		let mut old_values: Vec<_> = members_res.into_iter().collect::<Result<_, _>>()?;
 
 		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
 			if meta_bytes.is_empty() {
