@@ -190,6 +190,5 @@ var _ = Describe("Concurrency Tests", func() {
 		cardVal, err := client.SCard(ctx, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cardVal).To(Equal(int64(totalUniqueItems)), "Set cardinality mismatch")
-
 	})
 })
