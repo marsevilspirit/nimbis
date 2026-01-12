@@ -162,11 +162,11 @@ async fn handle_client(
 				}
 				RespParseResult::Error(e) => {
 					let error_response = RespValue::error(format!("ERR Protocol error: {}", e));
-					#[allow(clippy::collapsible_if)]
-					if let Err(write_err) = socket.write_all(&error_response.encode()?).await {
-						if write_err.kind() != std::io::ErrorKind::ConnectionReset {
-							return Err(write_err.into());
+					match socket.write_all(&error_response.encode()?).await {
+						Err(e) if e.kind() != std::io::ErrorKind::ConnectionReset => {
+							return Err(e.into());
 						}
+						_ => {}
 					}
 					return Err(e.into());
 				}
