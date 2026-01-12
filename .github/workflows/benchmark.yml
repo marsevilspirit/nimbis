@@ -19,13 +19,13 @@ jobs:
           cargo install rust-script
 
       - name: Checkout Main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           path: main_branch
 
       - name: Checkout PR Branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: pr_branch
 
