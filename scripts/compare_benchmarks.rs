@@ -102,7 +102,6 @@ fn main() {
 		}
 	}
 
-
 	println!();
 	println!("*Comparison triggered by automated benchmark.*");
 }
