@@ -56,18 +56,20 @@ cargo install just
 ### Common Commands
 
 ```bash
-# Build the project
-just build
+$ just
+Available recipes:
+    [check]
+    check                   # Check all crates
 
-# Run the server
-just run
+    [clean]
+    clean                   # Clean build artifacts
 
-# Run unit tests
-just test
+    [misc]
+    build profile='release' # Build all crates
+    fmt                     # Format code
+    run                     # Run nimbis-server
 
-# Run End-to-End integration tests
-just e2e-test
-
-# Check code quality (format, clippy)
-just check
+    [test]
+    e2e-test                # Run e2e tests
+    test                    # Run unit tests
 ```
