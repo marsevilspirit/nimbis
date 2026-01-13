@@ -37,7 +37,7 @@ fn main() {
 	println!();
 	
 	if redis_map.is_some() {
-		println!("| Command | Main RPS | PR RPS (vs Main) | Redis RPS (PR vs Redis) |");
+		println!("| Command | Main RPS | PR RPS (vs Main) | PR vs Redis |");
 		println!("|---|---|---|---|");
 	} else {
 		println!("| Command | Main RPS | PR RPS (vs Main) |");
@@ -45,12 +45,11 @@ fn main() {
 	}
 
 	// Collect all commands
-	let mut commands: Vec<_> = main_map.keys().chain(pr_map.keys()).collect();
+	let mut commands: std::collections::BTreeSet<_> = main_map.keys().collect();
+	commands.extend(pr_map.keys());
 	if let Some(r_map) = &redis_map {
 		commands.extend(r_map.keys());
 	}
-	// Deduplicate
-	let commands: std::collections::BTreeSet<_> = commands.into_iter().collect();
 
 	for cmd in commands {
 		let main_rps = main_map.get(cmd).copied().unwrap_or(0.0);
@@ -65,9 +64,9 @@ fn main() {
 			0.0
 		};
 		
-		let pr_icon = if pr_diff_percent > 5.0 { "✅" } else if pr_diff_percent < -5.0 { "⚠️" } else { "" };
+		let pr_icon = if pr_diff_percent > 5.0 { "✅ " } else if pr_diff_percent < -5.0 { "⚠️ " } else { "" };
 		let pr_cell = if main_rps > 0.0 {
-			format!("{:.2} ({} {:+.2}%)", pr_rps, pr_icon, pr_diff_percent)
+			format!("{:.2} ({}{:+.2}%)", pr_rps, pr_icon, pr_diff_percent)
 		} else {
 			format!("{:.2}", pr_rps)
 		};
@@ -78,15 +77,17 @@ fn main() {
 			// Format Redis cell: "Value (PR vs Redis %)"
 			let redis_diff_percent = if redis_rps > 0.0 {
 				((pr_rps - redis_rps) / redis_rps) * 100.0
+			} else if pr_rps > 0.0 {
+				100.0
 			} else {
 				0.0
 			};
 			
-			let redis_icon = if redis_diff_percent > 0.0 { "🏆" } else { "" };
+			let redis_icon = if redis_diff_percent > 0.0 { "🏆 " } else { "" };
 			let redis_cell = if redis_rps > 0.0 {
-				format!("{:.2} ({} {:+.2}%)", redis_rps, redis_icon, redis_diff_percent)
+				format!("{:.2} ({}{:+.2}%)", pr_rps, redis_icon, redis_diff_percent)
 			} else {
-				format!("{:.2}", redis_rps)
+				format!("{:.2}", pr_rps)
 			};
 
 			println!(
