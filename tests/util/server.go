@@ -39,7 +39,7 @@ func findProjectRoot() (string, error) {
 }
 
 // findBinary locates the nimbis binary, first checking the NIMBIS_BIN
-// environment variable, then falling back to target/debug/nimbis
+// environment variable, then falling back to target/release/nimbis
 func findBinary() (string, error) {
 	// 1. Check environment variable first
 	if binPath := os.Getenv("NIMBIS_BIN"); binPath != "" {

@@ -24,8 +24,8 @@ The Test Suite is responsible for managing the lifecycle of the `nimbis` server 
 ### Binary Discovery
 The test program attempts to find the `nimbis` executable in the following order:
 1.  **Environment Variable**: Checks the path specified by the `NIMBIS_BIN` environment variable.
-2.  **Default Build Path**: Automatically finds the project root (by looking upwards for `Cargo.toml`) and looks for the binary in the approximate path `target/debug/nimbis`.
-    - *Hint*: Please ensure `cargo build` or `just build` has been executed before running tests.
+2.  **Default Build Path**: Automatically finds the project root (by looking upwards for `Cargo.toml`) and looks for the binary in the approximate path `target/release/nimbis`.
+    - *Hint*: Please ensure `just build release` has been executed before running tests.
 
 ### Server Startup Process
 1.  `util.StartServer()` starts a subprocess (`os/exec`) to run `nimbis`.
