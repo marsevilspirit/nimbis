@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use futures::future;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -318,30 +317,24 @@ impl Storage {
 		let start_seq = meta_val.head + start_idx as u64;
 		let stop_seq = meta_val.head + stop_idx as u64;
 
-		// We use parallel GETs to fetch elements since we know the exact sequence numbers.
-		// Ranges are contiguous, so we can iterate from start_seq to stop_seq.
-		// TODO: Consider using scan for potentially better performance on large ranges,
-		// though simple GETs are sufficient given the sequence number design.
+		let start_element_key = ListElementKey::new(key.clone(), start_seq);
+		let stop_element_key = ListElementKey::new(key.clone(), stop_seq);
 
-		let futures: Vec<_> = (start_seq..=stop_seq)
-			.map(|seq| {
-				let element_key = ListElementKey::new(key.clone(), seq);
-				async move { self.list_db.get(element_key.encode()).await }
-			})
-			.collect();
+		// Use scan for potentially better performance on large ranges
+		let range = start_element_key.encode()..=stop_element_key.encode();
+		let mut stream = self.list_db.scan(range).await?;
 
-		let found_results = future::try_join_all(futures).await?;
+		while let Some(kv) = stream.next().await? {
+			results.push(kv.value);
+		}
 
-		for res in found_results {
-			if let Some(val) = res {
-				results.push(val);
-			} else {
-				// Should not happen if consistency is maintained
-				tracing::warn!(
-					"List element missing for key {:?} at sequence. Potential data inconsistency.",
-					key
-				);
-			}
+		if results.len() != count {
+			tracing::warn!(
+				"List element missing for key {:?} in range. Potential data inconsistency. Expected {}, got {}",
+				key,
+				count,
+				results.len()
+			);
 		}
 
 		Ok(results)

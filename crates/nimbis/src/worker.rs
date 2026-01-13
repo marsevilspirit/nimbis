@@ -94,14 +94,41 @@ impl Worker {
 }
 
 async fn handle_client(
-	mut socket: TcpStream,
+	socket: TcpStream,
 	peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	let (mut rd, mut wr) = socket.into_split();
+	let (w_tx, mut w_rx) = mpsc::channel::<oneshot::Receiver<RespValue>>(1000);
+
+	// Spawn writer task
+	tokio::spawn(async move {
+		while let Some(resp_rx) = w_rx.recv().await {
+			match resp_rx.await {
+				Ok(response) => match response.encode() {
+					Ok(encoded) => {
+						if let Err(e) = wr.write_all(&encoded).await {
+							debug!("Write error: {}", e);
+							break;
+						}
+					}
+					Err(e) => {
+						error!("Failed to encode response: {}", e);
+						break;
+					}
+				},
+				Err(_) => {
+					warn!("Response sender dropped");
+					break;
+				}
+			}
+		}
+	});
+
 	let mut parser = RespParser::new();
 	let mut buffer = BytesMut::with_capacity(4096);
 
 	loop {
-		let n = match socket.read_buf(&mut buffer).await {
+		let n = match rd.read_buf(&mut buffer).await {
 			Ok(n) => n,
 			Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
 				debug!("Connection reset by peer");
@@ -145,26 +172,17 @@ async fn handle_client(
 						return Err("Internal error: worker not found".into());
 					}
 
-					let response = resp_rx.await.map_err(|_| "worker dropped request")?;
-					if let Err(e) = socket.write_all(&response.encode()?).await {
-						if e.kind() == std::io::ErrorKind::ConnectionReset {
-							debug!("Connection reset by peer");
-							return Ok(());
-						}
-						return Err(e.into());
+					if w_tx.send(resp_rx).await.is_err() {
+						return Err("Writer task closed".into());
 					}
 				}
 				RespParseResult::Incomplete => {
 					break;
 				}
 				RespParseResult::Error(e) => {
-					let error_response = RespValue::error(format!("ERR Protocol error: {}", e));
-					match socket.write_all(&error_response.encode()?).await {
-						Err(e) if e.kind() != std::io::ErrorKind::ConnectionReset => {
-							return Err(e.into());
-						}
-						_ => {}
-					}
+					let (tx, rx) = oneshot::channel();
+					let _ = tx.send(RespValue::error(format!("ERR Protocol error: {}", e)));
+					let _ = w_tx.send(rx).await;
 					return Err(e.into());
 				}
 			}

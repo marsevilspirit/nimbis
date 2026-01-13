@@ -70,6 +70,9 @@ impl Server {
 			match listener.accept().await {
 				Ok((socket, addr)) => {
 					debug!("New client connected from {}", addr);
+					if let Err(e) = socket.set_nodelay(true) {
+						tracing::warn!("Failed to set TCP_NODELAY on socket: {}", e);
+					}
 
 					// Round-robin dispatch
 					let worker = &self.workers[next_worker_idx];

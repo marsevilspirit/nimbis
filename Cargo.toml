@@ -44,3 +44,9 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 criterion = { version = "0.8.1", features = ["html_reports"] }
 rstest = "0.26.1"
 ulid = "1.2.1"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
