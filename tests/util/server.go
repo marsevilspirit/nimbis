@@ -38,18 +38,9 @@ func findProjectRoot() (string, error) {
 	}
 }
 
-// findBinary locates the nimbis binary, first checking the NIMBIS_BIN
-// environment variable, then falling back to target/debug/nimbis
+// findBinary locates the nimbis binary in target/release/nimbis
 func findBinary() (string, error) {
-	// 1. Check environment variable first
-	if binPath := os.Getenv("NIMBIS_BIN"); binPath != "" {
-		if _, err := os.Stat(binPath); err == nil {
-			return binPath, nil
-		}
-		return "", fmt.Errorf("NIMBIS_BIN is set to %s but file not found", binPath)
-	}
-
-	// 2. Find project root and construct binary path
+	// Find project root and construct binary path
 	projectRoot, err := findProjectRoot()
 	if err != nil {
 		return "", fmt.Errorf("failed to find project root: %w", err)
@@ -60,16 +51,16 @@ func findBinary() (string, error) {
 		binName = "nimbis.exe"
 	}
 
-	binPath := filepath.Join(projectRoot, "target", "debug", binName)
+	binPath := filepath.Join(projectRoot, "target", "release", binName)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("binary not found at %s (hint: run 'just build' or 'cargo build')", binPath)
+		return "", fmt.Errorf("binary not found at %s (hint: run 'just build release')", binPath)
 	}
 
 	return binPath, nil
 }
 
 // StartServer starts the nimbis server on the specified port.
-// It assumes the binary is located at ../../target/debug/nimbis
+// It assumes the binary is located at ../../target/release/nimbis
 func StartServer() error {
 	// Find the binary using environment variable or project root detection
 	binPath, err := findBinary()
