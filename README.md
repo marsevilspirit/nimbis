@@ -55,7 +55,7 @@ cargo install just
 
 ### Common Commands
 
-```bash
+```
 $ just
 Available recipes:
     [check]
