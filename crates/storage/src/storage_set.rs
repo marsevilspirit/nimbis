@@ -19,24 +19,23 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<SetMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
-			if meta_bytes.is_empty() {
-				return Ok(None);
-			}
-			if meta_bytes[0] != DataType::Set as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
-			}
-			let meta_val = SetMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				self.del(key.clone()).await?;
-				return Ok(None);
-			}
-			Ok(Some(meta_val))
-		} else {
-			Ok(None)
+		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
+			Some(bytes) => bytes,
+			None => return Ok(None),
+		};
+
+		if meta_bytes.is_empty() {
+			return Ok(None);
 		}
+		if meta_bytes[0] != DataType::Set as u8 {
+			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+		}
+		let meta_val = SetMetaValue::decode(&meta_bytes)?;
+		if meta_val.is_expired() {
+			self.del(key.clone()).await?;
+			return Ok(None);
+		}
+		Ok(Some(meta_val))
 	}
 
 	pub(crate) async fn delete_set_members(
