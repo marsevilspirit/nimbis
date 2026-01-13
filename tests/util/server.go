@@ -38,18 +38,9 @@ func findProjectRoot() (string, error) {
 	}
 }
 
-// findBinary locates the nimbis binary, first checking the NIMBIS_BIN
-// environment variable, then falling back to target/release/nimbis
+// findBinary locates the nimbis binary in target/release/nimbis
 func findBinary() (string, error) {
-	// 1. Check environment variable first
-	if binPath := os.Getenv("NIMBIS_BIN"); binPath != "" {
-		if _, err := os.Stat(binPath); err == nil {
-			return binPath, nil
-		}
-		return "", fmt.Errorf("NIMBIS_BIN is set to %s but file not found", binPath)
-	}
-
-	// 2. Find project root and construct binary path
+	// Find project root and construct binary path
 	projectRoot, err := findProjectRoot()
 	if err != nil {
 		return "", fmt.Errorf("failed to find project root: %w", err)
