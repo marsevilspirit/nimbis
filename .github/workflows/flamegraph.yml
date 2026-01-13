@@ -1,0 +1,118 @@
+name: Performance Flamegraph
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+jobs:
+  flamegraph:
+    # Run if triggered manually OR if it has the 'performance' label
+    if: |
+      github.event_name == 'workflow_dispatch' || 
+      contains(github.event.pull_request.labels.*.name, 'performance')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          # Install linux-tools for perf
+          # We try generic and current kernel specific tools
+          sudo apt-get install -y linux-tools-generic redis-tools git || true
+          # Fallback or additional try for specific kernel version if above fails or is insufficient
+          sudo apt-get install -y linux-tools-`uname -r` || true
+          
+          # Clone Brendan Gregg's FlameGraph repo
+          git clone https://github.com/brendangregg/FlameGraph
+          
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Nimbis
+        run: |
+          # Enable debug symbols in release mode for meaningful flamegraphs
+          RUSTFLAGS="-g" cargo build --release
+
+      - name: Run Benchmark and Capture Profile
+        run: |
+          # 1. Start Nimbis in background
+          ./target/release/nimbis &
+          NIMBIS_PID=$!
+          echo "Nimbis started with PID $NIMBIS_PID"
+          
+          # Give it a moment to start
+          sleep 5
+          
+          # 2. Start perf recording
+          # -F 99: sample at 99Hz
+          # -p $PID: profile the nimbis process
+          # -g: capture call graphs
+          
+          echo "Starting perf record..."
+          # Note: sudo is required for perf. 
+          sudo perf record -F 99 -p $NIMBIS_PID -g -o perf.data &
+          PERF_PID=$!
+          
+          # 3. Run Redis Benchmark
+          echo "Running redis-benchmark..."
+          # Run a decent workload
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 || true
+          
+          # 4. Stop perf
+          echo "Stopping perf..."
+          sudo kill -INT $PERF_PID
+          # Wait for perf to write data
+          wait $PERF_PID || true
+          
+          # 5. Stop Nimbis
+          kill $NIMBIS_PID
+          
+          # 6. Generate Flamegraph
+          echo "Generating flamegraph..."
+          # perf script requires reading the data file, owned by root
+          sudo perf script -i perf.data > out.perf
+          
+          # Use FlameGraph scripts
+          ./FlameGraph/stackcollapse-perf.pl out.perf > out.folded
+          ./FlameGraph/flamegraph.pl out.folded > flamegraph.svg
+          
+          echo "Flamegraph generated at flamegraph.svg"
+
+      - name: Upload Flamegraph Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flamegraph
+          path: flamegraph.svg
+
+      - name: Comment on PR
+        # Only comment if it's a PR event (not workflow_dispatch, unless we look up the PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const run_id = context.runId;
+            const repo_url = context.payload.repository.html_url;
+            
+            const body = `### 🔥 Performance Flamegraph
+            
+            A flamegraph has been generated for this Pull Request.
+            
+            You can download the **flamegraph.svg** from the [Artifacts section of this Run](${repo_url}/actions/runs/${run_id}).
+            
+            _Note: Download the file and open it in a browser to explore the stack traces interactively._`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
