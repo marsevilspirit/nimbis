@@ -30,6 +30,9 @@ jobs:
           
           # Clone Brendan Gregg's FlameGraph repo
           git clone https://github.com/brendangregg/FlameGraph
+
+          # Install rustfilt for symbol demangling
+          cargo install rustfilt
           
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -79,11 +82,14 @@ jobs:
           # 6. Generate Flamegraph
           echo "Generating flamegraph..."
           # perf script requires reading the data file, owned by root
-          sudo perf script -i perf.data > out.perf
+          # We pipe through rustfilt to demangle Rust symbols (make them readable)
+          sudo perf script -i perf.data | rustfilt > out.perf
           
           # Use FlameGraph scripts
           ./FlameGraph/stackcollapse-perf.pl out.perf > out.folded
-          ./FlameGraph/flamegraph.pl out.folded > flamegraph.svg
+          
+          # Generate SVG with consistent hashing for colors
+          ./FlameGraph/flamegraph.pl --hash out.folded > flamegraph.svg
           
           echo "Flamegraph generated at flamegraph.svg"
 
