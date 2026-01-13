@@ -25,9 +25,9 @@ telemetry = { path = "crates/telemetry" }
 
 # Dependencies
 arc-swap = "1.8.0"
-async-trait = "0.1"
-bytes = "1.5"
-chrono = "0.4"
+async-trait = "0.1.89"
+bytes = "1.11.0"
+chrono = "0.4.42"
 futures = "0.3.31"
 num_cpus = "1.17.0"
 object_store = "0.13.0"
@@ -35,12 +35,12 @@ quote = "1.0.43"
 slatedb = "0.10.0"
 syn = { version = "2.0.114", features = ["full"] }
 thiserror = "2.0.17"
-tokio = { version = "1.49", features = ["full"] }
-tracing = "0.1"
-tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tokio = { version = "1.49.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.4"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 
 # Dev Dependencies
 criterion = { version = "0.8.1", features = ["html_reports"] }
 rstest = "0.26.1"
-ulid = "1.2"
+ulid = "1.2.1"

@@ -102,6 +102,10 @@ fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Ve
 		for (name, value) in table.iter() {
 			check_workspace_usage(path, section, name, value, issues);
 		}
+	} else {
+		for (name, value) in table.iter() {
+			check_specific_version(path, section, name, value, issues);
+		}
 	}
 
 	// Use raw text to identify blocks separated by blank lines
@@ -138,6 +142,44 @@ fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Ve
 		}
 		if !current_block.is_empty() {
 			check_order(path, section, &current_block, issues);
+		}
+	}
+}
+
+fn check_specific_version(
+	path: &Path,
+	section: &str,
+	name: &str,
+	value: &Item,
+	issues: &mut Vec<String>,
+) {
+	let version_str = if let Some(s) = value.as_str() {
+		Some(s)
+	} else if let Some(table) = value.as_table_like() {
+		if table.get("path").is_some() || table.get("git").is_some() {
+			return;
+		}
+		table.get("version").and_then(|v| v.as_str())
+	} else {
+		None
+	};
+
+	if let Some(version) = version_str {
+		// Check that version is specific:
+		// 1. Starts with a digit (no operators like ^, ~)
+		// 2. Contains at least 2 dots (x.y.z format)
+		let v = version.trim();
+		let starts_with_digit = v.starts_with(|c: char| c.is_ascii_digit());
+		let dot_count = v.chars().filter(|&c| c == '.').count();
+
+		if !starts_with_digit || dot_count < 2 {
+			issues.push(format!(
+				"{}:[{}] '{}' version should be specific (x.y.z), found \"{}\"",
+				path.display(),
+				section,
+				name,
+				version
+			));
 		}
 	}
 }
