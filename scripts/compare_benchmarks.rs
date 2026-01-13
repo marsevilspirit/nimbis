@@ -13,9 +13,9 @@ use regex::Regex;
 
 fn main() {
 	let args: Vec<String> = env::args().collect();
-	if args.len() != 3 {
+	if args.len() < 3 {
 		eprintln!(
-			"Usage: {} <main_benchmark_file> <pr_benchmark_file>",
+			"Usage: {} <main_benchmark_file> <pr_benchmark_file> [redis_benchmark_file]",
 			args[0]
 		);
 		process::exit(1);
@@ -23,47 +23,84 @@ fn main() {
 
 	let main_file = &args[1];
 	let pr_file = &args[2];
+	let redis_file = if args.len() > 3 { Some(&args[3]) } else { None };
 
 	let main_content = fs::read_to_string(main_file).expect("Failed to read main file");
 	let pr_content = fs::read_to_string(pr_file).expect("Failed to read pr file");
+	let redis_content = redis_file.map(|f| fs::read_to_string(f).expect("Failed to read redis file"));
 
 	let main_map = parse_benchmark(&main_content);
 	let pr_map = parse_benchmark(&pr_content);
+	let redis_map = redis_content.as_ref().map(|c| parse_benchmark(c));
 
 	println!("### Benchmark Comparison 🚀");
 	println!();
-	println!("| Command | Main RPS | PR RPS | Diff |");
-	println!("|---|---|---|---|");
+	
+	if redis_map.is_some() {
+		println!("| Command | Main RPS | PR RPS (vs Main) | Redis RPS (PR vs Redis) |");
+		println!("|---|---|---|---|");
+	} else {
+		println!("| Command | Main RPS | PR RPS (vs Main) |");
+		println!("|---|---|---|");
+	}
 
 	// Collect all commands
-	let commands: std::collections::BTreeSet<_> = main_map.keys().chain(pr_map.keys()).collect();
+	let mut commands: Vec<_> = main_map.keys().chain(pr_map.keys()).collect();
+	if let Some(r_map) = &redis_map {
+		commands.extend(r_map.keys());
+	}
+	// Deduplicate
+	let commands: std::collections::BTreeSet<_> = commands.into_iter().collect();
 
 	for cmd in commands {
 		let main_rps = main_map.get(cmd).copied().unwrap_or(0.0);
 		let pr_rps = pr_map.get(cmd).copied().unwrap_or(0.0);
 
-		let diff_percent = if main_rps > 0.0 {
+		// Format PR cell: "Value (Diff%)"
+		let pr_diff_percent = if main_rps > 0.0 {
 			((pr_rps - main_rps) / main_rps) * 100.0
 		} else if pr_rps > 0.0 {
-			100.0 // Treated as new/inf increase
+			100.0 
 		} else {
 			0.0
 		};
-
-		// Icon for diff
-		let icon = if diff_percent > 5.0 {
-			"✅" // Improved
-		} else if diff_percent < -5.0 {
-			"⚠️" // Regressed
+		
+		let pr_icon = if pr_diff_percent > 5.0 { "✅" } else if pr_diff_percent < -5.0 { "⚠️" } else { "" };
+		let pr_cell = if main_rps > 0.0 {
+			format!("{:.2} ({} {:+.2}%)", pr_rps, pr_icon, pr_diff_percent)
 		} else {
-			"➖" // No major change
+			format!("{:.2}", pr_rps)
 		};
 
-		println!(
-			"| {} | {:.2} | {:.2} | {} {:.2}% |",
-			cmd, main_rps, pr_rps, icon, diff_percent
-		);
+		if let Some(r_map) = &redis_map {
+			let redis_rps = r_map.get(cmd).copied().unwrap_or(0.0);
+			
+			// Format Redis cell: "Value (PR vs Redis %)"
+			let redis_diff_percent = if redis_rps > 0.0 {
+				((pr_rps - redis_rps) / redis_rps) * 100.0
+			} else {
+				0.0
+			};
+			
+			let redis_icon = if redis_diff_percent > 0.0 { "🏆" } else { "" };
+			let redis_cell = if redis_rps > 0.0 {
+				format!("{:.2} ({} {:+.2}%)", redis_rps, redis_icon, redis_diff_percent)
+			} else {
+				format!("{:.2}", redis_rps)
+			};
+
+			println!(
+				"| {} | {:.2} | {} | {} |",
+				cmd, main_rps, pr_cell, redis_cell
+			);
+		} else {
+			println!(
+				"| {} | {:.2} | {} |",
+				cmd, main_rps, pr_cell
+			);
+		}
 	}
+
 
 	println!();
 	println!("*Comparison triggered by automated benchmark.*");

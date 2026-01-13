@@ -12,11 +12,26 @@ jobs:
       contents: read
 
     steps:
-      - name: Install redis-tools and rust-script
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y redis-tools
+          sudo apt-get install -y redis-tools redis-server
           cargo install rust-script
+
+      - name: Run Redis Benchmark
+        run: |
+          # Start Redis Server
+          sudo systemctl start redis-server
+          sleep 5
+          
+          echo "Warmup on Redis..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on Redis..."
+          # Save to root workspace dir (which is parent of main_branch/pr_branch later)
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > benchmark_redis.txt || true
+          
+          sudo systemctl stop redis-server
 
       - name: Checkout Main
         uses: actions/checkout@v6
@@ -79,7 +94,7 @@ jobs:
           # benchmark files are in ../ (root of workspace)
           
           # output to a file to handle newlines easily in github-script or step output
-          rust-script scripts/compare_benchmarks.rs ../benchmark_main.txt ../benchmark_pr.txt > ../benchmark_report.md
+          rust-script scripts/compare_benchmarks.rs ../benchmark_main.txt ../benchmark_pr.txt ../benchmark_redis.txt > ../benchmark_report.md
           
           cat ../benchmark_report.md
 
