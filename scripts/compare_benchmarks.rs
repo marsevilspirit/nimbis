@@ -37,11 +37,11 @@ fn main() {
 	println!();
 	
 	if redis_map.is_some() {
-		println!("| Command | Main RPS | PR RPS (vs Main) | PR vs Redis |");
-		println!("|---|---|---|---|");
+		println!("| Command | PR RPS | Main RPS | Redis RPS | vs Main | vs Redis |");
+		println!("|---|---|---|---|---|---|");
 	} else {
-		println!("| Command | Main RPS | PR RPS (vs Main) |");
-		println!("|---|---|---|");
+		println!("| Command | PR RPS | Main RPS | vs Main |");
+		println!("|---|---|---|---|");
 	}
 
 	// Collect all commands
@@ -55,7 +55,7 @@ fn main() {
 		let main_rps = main_map.get(cmd).copied().unwrap_or(0.0);
 		let pr_rps = pr_map.get(cmd).copied().unwrap_or(0.0);
 
-		// Format PR cell: "Value (Diff%)"
+		// Calculate vs Main diff
 		let pr_diff_percent = if main_rps > 0.0 {
 			((pr_rps - main_rps) / main_rps) * 100.0
 		} else if pr_rps > 0.0 {
@@ -65,16 +65,16 @@ fn main() {
 		};
 		
 		let pr_icon = if pr_diff_percent > 5.0 { "✅ " } else if pr_diff_percent < -5.0 { "⚠️ " } else { "" };
-		let pr_cell = if main_rps > 0.0 {
-			format!("{:.2} ({}{:+.2}%)", pr_rps, pr_icon, pr_diff_percent)
+		let vs_main_cell = if main_rps > 0.0 {
+			format!("{}{:+.2}%", pr_icon, pr_diff_percent)
 		} else {
-			format!("{:.2}", pr_rps)
+			"-".to_string()
 		};
 
 		if let Some(r_map) = &redis_map {
 			let redis_rps = r_map.get(cmd).copied().unwrap_or(0.0);
 			
-			// Format Redis cell: "Value (PR vs Redis %)"
+			// Calculate vs Redis diff
 			let redis_diff_percent = if redis_rps > 0.0 {
 				((pr_rps - redis_rps) / redis_rps) * 100.0
 			} else if pr_rps > 0.0 {
@@ -84,20 +84,20 @@ fn main() {
 			};
 			
 			let redis_icon = if redis_diff_percent > 0.0 { "🏆 " } else { "" };
-			let redis_cell = if redis_rps > 0.0 {
-				format!("{:.2} ({}{:+.2}%)", pr_rps, redis_icon, redis_diff_percent)
+			let vs_redis_cell = if redis_rps > 0.0 {
+				format!("{}{:+.2}%", redis_icon, redis_diff_percent)
 			} else {
-				format!("{:.2}", pr_rps)
+				"-".to_string()
 			};
 
 			println!(
-				"| {} | {:.2} | {} | {} |",
-				cmd, main_rps, pr_cell, redis_cell
+				"| {} | {:.2} | {:.2} | {:.2} | {} | {} |",
+				cmd, pr_rps, main_rps, redis_rps, vs_main_cell, vs_redis_cell
 			);
 		} else {
 			println!(
-				"| {} | {:.2} | {} |",
-				cmd, main_rps, pr_cell
+				"| {} | {:.2} | {:.2} | {} |",
+				cmd, pr_rps, main_rps, vs_main_cell
 			);
 		}
 	}
