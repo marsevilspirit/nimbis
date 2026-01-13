@@ -182,7 +182,9 @@ async fn handle_client(
 				RespParseResult::Error(e) => {
 					let (tx, rx) = oneshot::channel();
 					let _ = tx.send(RespValue::error(format!("ERR Protocol error: {}", e)));
-					let _ = w_tx.send(rx).await;
+					if let Err(_) = w_tx.send(rx).await {
+						warn!("Failed to send protocol error response to writer task; client might see connection reset");
+					}
 					return Err(e.into());
 				}
 			}
