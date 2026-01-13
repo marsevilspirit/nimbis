@@ -1,6 +1,4 @@
 use bytes::Bytes;
-use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::expirable::Expirable;
@@ -9,55 +7,51 @@ use crate::string::key::StringKey;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::ListMetaValue;
 use crate::string::meta::SetMetaValue;
+use crate::string::meta::ZSetMetaValue;
 use crate::string::value::StringValue;
 
 impl Storage {
+	/// Helper to clean up collection data when overwriting/deleting
+	async fn cleanup_collection_type(
+		&self,
+		user_key: Bytes,
+		data_type: DataType,
+		meta: &[u8],
+	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+		match data_type {
+			DataType::Hash => self.delete_hash_fields(user_key).await,
+			DataType::List => {
+				let meta_val = ListMetaValue::decode(meta)?;
+				self.delete_list_elements(user_key, &meta_val).await
+			}
+			DataType::Set => self.delete_set_members(user_key).await,
+			DataType::ZSet => self.delete_zset_content(user_key).await,
+			_ => Ok(()),
+		}
+	}
+
 	pub async fn get(
 		&self,
 		key: Bytes,
 	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
-		let key = StringKey::new(key);
-		let result = self.string_db.get(key.encode()).await?;
+		let key_bytes = StringKey::new(key.clone()).encode();
+		let db = self.db().clone();
+		let result = tokio::task::spawn_blocking(move || db.get(key_bytes)).await??;
 
-		let bytes = match result {
-			Some(b) if !b.is_empty() => b,
-			_ => return Ok(None),
+		let Some(bytes) = result.filter(|b| !b.is_empty()) else {
+			return Ok(None);
 		};
 
 		match DataType::from_u8(bytes[0]) {
 			Some(DataType::String) => {
 				let string_val = StringValue::decode(&bytes)?;
 				if string_val.is_expired() {
-					self.del(key.encode()).await?;
+					self.del(key).await?;
 					return Ok(None);
 				}
 				Ok(Some(string_val.value))
 			}
-			Some(DataType::Hash) => {
-				let meta_val = HashMetaValue::decode(&bytes)?;
-				if meta_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
-				// Hash doesn't return value here usually? get() is for string?
-				// get() here is generic string_db get?
-				// If it is Hash, it returns WRONGTYPE. storage_string.rs line 33.
-				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
-			}
-			Some(DataType::List) => {
-				let meta_val = ListMetaValue::decode(&bytes)?;
-				if meta_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
-				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
-			}
-			Some(DataType::Set) => {
-				let meta_val = SetMetaValue::decode(&bytes)?;
-				if meta_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
+			Some(DataType::Hash | DataType::List | DataType::Set | DataType::ZSet) => {
 				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
 			}
 			_ => Err("WRONGTYPE Operation against a key holding the wrong kind of value".into()),
@@ -73,32 +67,21 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
-		let meta_opt = self.string_db.get(key.encode()).await?;
+		let key_encoded = key.encode();
+		let db = self.db().clone();
+		let key_encoded_clone = key_encoded.clone();
+		let meta_opt = tokio::task::spawn_blocking(move || db.get(key_encoded_clone)).await??;
 
-		// Clean up if it's a Hash or List
-		if let Some(meta) = meta_opt {
-			match meta.first().and_then(|&b| DataType::from_u8(b)) {
-				Some(DataType::Hash) => {
-					self.delete_hash_fields(user_key).await?;
-				}
-				Some(DataType::List) => {
-					let meta_val = ListMetaValue::decode(&meta)?;
-					self.delete_list_elements(user_key, &meta_val).await?;
-				}
-				Some(DataType::Set) => {
-					self.delete_set_members(user_key).await?;
-				}
-				_ => {}
-			}
+		// Clean up if it's a collection type
+		if let Some(meta) = meta_opt
+			&& let Some(dt) = meta.first().and_then(|&b| DataType::from_u8(b))
+		{
+			self.cleanup_collection_type(user_key, dt, &meta).await?;
 		}
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		let db = self.db().clone();
+		let value_encoded = value.encode();
+		tokio::task::spawn_blocking(move || db.put(key_encoded, value_encoded)).await??;
 		Ok(())
 	}
 
@@ -106,34 +89,22 @@ impl Storage {
 		let user_key = key.clone();
 		let key = StringKey::new(key);
 
-		let Some(meta) = self.string_db.get(key.encode()).await? else {
+		let key_encoded = key.encode();
+		let db = self.db().clone();
+		let key_encoded_clone = key_encoded.clone();
+		let meta = tokio::task::spawn_blocking(move || db.get(key_encoded_clone)).await??;
+		let Some(meta) = meta else {
 			return Ok(false);
 		};
 
 		// Clean up fields if this is a collection type
 		if let Some(dt) = meta.first().and_then(|&b| DataType::from_u8(b)) {
-			match dt {
-				DataType::Hash => {
-					self.delete_hash_fields(user_key).await?;
-				}
-				DataType::List => {
-					let meta_val = ListMetaValue::decode(&meta)?;
-					self.delete_list_elements(user_key, &meta_val).await?;
-				}
-				DataType::Set => {
-					self.delete_set_members(user_key).await?;
-				}
-				_ => {}
-			}
+			self.cleanup_collection_type(user_key, dt, &meta).await?;
 		}
 
-		// Delete from string_db
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		self.string_db
-			.delete_with_options(key.encode(), &write_opts)
-			.await?;
+		// Delete from default CF
+		let db = self.db().clone();
+		tokio::task::spawn_blocking(move || db.delete(key_encoded)).await??;
 		Ok(true)
 	}
 
@@ -146,62 +117,56 @@ impl Storage {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
-		if let Some(bytes) = self.string_db.get(encoded_key.clone()).await? {
-			if bytes.is_empty() {
-				return Ok(false);
-			}
+		let db = self.db().clone();
+		let encoded_key_clone = encoded_key.clone();
+		let Some(bytes) = tokio::task::spawn_blocking(move || db.get(encoded_key_clone)).await??
+		else {
+			return Ok(false);
+		};
 
-			let encoded_val = match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => {
-					let mut val = StringValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				Some(DataType::Hash) => {
-					let mut val = HashMetaValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				Some(DataType::List) => {
-					let mut val = ListMetaValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				Some(DataType::Set) => {
-					let mut val = SetMetaValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				_ => return Ok(false),
-			};
-
-			// Check if already expired immediately
-			// We can verify by decoding again, but we know the expire_time we just set.
-			let now = chrono::Utc::now().timestamp_millis() as u64;
-			if expire_time > 0 && expire_time <= now {
-				self.del(user_key).await?;
-				return Ok(true);
-			}
-
-			let ttl = if expire_time > 0 {
-				slatedb::config::Ttl::ExpireAfter(expire_time.saturating_sub(now))
-			} else {
-				slatedb::config::Ttl::NoExpiry
-			};
-
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-
-			let put_opts = PutOptions { ttl };
-
-			self.string_db
-				.put_with_options(encoded_key, encoded_val, &put_opts, &write_opts)
-				.await?;
-			Ok(true)
-		} else {
-			Ok(false)
+		if bytes.is_empty() {
+			return Ok(false);
 		}
+
+		let encoded_val = match DataType::from_u8(bytes[0]) {
+			Some(DataType::String) => {
+				let mut val = StringValue::decode(&bytes)?;
+				val.expire_at(expire_time);
+				val.encode()
+			}
+			Some(DataType::Hash) => {
+				let mut val = HashMetaValue::decode(&bytes)?;
+				val.expire_at(expire_time);
+				val.encode()
+			}
+			Some(DataType::List) => {
+				let mut val = ListMetaValue::decode(&bytes)?;
+				val.expire_at(expire_time);
+				val.encode()
+			}
+			Some(DataType::Set) => {
+				let mut val = SetMetaValue::decode(&bytes)?;
+				val.expire_at(expire_time);
+				val.encode()
+			}
+			Some(DataType::ZSet) => {
+				let mut val = ZSetMetaValue::decode(&bytes)?;
+				val.expire_at(expire_time);
+				val.encode()
+			}
+			_ => return Ok(false),
+		};
+
+		// Check if already expired immediately
+		let now = chrono::Utc::now().timestamp_millis() as u64;
+		if expire_time > 0 && expire_time <= now {
+			self.del(user_key).await?;
+			return Ok(true);
+		}
+
+		let db = self.db().clone();
+		tokio::task::spawn_blocking(move || db.put(encoded_key, encoded_val)).await??;
+		Ok(true)
 	}
 
 	pub async fn ttl(
@@ -211,25 +176,27 @@ impl Storage {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
-		if let Some(bytes) = self.string_db.get(encoded_key).await? {
-			if bytes.is_empty() {
-				return Ok(None);
-			}
+		let db = self.db().clone();
+		let Some(bytes) = tokio::task::spawn_blocking(move || db.get(encoded_key)).await?? else {
+			return Ok(None);
+		};
 
-			let remaining_ttl = match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => StringValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::Hash) => HashMetaValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::List) => ListMetaValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::Set) => SetMetaValue::decode(&bytes)?.remaining_ttl(),
-				_ => return Ok(None),
-			};
+		if bytes.is_empty() {
+			return Ok(None);
+		}
 
-			match remaining_ttl {
-				Some(duration) => Ok(Some(duration.as_millis() as i64)),
-				None => Ok(Some(-1)),
-			}
-		} else {
-			Ok(None)
+		let remaining_ttl = match DataType::from_u8(bytes[0]) {
+			Some(DataType::String) => StringValue::decode(&bytes)?.remaining_ttl(),
+			Some(DataType::Hash) => HashMetaValue::decode(&bytes)?.remaining_ttl(),
+			Some(DataType::List) => ListMetaValue::decode(&bytes)?.remaining_ttl(),
+			Some(DataType::Set) => SetMetaValue::decode(&bytes)?.remaining_ttl(),
+			Some(DataType::ZSet) => ZSetMetaValue::decode(&bytes)?.remaining_ttl(),
+			_ => return Ok(None),
+		};
+
+		match remaining_ttl {
+			Some(duration) => Ok(Some(duration.as_millis() as i64)),
+			None => Ok(Some(-1)),
 		}
 	}
 
@@ -241,27 +208,29 @@ impl Storage {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
-		if let Some(bytes) = self.string_db.get(encoded_key).await? {
-			if bytes.is_empty() {
-				return Ok(false);
-			}
+		let db = self.db().clone();
+		let Some(bytes) = tokio::task::spawn_blocking(move || db.get(encoded_key)).await?? else {
+			return Ok(false);
+		};
 
-			let is_expired = match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => StringValue::decode(&bytes)?.is_expired(),
-				Some(DataType::Hash) => HashMetaValue::decode(&bytes)?.is_expired(),
-				Some(DataType::List) => ListMetaValue::decode(&bytes)?.is_expired(),
-				Some(DataType::Set) => SetMetaValue::decode(&bytes)?.is_expired(),
-				_ => return Ok(false),
-			};
+		if bytes.is_empty() {
+			return Ok(false);
+		}
 
-			if is_expired {
-				self.del(user_key).await?; // Lazy delete
-				Ok(false)
-			} else {
-				Ok(true)
-			}
-		} else {
+		let is_expired = match DataType::from_u8(bytes[0]) {
+			Some(DataType::String) => StringValue::decode(&bytes)?.is_expired(),
+			Some(DataType::Hash) => HashMetaValue::decode(&bytes)?.is_expired(),
+			Some(DataType::List) => ListMetaValue::decode(&bytes)?.is_expired(),
+			Some(DataType::Set) => SetMetaValue::decode(&bytes)?.is_expired(),
+			Some(DataType::ZSet) => ZSetMetaValue::decode(&bytes)?.is_expired(),
+			_ => return Ok(false),
+		};
+
+		if is_expired {
+			self.del(user_key).await?;
 			Ok(false)
+		} else {
+			Ok(true)
 		}
 	}
 

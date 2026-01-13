@@ -1,7 +1,5 @@
 use bytes::Bytes;
 use futures::future;
-use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::expirable::Expirable;
@@ -21,7 +19,7 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<ListMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
+		let meta_bytes = match self.db_get(&meta_key.encode()).await? {
 			Some(bytes) => bytes,
 			None => return Ok(None),
 		};
@@ -49,18 +47,13 @@ impl Storage {
 		key: Bytes,
 		meta: &ListMetaValue,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		// Elements are stored in the range [head, tail).
 		// head points to the first element, and tail points to one past the last element.
 		// We iterate through this range to delete all individual elements.
 
 		for i in meta.head..meta.tail {
 			let field_key = ListElementKey::new(key.clone(), i);
-			self.list_db
-				.delete_with_options(field_key.encode(), &write_opts)
-				.await?;
+			self.list_delete(&field_key.encode()).await?;
 		}
 		Ok(())
 	}
@@ -100,7 +93,7 @@ impl Storage {
 		let meta_encoded_key = meta_key.encode();
 
 		// Check type and get current meta
-		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
+		let current_meta_bytes = self.db_get(&meta_encoded_key).await?;
 
 		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
 			if meta_bytes.is_empty() {
@@ -132,11 +125,6 @@ impl Storage {
 			ListMetaValue::new()
 		};
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-
 		for element in elements {
 			let seq = if is_left {
 				meta_val.head -= 1;
@@ -148,30 +136,12 @@ impl Storage {
 			};
 
 			let element_key = ListElementKey::new(key.clone(), seq);
-			self.list_db
-				.put_with_options(element_key.encode(), element, &put_opts, &write_opts)
-				.await?;
+			self.list_put(&element_key.encode(), &element).await?;
 			meta_val.len += 1;
 		}
 
 		// Update metadata
-		// Preserve TTL if it exists
-		let ttl = meta_val
-			.remaining_ttl()
-			.map(|d| d.as_millis() as u64)
-			.map(slatedb::config::Ttl::ExpireAfter)
-			.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-		let meta_put_opts = PutOptions { ttl };
-
-		self.string_db
-			.put_with_options(
-				meta_encoded_key,
-				meta_val.encode(),
-				&meta_put_opts,
-				&write_opts,
-			)
-			.await?;
+		self.db_put(&meta_encoded_key, &meta_val.encode()).await?;
 
 		Ok(meta_val.len)
 	}
@@ -208,9 +178,6 @@ impl Storage {
 		}
 
 		let mut results = Vec::with_capacity(num);
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 
 		// We will pop up to `num` elements
 		let loop_count = std::cmp::min(num as u64, meta_val.len);
@@ -224,8 +191,8 @@ impl Storage {
 
 			let element_key = ListElementKey::new(key.clone(), seq);
 			// Get element
-			if let Some(val) = self.list_db.get(element_key.encode()).await? {
-				results.push(val);
+			if let Some(val) = self.list_get(&element_key.encode()).await? {
+				results.push(Bytes::from(val));
 
 				// Only update meta and delete if element exists
 				if is_left {
@@ -235,9 +202,7 @@ impl Storage {
 				}
 				meta_val.len -= 1;
 
-				self.list_db
-					.delete_with_options(element_key.encode(), &write_opts)
-					.await?;
+				self.list_delete(&element_key.encode()).await?;
 			}
 		}
 
@@ -246,26 +211,9 @@ impl Storage {
 
 		if meta_val.len == 0 {
 			// List empty, delete metadata
-			self.string_db
-				.delete_with_options(meta_key.encode(), &write_opts)
-				.await?;
+			self.db_delete(&meta_key.encode()).await?;
 		} else {
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let meta_put_opts = PutOptions { ttl };
-
-			self.string_db
-				.put_with_options(
-					meta_key.encode(),
-					meta_val.encode(),
-					&meta_put_opts,
-					&write_opts,
-				)
-				.await?;
+			self.db_put(&meta_key.encode(), &meta_val.encode()).await?;
 		}
 
 		Ok(results)
@@ -320,13 +268,15 @@ impl Storage {
 
 		// We use parallel GETs to fetch elements since we know the exact sequence numbers.
 		// Ranges are contiguous, so we can iterate from start_seq to stop_seq.
-		// TODO: Consider using scan for potentially better performance on large ranges,
-		// though simple GETs are sufficient given the sequence number design.
 
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {
 				let element_key = ListElementKey::new(key.clone(), seq);
-				async move { self.list_db.get(element_key.encode()).await }
+				async move {
+					self.list_get(&element_key.encode())
+						.await
+						.map(|v| v.map(Bytes::from))
+				}
 			})
 			.collect();
 

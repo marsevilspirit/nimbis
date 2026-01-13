@@ -1,10 +1,5 @@
 use bytes::Buf;
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
-use futures::future;
-use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::expirable::Expirable;
@@ -15,18 +10,13 @@ use crate::string::meta::MetaKey;
 
 impl Storage {
 	// Helper to get and validate hash metadata.
-	// Returns:
-	// - Ok(Some(meta)) if the key is a valid, non-expired Hash
-	// - Ok(None) if the key doesn't exist or is expired
-	// - Err if the key exists but is of wrong type (e.g., String)
 	async fn get_valid_hash_meta(
 		&self,
 		key: &Bytes,
 	) -> Result<Option<HashMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
-			None => return Ok(None),
+		let Some(meta_bytes) = self.db_get(&meta_key.encode()).await? else {
+			return Ok(None);
 		};
 
 		if meta_bytes.is_empty() {
@@ -44,49 +34,12 @@ impl Storage {
 	}
 
 	// Helper to delete all fields of a hash.
-	// Used when overwriting a Hash with a String, or deleting a Hash.
-	// TODO: This function is temporary; once the compaction filter is implemented,
-	// it will be replaced with a custom filter for elegant deletion.
 	pub(crate) async fn delete_hash_fields(
 		&self,
 		key: Bytes,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
-
-		let range = prefix.clone()..;
-		let mut stream = self.hash_db.scan(range).await?;
-		let mut keys_to_delete = Vec::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			if !k.starts_with(&prefix) {
-				break;
-			}
-			// Verify suffix (should be at least 4 bytes for field_len)
-			let suffix = &k[prefix.len()..];
-			if suffix.len() < 4 {
-				continue;
-			}
-			let mut buf = suffix;
-			let field_len = buf.get_u32() as usize;
-			if buf.len() != field_len {
-				continue;
-			}
-
-			keys_to_delete.push(k);
-		}
-
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		for k in keys_to_delete {
-			self.hash_db.delete_with_options(k, &write_opts).await?;
-		}
-		Ok(())
+		self.delete_with_prefix("hash", &Self::create_key_prefix(&key))
+			.await
 	}
 
 	pub async fn hset(
@@ -99,14 +52,14 @@ impl Storage {
 		let field_key = HashFieldKey::new(key.clone(), field);
 
 		// Valid type check (Must be Hash or None)
-		// We read from string_db which holds ALL metadata (StringValue or HashMetaValue)
+		// We read from db which holds ALL metadata (StringValue or HashMetaValue)
 		let meta_encoded_key = meta_key.encode();
 		let encoded_field_key = field_key.encode();
 
 		// Parallel fetch meta and field
 		let (meta_res, field_res) = tokio::join!(
-			self.string_db.get(meta_encoded_key.clone()),
-			self.hash_db.get(encoded_field_key.clone())
+			self.db_get(&meta_encoded_key),
+			self.hash_get(&encoded_field_key)
 		);
 
 		let current_meta_bytes = meta_res?;
@@ -139,30 +92,13 @@ impl Storage {
 			is_new_field = true;
 		}
 
-		// Set the field in hash_db
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.hash_db
-			.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
-			.await?;
+		// Set the field in hash cf
+		self.hash_put(&encoded_field_key, &value).await?;
 
-		// Update metadata in string_db if needed
+		// Update metadata in db if needed
 		if is_new_field {
 			meta_val.len += 1;
-
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
-
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+			self.db_put(&meta_encoded_key, &meta_val.encode()).await?;
 			Ok(1)
 		} else {
 			Ok(0)
@@ -180,8 +116,8 @@ impl Storage {
 		}
 
 		let field_key = HashFieldKey::new(key, field);
-		let result = self.hash_db.get(field_key.encode()).await?;
-		Ok(result)
+		let result = self.hash_get(&field_key.encode()).await?;
+		Ok(result.map(Bytes::from))
 	}
 
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
@@ -203,31 +139,18 @@ impl Storage {
 		}
 
 		// Create a future for each field lookup to enable concurrent execution
-		// These futures will be awaited in parallel using try_join_all below
 		let futures: Vec<_> = fields
 			.iter()
 			.map(|field| {
-				// We don't need to call self.hget() which repeats the check, we can access hash_db directly
 				let field_key = HashFieldKey::new(key.clone(), field.clone());
-				// We need to clone the db handle for the closure/future if needed, but self.hash_db is Arc
-				// Actually self.hash_db.get is async.
-				// We can just call self.hash_db.get
 				async move {
 					let k = field_key.encode();
-					self.hash_db.get(k).await
+					self.hash_get(&k).await.map(|v| v.map(Bytes::from))
 				}
 			})
 			.collect();
 
-		// The error handling types need to match. hash_db.get returns SlateDB error.
-		// hget returns Box<dyn Error>.
-		// try_join_all expects futures to return Result<T, E> where E is same.
-		// slateDB errors satisfy Into<Box<dyn Error>>? Maybe.
-		// Let's keep it simple and use a loop or just map errors.
-		// Or verify if try_join_all works with SlateDB errors directly.
-		// For simplicity/safety, let's just map the results.
-
-		let results = future::try_join_all(futures).await?;
+		let results = futures::future::try_join_all(futures).await?;
 		Ok(results)
 	}
 
@@ -235,34 +158,22 @@ impl Storage {
 		&self,
 		key: Bytes,
 	) -> Result<Vec<(Bytes, Bytes)>, Box<dyn std::error::Error + Send + Sync>> {
-		use bytes::Buf;
-		use bytes::BytesMut;
-
-		// Check if the hash exists and is valid
 		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(Vec::new());
 		}
 
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
+		let prefix = Self::create_key_prefix(&key);
+		let results = self.scan_with_prefix("hash", &prefix).await?;
+		let prefix_len = prefix.len();
+		let mut hash_results = Vec::new();
 
-		let range = prefix.clone()..;
-		let mut stream = self.hash_db.scan(range).await?;
-		let mut results = Vec::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			let v = kv.value;
-
-			if !k.starts_with(&prefix) {
+		for (k, v) in results {
+			let k_bytes: Bytes = k.into();
+			if !k_bytes.starts_with(&prefix) {
 				break;
 			}
 
-			// Parse field: prefix + len(u32) + field
-			let suffix = &k[prefix.len()..];
+			let suffix = &k_bytes[prefix_len..];
 			if suffix.len() < 4 {
 				continue;
 			}
@@ -275,11 +186,12 @@ impl Storage {
 			}
 
 			let field = Bytes::copy_from_slice(buf);
-			results.push((field, v));
+			hash_results.push((field, Bytes::from(v)));
 		}
 
-		Ok(results)
+		Ok(hash_results)
 	}
+
 	pub async fn hdel(
 		&self,
 		key: Bytes,
@@ -295,19 +207,14 @@ impl Storage {
 		};
 
 		let mut deleted_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 
 		for field in fields {
 			let field_key = HashFieldKey::new(key.clone(), field.clone());
 			let encoded_field_key = field_key.encode();
 
 			// check if field exists
-			if self.hash_db.get(encoded_field_key.clone()).await?.is_some() {
-				self.hash_db
-					.delete_with_options(encoded_field_key, &write_opts)
-					.await?;
+			if self.hash_get(&encoded_field_key).await?.is_some() {
+				self.hash_delete(&encoded_field_key).await?;
 				deleted_count += 1;
 			}
 		}
@@ -315,24 +222,11 @@ impl Storage {
 		if deleted_count > 0 {
 			if meta_val.len <= deleted_count as u64 {
 				// Hash is empty, delete meta
-				self.string_db
-					.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
+				self.db_delete(&meta_encoded_key).await?;
 			} else {
 				// Update meta
 				meta_val.len -= deleted_count as u64;
-
-				let ttl = meta_val
-					.remaining_ttl()
-					.map(|d| d.as_millis() as u64)
-					.map(slatedb::config::Ttl::ExpireAfter)
-					.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-				let put_opts = PutOptions { ttl };
-
-				self.string_db
-					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-					.await?;
+				self.db_put(&meta_encoded_key, &meta_val.encode()).await?;
 			}
 		}
 

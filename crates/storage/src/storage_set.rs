@@ -1,9 +1,5 @@
 use bytes::Buf;
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
-use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::expirable::Expirable;
@@ -19,9 +15,8 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<SetMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
-			None => return Ok(None),
+		let Some(meta_bytes) = self.db_get(&meta_key.encode()).await? else {
+			return Ok(None);
 		};
 
 		if meta_bytes.is_empty() {
@@ -42,42 +37,8 @@ impl Storage {
 		&self,
 		key: Bytes,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
-
-		let range = prefix.clone()..;
-		let mut stream = self.set_db.scan(range).await?;
-		let mut keys_to_delete = Vec::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			if !k.starts_with(&prefix) {
-				break;
-			}
-			// Verify suffix (should be at least 4 bytes for member_len)
-			let suffix = &k[prefix.len()..];
-			if suffix.len() < 4 {
-				continue;
-			}
-			let mut buf = suffix;
-			let member_len = buf.get_u32() as usize;
-			if buf.len() != member_len {
-				continue;
-			}
-
-			keys_to_delete.push(k);
-		}
-
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		for k in keys_to_delete {
-			self.set_db.delete_with_options(k, &write_opts).await?;
-		}
-		Ok(())
+		self.delete_with_prefix("set", &Self::create_key_prefix(&key))
+			.await
 	}
 
 	pub async fn sadd(
@@ -87,7 +48,7 @@ impl Storage {
 	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
+		let current_meta_bytes = self.db_get(&meta_encoded_key).await?;
 
 		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
 			if meta_bytes.is_empty() {
@@ -113,42 +74,20 @@ impl Storage {
 		}
 
 		let mut added_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), member);
 			let encoded_member_key = member_key.encode();
 
-			if self.set_db.get(encoded_member_key.clone()).await?.is_none() {
-				self.set_db
-					.put_with_options(
-						encoded_member_key,
-						Bytes::new(), // value is empty for set members
-						&put_opts,
-						&write_opts,
-					)
-					.await?;
+			if self.set_get(&encoded_member_key).await?.is_none() {
+				self.set_put(&encoded_member_key, &[]).await?;
 				added_count += 1;
 			}
 		}
 
 		if added_count > 0 {
 			meta_val.len += added_count;
-
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
-
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+			self.db_put(&meta_encoded_key, &meta_val.encode()).await?;
 		}
 
 		Ok(added_count)
@@ -162,24 +101,18 @@ impl Storage {
 			return Ok(Vec::new());
 		}
 
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
-
-		let range = prefix.clone()..;
-		let mut stream = self.set_db.scan(range).await?;
+		let prefix = Self::create_key_prefix(&key);
+		let results = self.scan_with_prefix("set", &prefix).await?;
+		let prefix_len = prefix.len();
 		let mut members = Vec::new();
 
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			if !k.starts_with(&prefix) {
+		for (k, _v) in results {
+			let k_bytes: Bytes = k.into();
+			if !k_bytes.starts_with(&prefix) {
 				break;
 			}
 
-			// Parse member: prefix + len(u32) + member
-			let suffix = &k[prefix.len()..];
+			let suffix = &k_bytes[prefix_len..];
 			if suffix.len() < 4 {
 				continue;
 			}
@@ -208,7 +141,7 @@ impl Storage {
 		}
 
 		let member_key = SetMemberKey::new(key, member);
-		Ok(self.set_db.get(member_key.encode()).await?.is_some())
+		Ok(self.set_get(&member_key.encode()).await?.is_some())
 	}
 
 	pub async fn srem(
@@ -225,18 +158,13 @@ impl Storage {
 		};
 
 		let mut removed_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), member);
 			let encoded_key = member_key.encode();
 
-			if self.set_db.get(encoded_key.clone()).await?.is_some() {
-				self.set_db
-					.delete_with_options(encoded_key, &write_opts)
-					.await?;
+			if self.set_get(&encoded_key).await?.is_some() {
+				self.set_delete(&encoded_key).await?;
 				removed_count += 1;
 			}
 		}
@@ -244,20 +172,9 @@ impl Storage {
 		if removed_count > 0 {
 			meta_val.len -= removed_count;
 			if meta_val.len == 0 {
-				self.string_db
-					.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
+				self.db_delete(&meta_encoded_key).await?;
 			} else {
-				let ttl = meta_val
-					.remaining_ttl()
-					.map(|d| d.as_millis() as u64)
-					.map(slatedb::config::Ttl::ExpireAfter)
-					.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-				let put_opts = PutOptions { ttl };
-				self.string_db
-					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-					.await?;
+				self.db_put(&meta_encoded_key, &meta_val.encode()).await?;
 			}
 		}
 
