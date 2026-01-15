@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use storage::Storage;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 
 use crate::cmd::CmdTable;
 use crate::config::SERVER_CONF;
+use crate::worker::TcpStreamWrapper;
 use crate::worker::Worker;
 use crate::worker::WorkerMessage;
 
@@ -34,7 +34,7 @@ impl Server {
 		let mut receivers = Vec::with_capacity(workers_num);
 
 		for i in 0..workers_num {
-			let (tx, rx) = mpsc::unbounded_channel();
+			let (tx, rx) = kimojio::async_channel_unbounded();
 			senders.insert(i, tx);
 			receivers.push(rx);
 		}
@@ -52,6 +52,7 @@ impl Server {
 				senders.clone(),
 				storage.clone(),
 				cmd_table.clone(),
+				i, // Pass worker index
 			));
 		}
 
@@ -71,14 +72,26 @@ impl Server {
 				Ok((socket, addr)) => {
 					debug!("New client connected from {}", addr);
 
+					// Convert tokio TcpStream to our wrapper
+					let stream_wrapper = match TcpStreamWrapper::from_tokio_stream(socket) {
+						Ok(w) => w,
+						Err(e) => {
+							error!("Failed to convert stream: {}", e);
+							continue;
+						}
+					};
+
 					// Round-robin dispatch
 					let worker = &self.workers[next_worker_idx];
-					if let Err(e) = worker.tx.send(WorkerMessage::NewConnection(socket)) {
-						error!(
-							"Failed to dispatch connection to worker {}: {}",
-							next_worker_idx, e
-						);
-					}
+
+					// Kimojio channels use async send
+					let tx = worker.tx.clone();
+					tokio::spawn(async move {
+						if let Err(e) = tx.send(WorkerMessage::NewConnection(stream_wrapper)).await
+						{
+							error!("Failed to dispatch connection to worker: {}", e);
+						}
+					});
 
 					next_worker_idx = (next_worker_idx + 1) % workers_len;
 				}
