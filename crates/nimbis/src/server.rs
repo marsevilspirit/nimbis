@@ -47,6 +47,7 @@ impl Server {
 			let my_tx = senders.get(&i).unwrap().clone();
 			// workers need the full map of senders to route commands to the appropriate worker based on consistent hashing of the command's key
 			workers.push(Worker::new(
+				i,
 				my_tx,
 				rx,
 				senders.clone(),

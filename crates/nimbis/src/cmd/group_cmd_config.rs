@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -38,7 +37,7 @@ impl Cmd for ConfigGroupCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
 		// First argument should be the subcommand name (e.g., "GET")
 		if args.is_empty() {
 			return RespValue::error("ERR wrong number of arguments for CONFIG command");
@@ -80,7 +79,7 @@ impl Cmd for ConfigGetCommand {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(&self, _storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
 		let pattern = String::from_utf8_lossy(&args[0]);
 
 		// Check if pattern contains wildcard
@@ -143,7 +142,7 @@ impl Cmd for ConfigSetCommand {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(&self, _storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
 		let field_name = String::from_utf8_lossy(&args[0]);
 		let value = String::from_utf8_lossy(&args[1]);
 

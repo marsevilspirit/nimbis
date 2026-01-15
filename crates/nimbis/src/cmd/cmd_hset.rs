@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use resp::RespValue;
 use storage::Storage;
@@ -28,7 +26,7 @@ impl Cmd for HSetCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
 		// args: [key, field, value, field, value, ...]
 		if args.len() < 3 || !(args.len() - 1).is_multiple_of(2) {
 			return RespValue::error(
