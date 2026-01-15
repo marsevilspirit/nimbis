@@ -54,10 +54,12 @@ impl Worker {
 				.unwrap();
 
 			rt.block_on(async move {
+				debug!("Worker thread {} started", id);
 				// Use a small buffer to aggregate messages from the channel
 				let mut batch_buffer = Vec::with_capacity(64);
 
 				while let Some(msg) = rx.recv().await {
+					debug!("Worker {} received message", id);
 					batch_buffer.push(msg);
 
 					// Try to drain more messages from the channel if available (Smart Batching)
@@ -140,6 +142,7 @@ async fn handle_client(
 			}
 			Err(e) => return Err(e.into()),
 		};
+		debug!("Read {} bytes from socket", n);
 
 		if n == 0 {
 			if buffer.is_empty() {
@@ -169,29 +172,113 @@ async fn handle_client(
 						}
 					};
 
-					// Calculate target worker using hash of the first key
-					let hash_key = parsed_cmd.args.first().cloned().unwrap_or_default();
+					if parsed_cmd.name.to_lowercase() == "flushdb" {
+						// Broadcast FLUSHDB to all workers
+						let (final_tx, final_rx) = oneshot::channel();
+						ordered_responses.push(PendingResponse::Future(final_rx));
 
-					// FNV-1a 64-bit hash
-					let mut hasher: u64 = 0xcbf29ce484222325;
-					for byte in &hash_key {
-						hasher ^= *byte as u64;
-						hasher = hasher.wrapping_mul(0x100000001b3);
+						let mut flush_rxs = Vec::with_capacity(peers.len());
+						for worker_idx in 0..peers.len() {
+							let (tx, rx) = oneshot::channel();
+							flush_rxs.push(rx);
+							let req = CmdRequest {
+								cmd_name: "FLUSHDB".to_string(),
+								args: parsed_cmd.args.clone(),
+								resp_tx: tx,
+							};
+							batches.entry(worker_idx).or_default().push(req);
+						}
+
+						// Spawn a task to aggregate responses
+						tokio::spawn(async move {
+							let mut success = true;
+							for rx in flush_rxs {
+								match rx.await {
+									Ok(RespValue::SimpleString(s)) if s == "OK" => {}
+									_ => success = false,
+								}
+							}
+							let result = if success {
+								RespValue::SimpleString(Bytes::from_static(b"OK"))
+							} else {
+								RespValue::Error(Bytes::from("Failed to flush all shards"))
+							};
+							final_tx.send(result).ok();
+						});
+					} else if parsed_cmd.name.to_lowercase() == "del" && parsed_cmd.args.len() > 1 {
+						// Scatter-gather DEL for multiple keys
+						let (final_tx, final_rx) = oneshot::channel();
+						ordered_responses.push(PendingResponse::Future(final_rx));
+
+						let mut del_rxs = Vec::new();
+
+						// Group keys by worker
+						let mut keys_by_worker: HashMap<usize, Vec<Bytes>> = HashMap::new();
+						for key in parsed_cmd.args {
+							let mut hasher: u64 = 0xcbf29ce484222325;
+							for byte in &key {
+								hasher ^= *byte as u64;
+								hasher = hasher.wrapping_mul(0x100000001b3);
+							}
+							let worker_idx = (hasher as usize) % peers.len();
+							keys_by_worker.entry(worker_idx).or_default().push(key);
+						}
+
+						for (worker_idx, keys) in keys_by_worker {
+							let (tx, rx) = oneshot::channel();
+							del_rxs.push(rx);
+							let req = CmdRequest {
+								cmd_name: "DEL".to_string(),
+								args: keys,
+								resp_tx: tx,
+							};
+							batches.entry(worker_idx).or_default().push(req);
+						}
+
+						tokio::spawn(async move {
+							let mut total_deleted = 0;
+							let mut error = None;
+							for rx in del_rxs {
+								match rx.await {
+									Ok(RespValue::Integer(n)) => total_deleted += n,
+									Ok(RespValue::Error(e)) => error = Some(e),
+									Ok(_) => {} // Unexpected type
+									Err(_) => error = Some(Bytes::from("Internal error")),
+								}
+							}
+
+							let result = if let Some(e) = error {
+								RespValue::Error(e)
+							} else {
+								RespValue::Integer(total_deleted)
+							};
+							final_tx.send(result).ok();
+						});
+					} else {
+						// Calculate target worker using hash of the first key
+						let hash_key = parsed_cmd.args.first().cloned().unwrap_or_default();
+
+						// FNV-1a 64-bit hash
+						let mut hasher: u64 = 0xcbf29ce484222325;
+						for byte in &hash_key {
+							hasher ^= *byte as u64;
+							hasher = hasher.wrapping_mul(0x100000001b3);
+						}
+
+						let target_worker_idx = (hasher as usize) % peers.len();
+
+						// Always route via channel (even for local) to ensure serialization
+						let (resp_tx, resp_rx) = oneshot::channel();
+						ordered_responses.push(PendingResponse::Future(resp_rx));
+
+						let req = CmdRequest {
+							cmd_name: parsed_cmd.name,
+							args: parsed_cmd.args,
+							resp_tx,
+						};
+
+						batches.entry(target_worker_idx).or_default().push(req);
 					}
-
-					let target_worker_idx = (hasher as usize) % peers.len();
-
-					// Always route via channel (even for local) to ensure serialization
-					let (resp_tx, resp_rx) = oneshot::channel();
-					ordered_responses.push(PendingResponse::Future(resp_rx));
-
-					let req = CmdRequest {
-						cmd_name: parsed_cmd.name,
-						args: parsed_cmd.args,
-						resp_tx,
-					};
-
-					batches.entry(target_worker_idx).or_default().push(req);
 				}
 				RespParseResult::Incomplete => {
 					break;
@@ -211,6 +298,11 @@ async fn handle_client(
 
 		// Dispatch batches
 		for (worker_idx, batch) in batches {
+			debug!(
+				"Dispatching batch of {} cmds to worker {}",
+				batch.len(),
+				worker_idx
+			);
 			if let Some(sender) = peers.get(&worker_idx) {
 				if let Err(e) = sender.send(WorkerMessage::CmdBatch(batch)) {
 					error!("Failed to send batch to worker {}: {}", worker_idx, e);
@@ -224,10 +316,11 @@ async fn handle_client(
 
 		// Wait for responses in order and write to socket
 		for response in ordered_responses {
+			debug!("Waiting for response...");
 			let resp_value = match response {
 				PendingResponse::Future(rx) => rx.await.map_err(|_| "worker dropped request")?,
 			};
-
+			debug!("Got response, writing to socket");
 			if let Err(e) = socket.write_all(&resp_value.encode()?).await {
 				if e.kind() == std::io::ErrorKind::ConnectionReset {
 					debug!("Connection reset by peer");

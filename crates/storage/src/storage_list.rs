@@ -356,7 +356,7 @@ mod tests {
 		let timestamp = ulid::Ulid::new().to_string();
 		let path = std::env::temp_dir().join(format!("nimbis_test_list_{}", timestamp));
 		std::fs::create_dir_all(&path).unwrap();
-		let storage = Storage::open(&path).await.unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
 		(storage, path)
 	}
 
