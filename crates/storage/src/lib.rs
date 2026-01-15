@@ -3,6 +3,7 @@ pub mod error;
 pub mod expirable;
 pub mod hash;
 pub mod list;
+pub mod lock_manager;
 pub mod set;
 pub mod storage;
 pub mod storage_hash;
@@ -13,4 +14,7 @@ pub mod storage_zset;
 pub mod string;
 pub mod zset;
 
+pub use crate::lock_manager::LockGuard;
+pub use crate::lock_manager::LockManager;
+pub use crate::lock_manager::MultiLockGuard;
 pub use crate::storage::Storage;

@@ -5,6 +5,8 @@ use slatedb::Db;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
+use crate::lock_manager::LockManager;
+
 #[derive(Clone)]
 pub struct Storage {
 	pub(crate) string_db: Arc<Db>,
@@ -12,6 +14,7 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
+	pub lock_manager: Arc<LockManager>,
 }
 
 impl Storage {
@@ -28,6 +31,7 @@ impl Storage {
 			list_db,
 			set_db,
 			zset_db,
+			lock_manager: Arc::new(LockManager::new()),
 		}
 	}
 
@@ -50,13 +54,14 @@ impl Storage {
 			open_db("/zset")
 		)?;
 
-		Ok(Self::new(
+		let storage = Self::new(
 			Arc::new(string_db),
 			Arc::new(hash_db),
 			Arc::new(list_db),
 			Arc::new(set_db),
 			Arc::new(zset_db),
-		))
+		);
+		Ok(storage)
 	}
 
 	pub async fn flush_all(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
