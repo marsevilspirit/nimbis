@@ -26,10 +26,6 @@ fn hash_key(key: &[u8]) -> u64 {
 	hasher
 }
 
-enum PendingResponse {
-	Future(oneshot::Receiver<RespValue>),
-}
-
 /// Helper to aggregate FLUSHDB responses from all workers
 async fn aggregate_flushdb_responses(
 	flush_rxs: Vec<oneshot::Receiver<RespValue>>,
@@ -54,7 +50,7 @@ async fn aggregate_flushdb_responses(
 pub struct CommandDispatcher {
 	peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 	batches: HashMap<usize, Vec<CmdRequest>>,
-	ordered_responses: Vec<PendingResponse>,
+	ordered_responses: Vec<oneshot::Receiver<RespValue>>,
 }
 
 impl CommandDispatcher {
@@ -83,8 +79,7 @@ impl CommandDispatcher {
 	/// Broadcast command to all workers (FLUSHDB)
 	fn broadcast_cmd(&mut self, cmd: ParsedCmd) {
 		let (final_tx, final_rx) = oneshot::channel();
-		self.ordered_responses
-			.push(PendingResponse::Future(final_rx));
+		self.ordered_responses.push(final_rx);
 
 		let mut flush_rxs = Vec::with_capacity(self.peers.len());
 		for &worker_idx in self.peers.keys() {
@@ -107,8 +102,7 @@ impl CommandDispatcher {
 		let target_worker_idx = (hash_key(&key) as usize) % self.peers.len();
 
 		let (resp_tx, resp_rx) = oneshot::channel();
-		self.ordered_responses
-			.push(PendingResponse::Future(resp_rx));
+		self.ordered_responses.push(resp_rx);
 
 		let req = CmdRequest {
 			cmd_name: cmd.name,
@@ -147,11 +141,9 @@ impl CommandDispatcher {
 		&mut self,
 		socket: &mut TcpStream,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		for response in self.ordered_responses.drain(..) {
+		for rx in self.ordered_responses.drain(..) {
 			debug!("Waiting for response...");
-			let resp_value = match response {
-				PendingResponse::Future(rx) => rx.await.map_err(|_| "worker dropped request")?,
-			};
+			let resp_value = rx.await.map_err(|_| "worker dropped request")?;
 			debug!("Got response, writing to socket");
 			if let Err(e) = socket.write_all(&resp_value.encode()?).await {
 				if e.kind() == std::io::ErrorKind::ConnectionReset {

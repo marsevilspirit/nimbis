@@ -23,13 +23,14 @@ pub struct Storage {
 }
 ```
 
-It leverages multiple `SlateDB` instances:
+It leverages multiple `SlateDB` instances (5 isolated databases total):
 - **String DB**: Stores actual String values AND Metadata for all data types (Hash, List, etc.).
 - **Hash DB**: Stores Hash fields exclusively.
 - **List DB**: Stores List elements exclusively.
 - **Set DB**: Stores Set members exclusively.
 - **ZSet DB**: Stores Sorted Set members and score indices exclusively.
 - **Isolated Storage**: Each data type has its own database instance for better isolation and performance.
+- **Sharded Storage**: Each worker owns its own `Storage` instance in `{data_path}/shard-{id}/` for zero-lock contention.
 
 ### String Operations
 
@@ -194,18 +195,30 @@ This method:
 
 ### Directory Structure
 
-When you call `Storage::open("./nimbis_data")`, it creates the following structure:
+When you call `Storage::open("./nimbis_data", Some(shard_id))`, it creates the following structure per worker:
 
 ```
 nimbis_data/
-├── string/          # String key-value and metadata storage
-├── hash/            # Hash fields storage
-├── list/            # List elements storage
-├── set/             # Set members storage
-└── zset/            # Sorted Set members and score indices
+└── shard-0/          # Worker 0's isolated storage
+    ├── string/       # String key-value and metadata storage
+    ├── hash/         # Hash fields storage
+    ├── list/         # List elements storage
+    ├── set/          # Set members storage
+    └── zset/         # Sorted Set members and score indices
+
+nimbis_data/
+└── shard-1/          # Worker 1's isolated storage (and so on...)
+    ├── string/
+    ├── hash/
+    ├── list/
+    ├── set/
+    └── zset/
 ```
 
-Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.).
+Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.). The sharded architecture ensures:
+- **Zero contention**: No cross-shard locks or shared SlateDB instances.
+- **Improved cache locality**: Each worker thread processes a specific subset of data.
+- **Independent compaction**: SlateDB background tasks are distributed across workers.
 
 ### Usage in Commands
 

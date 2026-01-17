@@ -34,7 +34,8 @@ Persistent storage layer using SlateDB.
 **Location**: `crates/storage/`
 
 **Key Components**:
-- `Storage` struct with multi-engine support (`meta_db`, `string_db`, `hash_db`)
+- `Storage` struct with 5 isolated SlateDB instances (`string_db`, `hash_db`, `list_db`, `set_db`, `zset_db`)
+- Per-worker sharded storage architecture (`shard-{id}/` subdirectories)
 - Type-specific encoding logic (StringKey, HashFieldKey, etc.)
 - SlateDB integration
 

@@ -27,7 +27,8 @@ impl Cmd for DelCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
-		// Only delete the first key (multi-key DEL should be handled by client via MGET/MSET pattern)
+		// TODO: Support multi-key deletion via scatter-gather across workers
+		// (similar to FLUSHDB broadcast pattern, not MGET/MSET which are for get/set)
 		if let Some(key) = args.first() {
 			match storage.del(key.clone()).await {
 				Ok(true) => RespValue::Integer(1),

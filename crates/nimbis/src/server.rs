@@ -28,7 +28,6 @@ impl Server {
 
 		let cmd_table = Arc::new(CmdTable::new());
 
-		// let workers_num = num_cpus::get();
 		let workers_num = num_cpus::get();
 		let mut workers = Vec::with_capacity(workers_num);
 
