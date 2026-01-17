@@ -96,7 +96,8 @@ impl CommandDispatcher {
 		tokio::spawn(aggregate_flushdb_responses(flush_rxs, final_tx));
 	}
 
-	/// Route command to single worker based on first key's hash (DEL, GET, SET, etc.)
+	/// Route command to single worker based on first key's hash (DEL, GET, SET,
+	/// etc.)
 	fn route_cmd(&mut self, cmd: ParsedCmd) {
 		let key = cmd.args.first().cloned().unwrap_or_default();
 		let target_worker_idx = (hash_key(&key) as usize) % self.peers.len();

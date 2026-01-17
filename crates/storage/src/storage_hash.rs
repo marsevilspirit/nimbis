@@ -99,7 +99,8 @@ impl Storage {
 		let field_key = HashFieldKey::new(key.clone(), field);
 
 		// Valid type check (Must be Hash or None)
-		// We read from string_db which holds ALL metadata (StringValue or HashMetaValue)
+		// We read from string_db which holds ALL metadata (StringValue or
+		// HashMetaValue)
 		let meta_encoded_key = meta_key.encode();
 		let encoded_field_key = field_key.encode();
 
@@ -207,10 +208,11 @@ impl Storage {
 		let futures: Vec<_> = fields
 			.iter()
 			.map(|field| {
-				// We don't need to call self.hget() which repeats the check, we can access hash_db directly
+				// We don't need to call self.hget() which repeats the check, we can access
+				// hash_db directly
 				let field_key = HashFieldKey::new(key.clone(), field.clone());
-				// We need to clone the db handle for the closure/future if needed, but self.hash_db is Arc
-				// Actually self.hash_db.get is async.
+				// We need to clone the db handle for the closure/future if needed, but
+				// self.hash_db is Arc Actually self.hash_db.get is async.
 				// We can just call self.hash_db.get
 				async move {
 					let k = field_key.encode();

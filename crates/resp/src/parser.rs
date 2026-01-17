@@ -69,9 +69,10 @@ impl RespParser {
 
 	/// Parse a RESP value from a mutable BytesMut buffer.
 	///
-	/// If successful, consumes the parsed bytes and returns `RespParseResult::Complete(value)`.
-	/// If incomplete, returns `RespParseResult::Incomplete`.
-	/// If an error occurs, returns `RespParseResult::Error(error)`.
+	/// If successful, consumes the parsed bytes and returns
+	/// `RespParseResult::Complete(value)`. If incomplete, returns
+	/// `RespParseResult::Incomplete`. If an error occurs, returns
+	/// `RespParseResult::Error(error)`.
 	pub fn parse(&mut self, buf: &mut BytesMut) -> RespParseResult {
 		if self.frames.is_empty() {
 			self.frames.push(Frame::Root);
@@ -97,7 +98,8 @@ impl RespParser {
 		}
 	}
 
-	// Helper to handle a successfully obtained value (either primitive or a finished collection)
+	// Helper to handle a successfully obtained value (either primitive or a
+	// finished collection)
 	fn handle_parsed_value(&mut self, value: RespValue) -> Result<Option<RespValue>, ParseError> {
 		// This function injects the value into the current top frame.
 		// Returns `Some(RespValue)` if the ROOT value is completed.
@@ -176,8 +178,8 @@ impl RespParser {
 
 	/// Tries to parse the next token.
 	/// If it's a primitive, returns `Ok(Some(Parsed::Value(v)))`.
-	/// If it's a collection start, pushes frame and returns `Ok(Some(Parsed::FramePushed))`.
-	/// If incomplete, returns `Ok(None)`.
+	/// If it's a collection start, pushes frame and returns
+	/// `Ok(Some(Parsed::FramePushed))`. If incomplete, returns `Ok(None)`.
 	fn parse_step(&mut self, buf: &mut BytesMut) -> Result<Option<ParsedItem>, ParseError> {
 		if buf.is_empty() {
 			return Ok(None);

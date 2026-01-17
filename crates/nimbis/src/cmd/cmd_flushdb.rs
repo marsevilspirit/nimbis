@@ -29,7 +29,8 @@ impl Cmd for FlushDbCmd {
 
 	async fn do_cmd(&self, storage: &Storage, _args: &[Bytes]) -> RespValue {
 		// FLUSHDB removes all keys from the current database.
-		// Storage provides a flush_all method to delete all data while keeping the storage instances valid.
+		// Storage provides a flush_all method to delete all data while keeping the
+		// storage instances valid.
 		match storage.flush_all().await {
 			Ok(_) => RespValue::simple_string("OK"),
 			Err(e) => RespValue::error(e.to_string()),

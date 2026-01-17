@@ -21,11 +21,11 @@ impl ScoreKey {
 	pub fn encode(&self) -> Bytes {
 		// Key format: user_key + b'S' + score (u64 big endian, bit flipped) + member
 		// We use a custom encoding for f64 to ensure correct sorting order.
-		// IEEE 754 floats don't sort correctly when treated as bytes (especially negative numbers).
-		// A common trick is to flip the sign bit if positive, or flip all bits if negative.
-		// However, for simplicity and standard practice in key-value stores (like CockroachDB or others):
-		// If sign bit is 0 (positive): flip sign bit (becomes 1)
-		// If sign bit is 1 (negative): flip all bits
+		// IEEE 754 floats don't sort correctly when treated as bytes (especially
+		// negative numbers). A common trick is to flip the sign bit if positive, or
+		// flip all bits if negative. However, for simplicity and standard practice in
+		// key-value stores (like CockroachDB or others): If sign bit is 0 (positive):
+		// flip sign bit (becomes 1) If sign bit is 1 (negative): flip all bits
 		// This maps:
 		// -0.0 -> 0x8000...
 		// +0.0 -> 0x8000...
@@ -47,8 +47,9 @@ impl ScoreKey {
 	}
 
 	/// Encode an f64 score into a u64 for byte-sortable storage.
-	/// IEEE 754 floats don't sort correctly when treated as bytes (especially negative numbers).
-	/// This flips bits to ensure correct byte-level ordering:
+	/// IEEE 754 floats don't sort correctly when treated as bytes (especially
+	/// negative numbers). This flips bits to ensure correct byte-level
+	/// ordering:
 	/// - Positive numbers: set sign bit to 1
 	/// - Negative numbers: flip all bits
 	pub fn encode_score(score: f64) -> u64 {

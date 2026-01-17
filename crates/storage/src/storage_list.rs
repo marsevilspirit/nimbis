@@ -53,8 +53,8 @@ impl Storage {
 			await_durable: false,
 		};
 		// Elements are stored in the range [head, tail).
-		// head points to the first element, and tail points to one past the last element.
-		// We iterate through this range to delete all individual elements.
+		// head points to the first element, and tail points to one past the last
+		// element. We iterate through this range to delete all individual elements.
 
 		for i in meta.head..meta.tail {
 			let field_key = ListElementKey::new(key.clone(), i);
@@ -318,10 +318,11 @@ impl Storage {
 		let start_seq = meta_val.head + start_idx as u64;
 		let stop_seq = meta_val.head + stop_idx as u64;
 
-		// We use parallel GETs to fetch elements since we know the exact sequence numbers.
-		// Ranges are contiguous, so we can iterate from start_seq to stop_seq.
-		// TODO: Consider using scan for potentially better performance on large ranges,
-		// though simple GETs are sufficient given the sequence number design.
+		// We use parallel GETs to fetch elements since we know the exact sequence
+		// numbers. Ranges are contiguous, so we can iterate from start_seq to
+		// stop_seq. TODO: Consider using scan for potentially better performance on
+		// large ranges, though simple GETs are sufficient given the sequence number
+		// design.
 
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {

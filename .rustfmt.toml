@@ -10,3 +10,14 @@ imports_granularity = "Item"
 newline_style = "Unix"
 
 hard_tabs = true
+
+# Allow automatic line-wrapping for comments
+wrap_comments = true
+
+# Set the maximum width for comments (usually recommended to match max_width, default is 80)
+comment_width = 80
+
+# (Optional) Whether to convert /* */ to //
+normalize_comments = true
+
+max_width = 100

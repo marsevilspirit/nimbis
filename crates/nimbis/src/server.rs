@@ -22,12 +22,11 @@ impl Server {
 	pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 		// Ensure data directory exists
 		let data_path = &SERVER_CONF.load().data_path;
-		// create_dir_all is handled by Storage::open for subdirs, but we can keep this for base
 		std::fs::create_dir_all(data_path)?;
-		// Let storage initialization happen per worker
 
 		let cmd_table = Arc::new(CmdTable::new());
 
+		// Determine number of workers based on CPU cores
 		let workers_num = num_cpus::get();
 		let mut workers = Vec::with_capacity(workers_num);
 
@@ -52,7 +51,8 @@ impl Server {
 			// Data will be in .../nimbis_data/shard-{i}/...
 			let storage = Arc::new(Storage::open(data_path, Some(i)).await?);
 
-			// workers need the full map of senders to route commands to the appropriate worker based on consistent hashing of the command's key
+			// workers need the full map of senders to route commands to the appropriate
+			// worker based on consistent hashing of the command's key
 			workers.push(Worker::new(
 				i,
 				my_tx,

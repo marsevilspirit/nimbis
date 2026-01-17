@@ -29,8 +29,8 @@ pub fn find_crlf(buf: &[u8]) -> Option<usize> {
 	buf.windows(2).position(|window| window == CRLF)
 }
 
-/// Peek a line from buffer (without CRLF), returning (line, total_len_including_crlf)
-/// returns None if CRLF is not found
+/// Peek a line from buffer (without CRLF), returning (line,
+/// total_len_including_crlf) returns None if CRLF is not found
 #[inline]
 pub fn peek_line(buf: &[u8]) -> Option<(&[u8], usize)> {
 	find_crlf(buf).map(|pos| (&buf[..pos], pos + 2))

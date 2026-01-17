@@ -41,8 +41,8 @@ impl Cmd for HSetCmd {
 		for chunk in chunks {
 			let field = &chunk[0];
 			let value = &chunk[1];
-			// TODO: Optimize by handling errors gracefully or transactional vs partial success?
-			// Redis HSET is atomic per key. Here we do sequential updates.
+			// TODO: Optimize by handling errors gracefully or transactional vs partial
+			// success? Redis HSET is atomic per key. Here we do sequential updates.
 			// If one fails, we return error.
 			match storage
 				.hset(key.clone(), field.clone(), value.clone())
