@@ -16,11 +16,14 @@ use crate::worker::CmdRequest;
 use crate::worker::WorkerMessage;
 
 /// Simple FNV-1a 64-bit hash for key-based worker routing
+/// See: https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
 #[inline]
 fn hash_key(key: &[u8]) -> u64 {
+	// FNV-1a 64-bit offset basis (standard constant)
 	let mut hasher: u64 = 0xcbf29ce484222325;
 	for &byte in key {
 		hasher ^= byte as u64;
+		// FNV-1a 64-bit prime (standard constant)
 		hasher = hasher.wrapping_mul(0x100000001b3);
 	}
 	hasher
