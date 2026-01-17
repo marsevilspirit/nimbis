@@ -1,3 +1,4 @@
+# Enables unstable formatting features that are not yet finalized
 unstable_features = true
 
 # Automatically reorder and sort imports into three groups
@@ -9,6 +10,10 @@ imports_granularity = "Item"
 # Force Unix-style newlines
 newline_style = "Unix"
 
+# Reorder imports alphabetically (forces alphabetical sorting of imports)
+reorder_imports = true
+
+# Use hard tabs instead of spaces for indentation
 hard_tabs = true
 
 # Allow automatic line-wrapping for comments
@@ -20,4 +25,5 @@ comment_width = 80
 # (Optional) Whether to convert /* */ to //
 normalize_comments = true
 
+# Sets the maximum line width for code formatting
 max_width = 100
