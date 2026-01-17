@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use resp::RespValue;
@@ -30,7 +28,7 @@ impl Cmd for RPopCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
 		let key = args[0].clone();
 		let count = if args.len() > 1 {
 			match utils::parse_int(&args[1]) {
@@ -47,8 +45,8 @@ impl Cmd for RPopCmd {
 					return RespValue::Null;
 				}
 				if args.len() == 1 {
-					// The `elements.is_empty()` check above ensures `elements` has exactly one item here
-					// so we can safely unwrap.
+					// The `elements.is_empty()` check above ensures `elements` has exactly one item
+					// here so we can safely unwrap.
 					RespValue::bulk_string(elements.first().unwrap().clone())
 				} else {
 					let resp_elements: Vec<RespValue> =

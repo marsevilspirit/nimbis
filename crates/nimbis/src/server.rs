@@ -23,9 +23,10 @@ impl Server {
 		// Ensure data directory exists
 		let data_path = &SERVER_CONF.load().data_path;
 		std::fs::create_dir_all(data_path)?;
-		let storage = Arc::new(Storage::open(data_path).await?);
+
 		let cmd_table = Arc::new(CmdTable::new());
 
+		// Determine number of workers based on CPU cores
 		let workers_num = num_cpus::get();
 		let mut workers = Vec::with_capacity(workers_num);
 
@@ -42,15 +43,22 @@ impl Server {
 		// Wrap senders in Arc to avoid deep cloning for each worker
 		let senders = Arc::new(senders);
 
-		// Second pass: create workers
+		// Second pass: create workers and sharded storage
 		for (i, rx) in receivers.into_iter().enumerate() {
 			let my_tx = senders.get(&i).unwrap().clone();
-			// workers need the full map of senders to route commands to the appropriate worker based on consistent hashing of the command's key
+
+			// SHARDED STORAGE: Create a unique Storage instance for this worker
+			// Data will be in .../nimbis_data/shard-{i}/...
+			let storage = Arc::new(Storage::open(data_path, Some(i)).await?);
+
+			// workers need the full map of senders to route commands to the appropriate
+			// worker based on consistent hashing of the command's key
 			workers.push(Worker::new(
+				i,
 				my_tx,
 				rx,
 				senders.clone(),
-				storage.clone(),
+				storage, // This is now unique per worker
 				cmd_table.clone(),
 			));
 		}
@@ -67,6 +75,7 @@ impl Server {
 		let mut next_worker_idx = 0;
 
 		loop {
+			debug!("Waiting for accept...");
 			match listener.accept().await {
 				Ok((socket, addr)) => {
 					debug!("New client connected from {}", addr);

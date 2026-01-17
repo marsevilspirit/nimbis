@@ -2,8 +2,9 @@
 //!
 //! A high-performance, zero-copy RESP protocol parser and encoder for Rust.
 //!
-//! This library provides efficient parsing and encoding of the Redis Serialization Protocol (RESP),
-//! supporting both RESP2 and RESP3 specifications.
+//! This library provides efficient parsing and encoding of the Redis
+//! Serialization Protocol (RESP), supporting both RESP2 and RESP3
+//! specifications.
 //!
 //! ## Features
 //!

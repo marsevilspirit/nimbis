@@ -33,8 +33,17 @@ impl Storage {
 
 	pub async fn open(
 		path: impl AsRef<Path>,
+		shard_id: Option<usize>,
 	) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-		let path = path.as_ref();
+		let mut path_buf = path.as_ref().to_path_buf();
+		if let Some(id) = shard_id {
+			path_buf.push(format!("shard-{}", id));
+		}
+		let path = path_buf.as_path();
+
+		// Ensure shard directory exists
+		tokio::fs::create_dir_all(path).await?;
+
 		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
 
 		let open_db = |name: &'static str| {

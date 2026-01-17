@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use resp::RespValue;
 use storage::Storage;
@@ -45,10 +43,10 @@ pub trait Cmd: Send + Sync {
 	/// Get command metadata
 	fn meta(&self) -> &CmdMeta;
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue;
+	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue;
 
 	/// Execute the command
-	async fn execute(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+	async fn execute(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
 		if let Err(err) = self.meta().validate_arity(args.len() + 1) {
 			return RespValue::error(err);
 		}

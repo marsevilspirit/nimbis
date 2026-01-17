@@ -77,7 +77,8 @@ mod tests {
 		// Initialize with default values
 		let config = ServerConfig::default();
 
-		// Try to init. If it's already initialized (by other tests), this is a no-op due to our idempotent implementation.
+		// Try to init. If it's already initialized (by other tests), this is a no-op
+		// due to our idempotent implementation.
 		SERVER_CONF.init(config);
 
 		// Now verify access via load()

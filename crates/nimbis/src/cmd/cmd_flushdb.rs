@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use resp::RespValue;
@@ -17,7 +15,7 @@ impl Default for FlushDbCmd {
 		Self {
 			meta: CmdMeta {
 				name: "FLUSHDB".to_string(),
-				arity: 1, // FLUSHDB
+				arity: 0,
 			},
 		}
 	}
@@ -29,7 +27,10 @@ impl Cmd for FlushDbCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, _args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, _args: &[Bytes]) -> RespValue {
+		// FLUSHDB removes all keys from the current database.
+		// Storage provides a flush_all method to delete all data while keeping the
+		// storage instances valid.
 		match storage.flush_all().await {
 			Ok(_) => RespValue::simple_string("OK"),
 			Err(e) => RespValue::error(e.to_string()),

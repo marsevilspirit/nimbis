@@ -89,7 +89,8 @@ pub struct ListMetaValue {
 
 impl ListMetaValue {
 	pub fn new() -> Self {
-		// Initialize head and tail at the middle of u64 range to allow expansion in both directions
+		// Initialize head and tail at the middle of u64 range to allow expansion in
+		// both directions
 		let mid = u64::MAX / 2;
 		Self {
 			len: 0,

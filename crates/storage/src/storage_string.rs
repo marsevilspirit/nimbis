@@ -296,7 +296,7 @@ mod tests {
 		let timestamp = ulid::Ulid::new().to_string();
 		let path = std::env::temp_dir().join(format!("nimbis_test_{}", timestamp));
 		std::fs::create_dir_all(&path).unwrap();
-		let storage = Storage::open(&path).await.unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
 		(storage, path)
 	}
 
@@ -392,7 +392,8 @@ mod tests {
 		let val = storage.get(k.clone()).await.unwrap();
 		assert_eq!(val, Some(Bytes::from("v2")));
 
-		// 8. Check Hash is gone (HGET -> WRONGTYPE, wait, if we deleted hash fields, HGET logic checks meta first)
+		// 8. Check Hash is gone (HGET -> WRONGTYPE, wait, if we deleted hash fields,
+		//    HGET logic checks meta first)
 		// Since meta is now String, HGET returns WRONGTYPE. Correct.
 		let err = storage.hget(k.clone(), f.clone()).await.unwrap_err();
 		assert!(err.to_string().contains("WRONGTYPE"));

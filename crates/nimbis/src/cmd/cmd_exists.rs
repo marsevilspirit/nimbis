@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use resp::RespValue;
@@ -17,7 +15,7 @@ impl Default for ExistsCmd {
 		Self {
 			meta: CmdMeta {
 				name: "EXISTS".to_string(),
-				arity: -2, // At least 1 key
+				arity: 2, // Exactly 1 key (multi-key requires scatter-gather across workers)
 			},
 		}
 	}
@@ -29,18 +27,15 @@ impl Cmd for ExistsCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[Bytes]) -> RespValue {
-		let mut count = 0;
-		for key in args {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
+		// TODO: Support multi-key existence check via scatter-gather across workers
+		if let Some(key) = args.first() {
 			match storage.exists(key.clone()).await {
-				Ok(exists) => {
-					if exists {
-						count += 1;
-					}
-				}
-				Err(e) => return RespValue::Error(Bytes::from(e.to_string())),
+				Ok(exists) => RespValue::Integer(if exists { 1 } else { 0 }),
+				Err(e) => RespValue::Error(Bytes::from(e.to_string())),
 			}
+		} else {
+			RespValue::Integer(0)
 		}
-		RespValue::Integer(count)
 	}
 }

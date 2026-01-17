@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use resp::RespValue;
 use storage::Storage;
@@ -28,7 +26,7 @@ impl Cmd for HGetCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
 		let key = &args[0];
 		let field = &args[1];
 

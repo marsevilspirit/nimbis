@@ -17,7 +17,8 @@ impl MemberKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: len(user_key) (u16 BE) + user_key + b'M' + len(member) (u32 BE) + member
+		// Key format: len(user_key) (u16 BE) + user_key + b'M' + len(member) (u32 BE) +
+		// member
 		let user_key_len = self.user_key.len() as u16;
 		let member_len = self.member.len() as u32;
 

@@ -9,42 +9,35 @@ The Worker subsystem is responsible for handling client commands and managing co
 ### 1.1 Key Design Goals
 
 - **Multi-core Utilization**: Spawn workers equal to CPU cores for parallelism
-- **Connection Isolation**: Each worker handles connections independently
-- **Key-based Affinity**: Commands targeting the same key are routed to the same worker
-- **Thread Safety**: All state is shared via `Arc` with message passing
+- **Strict Sharding**: Each worker manages a unique storage shard, eliminating cross-shard lock contention
+- **Key-based Affinity**: Commands targeting the same key are routed to the same worker/shard
+- **Thread Safety**: All state is isolated or shared via `Arc` with message passing
 
 ---
 
 ## 2. Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Server                               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │ Acceptor Loop                                       │    │
-│  │ - Listens on TCP port                               │    │
-│  │ - Round-robin dispatch to workers                   │    │
-│  └─────────────────────────────────────────────────────┘    │
-│           │               │               │                 │
-│           ▼               ▼               ▼                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│  │  Worker 0   │  │  Worker 1   │  │  Worker N   │          │
-│  │ (Thread 1)  │  │ (Thread 2)  │  │ (Thread N)  │          │
-│  └─────────────┘  └─────────────┘  └─────────────┘          │
-│           │               │               │                 │
-│           └───────────────┴───────────────┘                 │
-│                         │                                   │
-│              ┌──────────┴──────────┐                        │
-│              │    Consistent       │                        │
-│              │      Hashing        │                        │
-│              │  (Key → Worker ID)  │                        │
-│              └─────────────────────┘                        │
-│                         │                                   │
-│              ┌──────────┴──────────┐                        │
-│              │       Storage       │                        │
-│              │     (Arc<Storage>)  │                        │
-│              └─────────────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                        Server                        │
+│  ┌───────────────────────────────────────────────┐   │
+│  │ Acceptor Loop                                 │   │
+│  │ - Listens on TCP port                         │   │
+│  │ - Round-robin dispatch to workers             │   │
+│  └───────────────────────────────────────────────┘   │
+│           │               │               │          │
+│           ▼               ▼               ▼          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
+│  │  Worker 0   │  │  Worker 1   │  │  Worker N   │   │
+│  │ (Thread 1)  │  │ (Thread 2)  │  │ (Thread N)  │   │
+│  └─────────────┘  └─────────────┘  └─────────────┘   │
+│           │               │               │          │
+│           ▼               ▼               ▼          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
+│  │  Storage 0  │  │  Storage 1  │  │  Storage N  │   │
+│  │ (Shard 0)   │  │ (Shard 1)   │  │ (Shard N)   │   │
+│  └─────────────┘  └─────────────┘  └─────────────┘   │
+└──────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -69,22 +62,25 @@ pub fn new(
 2. **Initialize Runtime**: Creates a single-threaded Tokio runtime with `enable_all()`
 3. **Store References**: Keeps references to shared resources (storage, cmd_table, peer channels)
 
-### 3.2 Message Loop
+### 3.2 Message Loop & Smart Batching
 
-The worker runs an async loop processing `WorkerMessage` variants:
+The worker runs an async loop processing `WorkerMessage` variants. It employs **Smart Batching** to drain multiple messages from the channel at once:
 
 ```rust
 while let Some(msg) = rx.recv().await {
-    match msg {
-        WorkerMessage::NewConnection(socket) => {
-            // Spawn async task to handle client
-        }
-        WorkerMessage::CmdRequest(req) => {
-            // Execute command and send response
+    batch_buffer.push(msg);
+    // Drain more if available, up to 256
+    while batch_buffer.len() < 256 {
+        match rx.try_recv() {
+            Ok(msg) => batch_buffer.push(msg),
+            Err(_) => break,
         }
     }
+    // Process drained batch...
 }
 ```
+
+This reduces the number of async wakeups and improves throughput under high load.
 
 ---
 
@@ -100,15 +96,20 @@ WorkerMessage::NewConnection(TcpStream)
 
 The worker spawns an async task (`tokio::spawn`) to handle the connection independently, allowing concurrent processing of multiple clients.
 
-### 4.2 CmdRequest
+### 4.2 CmdBatch
 
-Commands are wrapped in a `CmdRequest` for execution:
+Commands are batched by the client handler before being sent to the target worker to minimize inter-thread communication overhead:
 
 ```rust
+pub enum WorkerMessage {
+    NewConnection(TcpStream),
+    CmdBatch(Vec<CmdRequest>),
+}
+
 pub struct CmdRequest {
-    pub(crate) cmd_name: String,           // Command name (e.g., "GET", "SET")
-    pub(crate) args: Vec<Bytes>,           // Command arguments
-    pub(crate) resp_tx: oneshot::Sender<RespValue>,  // Response channel
+    pub(crate) cmd_name: String,
+    pub(crate) args: Vec<Bytes>,
+    pub(crate) resp_tx: oneshot::Sender<RespValue>,
 }
 ```
 
@@ -122,21 +123,24 @@ To ensure **key-based affinity** - commands targeting the same key must be proce
 - **Atomic operations** on the same key are serialized
 - **Multi-key operations** see a consistent view across commands
 
-### 5.2 Routing Algorithm
+### 5.2 Routing Algorithm: FNV-1a
+
+Nimbis uses the **FNV-1a** hashing algorithm for its speed and good distribution properties on short keys:
 
 ```rust
-// Calculate target worker using hash of the first key
-let hash_key = parsed_cmd.args.first().cloned().unwrap_or_default();
-let mut hasher = DefaultHasher::new();
-hash_key.hash(&mut hasher);
-let target_worker_idx = (hasher.finish() as usize) % peers.len();
+let mut hasher: u64 = 0xcbf29ce484222325;
+for byte in &key {
+    hasher ^= *byte as u64;
+    hasher = hasher.wrapping_mul(0x100000001b3);
+}
+let target_worker_idx = (hasher as usize) % peers.len();
 ```
 
 **Steps:**
 1. Extract the first argument (typically the key)
-2. Compute 64-bit hash using `DefaultHasher`
+2. Compute 64-bit FNV-1a hash
 3. Modulo by worker count to get target worker index
-4. Route via channel to target worker
+4. Route via `CmdBatchDescriptor` to target worker
 
 ### 5.3 Channel Communication
 
@@ -199,49 +203,41 @@ loop {
 }
 ```
 
-### 6.4 Command Execution Flow
+### 6.4 Batching & Ordered Responses
 
-```
-┌──────────────┐
-│ Read bytes   │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Parse RESP   │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Extract key, │
-│ compute hash │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Route to     │◄─────────────────────┐
-│ target worker│                      │
-└──────┬───────┘                      │
-       ▼                              │
-┌──────────────┐                      │
-│ Execute cmd  │                      │
-└──────┬───────┘                      │
-       ▼                              │
-┌──────────────┐                      │
-│ Send response│                      │
-└──────┬───────┘                      │
-       ▼                              │
-Write to socket ──────────────────────┘
-```
+The `handle_client` loop parses multiple RESP values and groups them into batches by target worker. To maintain Redis's serial response guarantee, it uses an `ordered_responses` list:
+
+1. **Parse**: Extract multiple commands from the read buffer.
+2. **Route**: For each command, calculate the target worker and push a `oneshot::Receiver` into `ordered_responses`.
+3. **Dispatch**: Send `CmdBatch` to each involved worker.
+4. **Collect**: Wait for `oneshot` receivers in the exact order they were created and write to the socket.
+
+### 6.5 Multi-Key & Global Commands (Scatter-Gather)
+
+| Command     | Behavior           | implementation                                                      |
+| ----------- | ------------------ | ------------------------------------------------------------------- |
+| `FLUSHDB`   | **Broadcast**      | Sent to ALL workers; success if all OK.                             |
+| `DEL k1 k2` | **Scatter-Gather** | Keys grouped by target worker; sent as sub-batches; results summed. |
 
 ---
 
-## 7. Error Handling
+## 7. Storage Sharding
 
-| Scenario | Handling |
-|----------|----------|
-| `ConnectionReset` | Log debug, close gracefully |
-| Incomplete data | Wait for more bytes |
-| Malformed RESP | Send error, close connection |
-| Unknown command | Return `ERR unknown command` |
-| Worker dropped | Log warning, drop response |
+Each worker owns its own `Storage` instance, which maps to a unique subdirectory:
+`{data_path}/shard-{id}/`
+
+This ensures:
+- **Zero contention**: No cross-shard locks or shared SlateDB instances.
+- **Improved Cache Locality**: Each worker thread processes a specific subset of the data.
+- **Independent Compaction**: SlateDB background tasks are distributed across workers.
+
+| Scenario          | Handling                     |
+| ----------------- | ---------------------------- |
+| `ConnectionReset` | Log debug, close gracefully  |
+| Incomplete data   | Wait for more bytes          |
+| Malformed RESP    | Send error, close connection |
+| Unknown command   | Return `ERR unknown command` |
+| Worker dropped    | Log warning, drop response   |
 
 ---
 
@@ -287,9 +283,9 @@ All mutable state is shared via `Arc`:
 
 ## 10. Key Files
 
-| File | Purpose |
-|------|---------|
-| `crates/nimbis/src/worker.rs` | Worker implementation |
-| `crates/nimbis/src/server.rs` | Server/acceptor loop |
-| `crates/resp/src/` | RESP protocol parser |
-| `crates/storage/src/` | Persistent storage layer |
+| File                          | Purpose                  |
+| ----------------------------- | ------------------------ |
+| `crates/nimbis/src/worker.rs` | Worker implementation    |
+| `crates/nimbis/src/server.rs` | Server/acceptor loop     |
+| `crates/resp/src/`            | RESP protocol parser     |
+| `crates/storage/src/`         | Persistent storage layer |

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use resp::RespValue;
@@ -30,7 +28,7 @@ impl Cmd for ExpireCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
 		let key = args[0].clone();
 		let seconds_str = String::from_utf8_lossy(&args[1]);
 		let seconds = match seconds_str.parse::<u64>() {

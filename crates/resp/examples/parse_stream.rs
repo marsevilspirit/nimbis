@@ -37,7 +37,8 @@ fn main() {
 			match parser.parse(&mut buffer) {
 				RespParseResult::Complete(value) => {
 					println!("[Parser] Complete: {:?}", value);
-					// Continue loop to see if there are more complete frames in the buffer
+					// Continue loop to see if there are more complete frames in
+					// the buffer
 				}
 				RespParseResult::Incomplete => {
 					println!("[Parser] Incomplete, waiting for more data...");

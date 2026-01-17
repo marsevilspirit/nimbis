@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use resp::RespValue;
@@ -29,7 +27,7 @@ impl Cmd for ZAddCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Arc<Storage>, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
 		// args: [key, score1, member1, score2, member2, ...]
 		let key = args[0].clone();
 		let remaining_args = &args[1..];
