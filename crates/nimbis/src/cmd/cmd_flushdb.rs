@@ -31,7 +31,7 @@ impl Cmd for FlushDbCmd {
 		// FLUSHDB removes all keys from the current database.
 		// Storage provides a flush_all method to delete all data while keeping the storage instances valid.
 		match storage.flush_all().await {
-			Ok(_) => RespValue::SimpleString("OK".into()),
+			Ok(_) => RespValue::simple_string("OK"),
 			Err(e) => RespValue::error(e.to_string()),
 		}
 	}
