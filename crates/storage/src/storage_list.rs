@@ -4,6 +4,7 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
+use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::list::element_key::ListElementKey;
 use crate::storage::Storage;
@@ -19,7 +20,7 @@ impl Storage {
 	async fn get_valid_list_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<ListMetaValue>, crate::error::StorageError> {
+	) -> Result<Option<ListMetaValue>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
 			Some(bytes) => bytes,
@@ -31,8 +32,9 @@ impl Storage {
 		}
 
 		if meta_bytes[0] != DataType::List as u8 {
-			return Err(crate::error::StorageError::wrong_type_simple(
-				crate::data_type::DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
+			return Err(StorageError::wrong_type(
+				DataType::List,
+				DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
 			));
 		}
 
@@ -50,7 +52,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		meta: &ListMetaValue,
-	) -> Result<(), crate::error::StorageError> {
+	) -> Result<(), StorageError> {
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
@@ -67,19 +69,11 @@ impl Storage {
 		Ok(())
 	}
 
-	pub async fn lpush(
-		&self,
-		key: Bytes,
-		elements: Vec<Bytes>,
-	) -> Result<u64, crate::error::StorageError> {
+	pub async fn lpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
 		self.list_push(key, elements, true).await
 	}
 
-	pub async fn rpush(
-		&self,
-		key: Bytes,
-		elements: Vec<Bytes>,
-	) -> Result<u64, crate::error::StorageError> {
+	pub async fn rpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
 		self.list_push(key, elements, false).await
 	}
 
@@ -88,7 +82,7 @@ impl Storage {
 		key: Bytes,
 		elements: Vec<Bytes>,
 		is_left: bool,
-	) -> Result<u64, crate::error::StorageError> {
+	) -> Result<u64, StorageError> {
 		if elements.is_empty() {
 			// If key exists, return len. If not, return 0.
 			if let Some(meta) = self.get_valid_list_meta(&key).await? {
@@ -115,10 +109,7 @@ impl Storage {
 					| Some(DataType::ZSet) => {
 						let actual_type =
 							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-						return Err(crate::error::StorageError::wrong_type(
-							DataType::List,
-							actual_type,
-						));
+						return Err(StorageError::wrong_type(DataType::List, actual_type));
 					}
 					Some(DataType::List) => {
 						let val = ListMetaValue::decode(&meta_bytes)?;
@@ -180,19 +171,11 @@ impl Storage {
 		Ok(meta_val.len)
 	}
 
-	pub async fn lpop(
-		&self,
-		key: Bytes,
-		count: Option<usize>,
-	) -> Result<Vec<Bytes>, crate::error::StorageError> {
+	pub async fn lpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, StorageError> {
 		self.list_pop(key, count, true).await
 	}
 
-	pub async fn rpop(
-		&self,
-		key: Bytes,
-		count: Option<usize>,
-	) -> Result<Vec<Bytes>, crate::error::StorageError> {
+	pub async fn rpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, StorageError> {
 		self.list_pop(key, count, false).await
 	}
 
@@ -201,7 +184,7 @@ impl Storage {
 		key: Bytes,
 		count: Option<usize>,
 		is_left: bool,
-	) -> Result<Vec<Bytes>, crate::error::StorageError> {
+	) -> Result<Vec<Bytes>, StorageError> {
 		let Some(mut meta_val) = self.get_valid_list_meta(&key).await? else {
 			return Ok(Vec::new());
 		};
@@ -275,7 +258,7 @@ impl Storage {
 		Ok(results)
 	}
 
-	pub async fn llen(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
+	pub async fn llen(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_valid_list_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -288,7 +271,7 @@ impl Storage {
 		key: Bytes,
 		start: i64,
 		stop: i64,
-	) -> Result<Vec<Bytes>, crate::error::StorageError> {
+	) -> Result<Vec<Bytes>, StorageError> {
 		let Some(meta_val) = self.get_valid_list_meta(&key).await? else {
 			return Ok(Vec::new());
 		};

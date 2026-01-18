@@ -7,6 +7,7 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
+use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::hash::field_key::HashFieldKey;
 use crate::storage::Storage;
@@ -22,7 +23,7 @@ impl Storage {
 	async fn get_valid_hash_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<HashMetaValue>, crate::error::StorageError> {
+	) -> Result<Option<HashMetaValue>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
 			Some(bytes) => bytes,
@@ -33,8 +34,9 @@ impl Storage {
 			return Ok(None);
 		}
 		if meta_bytes[0] != DataType::Hash as u8 {
-			return Err(crate::error::StorageError::wrong_type_simple(
-				crate::data_type::DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
+			return Err(StorageError::wrong_type(
+				DataType::Hash,
+				DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
 			));
 		}
 		let meta_val = HashMetaValue::decode(&meta_bytes)?;
@@ -49,10 +51,7 @@ impl Storage {
 	// Used when overwriting a Hash with a String, or deleting a Hash.
 	// TODO: This function is temporary; once the compaction filter is implemented,
 	// it will be replaced with a custom filter for elegant deletion.
-	pub(crate) async fn delete_hash_fields(
-		&self,
-		key: Bytes,
-	) -> Result<(), crate::error::StorageError> {
+	pub(crate) async fn delete_hash_fields(&self, key: Bytes) -> Result<(), StorageError> {
 		// Construct prefix: len(user_key) + user_key
 		let mut prefix = BytesMut::with_capacity(2 + key.len());
 		prefix.put_u16(key.len() as u16);
@@ -91,12 +90,7 @@ impl Storage {
 		Ok(())
 	}
 
-	pub async fn hset(
-		&self,
-		key: Bytes,
-		field: Bytes,
-		value: Bytes,
-	) -> Result<i64, crate::error::StorageError> {
+	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let field_key = HashFieldKey::new(key.clone(), field);
 
@@ -121,10 +115,7 @@ impl Storage {
 			} else {
 				match DataType::from_u8(meta_bytes[0]) {
 					Some(DataType::String) => {
-						return Err(crate::error::StorageError::wrong_type(
-							DataType::Hash,
-							DataType::String,
-						));
+						return Err(StorageError::wrong_type(DataType::Hash, DataType::String));
 					}
 					_ => HashMetaValue::decode(&meta_bytes)?,
 				}
@@ -172,11 +163,7 @@ impl Storage {
 		}
 	}
 
-	pub async fn hget(
-		&self,
-		key: Bytes,
-		field: Bytes,
-	) -> Result<Option<Bytes>, crate::error::StorageError> {
+	pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, StorageError> {
 		// Check if the hash exists and is valid
 		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(None);
@@ -187,7 +174,7 @@ impl Storage {
 		Ok(result)
 	}
 
-	pub async fn hlen(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
+	pub async fn hlen(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_valid_hash_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -199,7 +186,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		fields: &[Bytes],
-	) -> Result<Vec<Option<Bytes>>, crate::error::StorageError> {
+	) -> Result<Vec<Option<Bytes>>, StorageError> {
 		// Check if the hash exists and is valid
 		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(vec![None; fields.len()]);
@@ -235,10 +222,7 @@ impl Storage {
 		Ok(results)
 	}
 
-	pub async fn hgetall(
-		&self,
-		key: Bytes,
-	) -> Result<Vec<(Bytes, Bytes)>, crate::error::StorageError> {
+	pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, StorageError> {
 		use bytes::Buf;
 		use bytes::BytesMut;
 
@@ -284,11 +268,7 @@ impl Storage {
 
 		Ok(results)
 	}
-	pub async fn hdel(
-		&self,
-		key: Bytes,
-		fields: &[Bytes],
-	) -> Result<i64, crate::error::StorageError> {
+	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 

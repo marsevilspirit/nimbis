@@ -5,6 +5,8 @@ use slatedb::Db;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
+use crate::error::StorageError;
+
 #[derive(Clone)]
 pub struct Storage {
 	pub(crate) string_db: Arc<Db>,
@@ -34,7 +36,7 @@ impl Storage {
 	pub async fn open(
 		path: impl AsRef<Path>,
 		shard_id: Option<usize>,
-	) -> Result<Self, crate::error::StorageError> {
+	) -> Result<Self, StorageError> {
 		let mut path_buf = path.as_ref().to_path_buf();
 		if let Some(id) = shard_id {
 			path_buf.push(format!("shard-{}", id));
@@ -68,7 +70,7 @@ impl Storage {
 		))
 	}
 
-	pub async fn flush_all(&self) -> Result<(), crate::error::StorageError> {
+	pub async fn flush_all(&self) -> Result<(), StorageError> {
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
 		// Scanning and deleting everything is slow but correct for tests.

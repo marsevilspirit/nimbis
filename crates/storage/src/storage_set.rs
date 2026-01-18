@@ -6,6 +6,7 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
+use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
@@ -14,10 +15,7 @@ use crate::string::meta::SetMetaValue;
 
 impl Storage {
 	// Helper to get and validate set metadata.
-	async fn get_valid_set_meta(
-		&self,
-		key: &Bytes,
-	) -> Result<Option<SetMetaValue>, crate::error::StorageError> {
+	async fn get_valid_set_meta(&self, key: &Bytes) -> Result<Option<SetMetaValue>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
 			Some(bytes) => bytes,
@@ -28,8 +26,9 @@ impl Storage {
 			return Ok(None);
 		}
 		if meta_bytes[0] != DataType::Set as u8 {
-			return Err(crate::error::StorageError::wrong_type_simple(
-				crate::data_type::DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
+			return Err(StorageError::wrong_type(
+				DataType::Set,
+				DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
 			));
 		}
 		let meta_val = SetMetaValue::decode(&meta_bytes)?;
@@ -40,10 +39,7 @@ impl Storage {
 		Ok(Some(meta_val))
 	}
 
-	pub(crate) async fn delete_set_members(
-		&self,
-		key: Bytes,
-	) -> Result<(), crate::error::StorageError> {
+	pub(crate) async fn delete_set_members(&self, key: Bytes) -> Result<(), StorageError> {
 		// Construct prefix: len(user_key) + user_key
 		let mut prefix = BytesMut::with_capacity(2 + key.len());
 		prefix.put_u16(key.len() as u16);
@@ -82,11 +78,7 @@ impl Storage {
 		Ok(())
 	}
 
-	pub async fn sadd(
-		&self,
-		key: Bytes,
-		members: Vec<Bytes>,
-	) -> Result<u64, crate::error::StorageError> {
+	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
@@ -100,10 +92,7 @@ impl Storage {
 					_ => {
 						let actual_type =
 							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-						return Err(crate::error::StorageError::wrong_type(
-							DataType::Set,
-							actual_type,
-						));
+						return Err(StorageError::wrong_type(DataType::Set, actual_type));
 					}
 				}
 			}
@@ -158,7 +147,7 @@ impl Storage {
 		Ok(added_count)
 	}
 
-	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, crate::error::StorageError> {
+	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, StorageError> {
 		if self.get_valid_set_meta(&key).await?.is_none() {
 			return Ok(Vec::new());
 		}
@@ -199,11 +188,7 @@ impl Storage {
 		Ok(members)
 	}
 
-	pub async fn sismember(
-		&self,
-		key: Bytes,
-		member: Bytes,
-	) -> Result<bool, crate::error::StorageError> {
+	pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, StorageError> {
 		if self.get_valid_set_meta(&key).await?.is_none() {
 			return Ok(false);
 		}
@@ -212,11 +197,7 @@ impl Storage {
 		Ok(self.set_db.get(member_key.encode()).await?.is_some())
 	}
 
-	pub async fn srem(
-		&self,
-		key: Bytes,
-		members: Vec<Bytes>,
-	) -> Result<u64, crate::error::StorageError> {
+	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -265,7 +246,7 @@ impl Storage {
 		Ok(removed_count)
 	}
 
-	pub async fn scard(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
+	pub async fn scard(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_valid_set_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {

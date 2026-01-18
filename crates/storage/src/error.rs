@@ -90,14 +90,6 @@ impl StorageError {
 			actual,
 		}
 	}
-
-	/// Helper to create a WrongType error without expected type
-	pub fn wrong_type_simple(actual: DataType) -> Self {
-		Self::WrongType {
-			expected: None,
-			actual,
-		}
-	}
 }
 
 // Auto-convert from DecoderError

@@ -7,6 +7,7 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
+use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
@@ -27,7 +28,7 @@ impl Storage {
 	async fn get_valid_zset_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<ZSetMetaValue>, crate::error::StorageError> {
+	) -> Result<Option<ZSetMetaValue>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
 			if meta_bytes.is_empty() {
@@ -35,10 +36,7 @@ impl Storage {
 			}
 			if meta_bytes[0] != DataType::ZSet as u8 {
 				let actual_type = DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-				return Err(crate::error::StorageError::wrong_type(
-					DataType::ZSet,
-					actual_type,
-				));
+				return Err(StorageError::wrong_type(DataType::ZSet, actual_type));
 			}
 			let meta_val = ZSetMetaValue::decode(&meta_bytes)?;
 			if meta_val.is_expired() {
@@ -52,10 +50,7 @@ impl Storage {
 		}
 	}
 
-	pub(crate) async fn delete_zset_content(
-		&self,
-		key: Bytes,
-	) -> Result<(), crate::error::StorageError> {
+	pub(crate) async fn delete_zset_content(&self, key: Bytes) -> Result<(), StorageError> {
 		// Scan range starts with len(user_key) + user_key
 		let range_start = Self::create_key_prefix(&key);
 		let range = range_start.as_ref()..;
@@ -93,7 +88,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		elements: Vec<(f64, Bytes)>, // (score, member)
-	) -> Result<u64, crate::error::StorageError> {
+	) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -126,10 +121,7 @@ impl Storage {
 					_ => {
 						let actual_type =
 							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-						return Err(crate::error::StorageError::wrong_type(
-							DataType::ZSet,
-							actual_type,
-						));
+						return Err(StorageError::wrong_type(DataType::ZSet, actual_type));
 					}
 				}
 			}
@@ -224,7 +216,7 @@ impl Storage {
 		start: isize,
 		stop: isize,
 		with_scores: bool,
-	) -> Result<Vec<Bytes>, crate::error::StorageError> {
+	) -> Result<Vec<Bytes>, StorageError> {
 		if let Some(meta) = self.get_valid_zset_meta(&key).await? {
 			// Adjust indices
 			let len = meta.len as isize;
@@ -292,11 +284,7 @@ impl Storage {
 		}
 	}
 
-	pub async fn zscore(
-		&self,
-		key: Bytes,
-		member: Bytes,
-	) -> Result<Option<f64>, crate::error::StorageError> {
+	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
 		if self.get_valid_zset_meta(&key).await?.is_none() {
 			return Ok(None);
 		}
@@ -311,11 +299,7 @@ impl Storage {
 		}
 	}
 
-	pub async fn zrem(
-		&self,
-		key: Bytes,
-		members: Vec<Bytes>,
-	) -> Result<u64, crate::error::StorageError> {
+	pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -391,7 +375,7 @@ impl Storage {
 		Ok(removed_count)
 	}
 
-	pub async fn zcard(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
+	pub async fn zcard(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_valid_zset_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {
