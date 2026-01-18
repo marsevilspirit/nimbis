@@ -22,7 +22,7 @@ impl Storage {
 	async fn get_valid_hash_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<HashMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Option<HashMetaValue>, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
 			Some(bytes) => bytes,
@@ -33,7 +33,9 @@ impl Storage {
 			return Ok(None);
 		}
 		if meta_bytes[0] != DataType::Hash as u8 {
-			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+			return Err(crate::error::StorageError::wrong_type_simple(
+				crate::data_type::DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
+			));
 		}
 		let meta_val = HashMetaValue::decode(&meta_bytes)?;
 		if meta_val.is_expired() {
@@ -50,7 +52,7 @@ impl Storage {
 	pub(crate) async fn delete_hash_fields(
 		&self,
 		key: Bytes,
-	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<(), crate::error::StorageError> {
 		// Construct prefix: len(user_key) + user_key
 		let mut prefix = BytesMut::with_capacity(2 + key.len());
 		prefix.put_u16(key.len() as u16);
@@ -94,7 +96,7 @@ impl Storage {
 		key: Bytes,
 		field: Bytes,
 		value: Bytes,
-	) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<i64, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let field_key = HashFieldKey::new(key.clone(), field);
 
@@ -119,10 +121,10 @@ impl Storage {
 			} else {
 				match DataType::from_u8(meta_bytes[0]) {
 					Some(DataType::String) => {
-						return Err(
-							"WRONGTYPE Operation against a key holding the wrong kind of value"
-								.into(),
-						);
+						return Err(crate::error::StorageError::wrong_type(
+							DataType::Hash,
+							DataType::String,
+						));
 					}
 					_ => HashMetaValue::decode(&meta_bytes)?,
 				}
@@ -174,7 +176,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		field: Bytes,
-	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Option<Bytes>, crate::error::StorageError> {
 		// Check if the hash exists and is valid
 		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(None);
@@ -185,7 +187,7 @@ impl Storage {
 		Ok(result)
 	}
 
-	pub async fn hlen(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn hlen(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
 		if let Some(meta_val) = self.get_valid_hash_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -197,7 +199,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		fields: &[Bytes],
-	) -> Result<Vec<Option<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<Option<Bytes>>, crate::error::StorageError> {
 		// Check if the hash exists and is valid
 		if self.get_valid_hash_meta(&key).await?.is_none() {
 			return Ok(vec![None; fields.len()]);
@@ -236,7 +238,7 @@ impl Storage {
 	pub async fn hgetall(
 		&self,
 		key: Bytes,
-	) -> Result<Vec<(Bytes, Bytes)>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<(Bytes, Bytes)>, crate::error::StorageError> {
 		use bytes::Buf;
 		use bytes::BytesMut;
 
@@ -286,7 +288,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		fields: &[Bytes],
-	) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<i64, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 

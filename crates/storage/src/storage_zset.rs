@@ -27,16 +27,18 @@ impl Storage {
 	async fn get_valid_zset_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<ZSetMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Option<ZSetMetaValue>, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
 			if meta_bytes.is_empty() {
 				return Ok(None);
 			}
 			if meta_bytes[0] != DataType::ZSet as u8 {
-				return Err(
-					"WRONGTYPE Operation against a key holding the wrong kind of value".into(),
-				);
+				let actual_type = DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
+				return Err(crate::error::StorageError::wrong_type(
+					DataType::ZSet,
+					actual_type,
+				));
 			}
 			let meta_val = ZSetMetaValue::decode(&meta_bytes)?;
 			if meta_val.is_expired() {
@@ -53,7 +55,7 @@ impl Storage {
 	pub(crate) async fn delete_zset_content(
 		&self,
 		key: Bytes,
-	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<(), crate::error::StorageError> {
 		// Scan range starts with len(user_key) + user_key
 		let range_start = Self::create_key_prefix(&key);
 		let range = range_start.as_ref()..;
@@ -91,7 +93,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		elements: Vec<(f64, Bytes)>, // (score, member)
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -122,10 +124,12 @@ impl Storage {
 				match DataType::from_u8(meta_bytes[0]) {
 					Some(DataType::ZSet) => ZSetMetaValue::decode(&meta_bytes)?,
 					_ => {
-						return Err(
-							"WRONGTYPE Operation against a key holding the wrong kind of value"
-								.into(),
-						);
+						let actual_type =
+							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
+						return Err(crate::error::StorageError::wrong_type(
+							DataType::ZSet,
+							actual_type,
+						));
 					}
 				}
 			}
@@ -220,7 +224,7 @@ impl Storage {
 		start: isize,
 		stop: isize,
 		with_scores: bool,
-	) -> Result<Vec<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<Bytes>, crate::error::StorageError> {
 		if let Some(meta) = self.get_valid_zset_meta(&key).await? {
 			// Adjust indices
 			let len = meta.len as isize;
@@ -292,7 +296,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		member: Bytes,
-	) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Option<f64>, crate::error::StorageError> {
 		if self.get_valid_zset_meta(&key).await?.is_none() {
 			return Ok(None);
 		}
@@ -311,7 +315,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		members: Vec<Bytes>,
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -387,7 +391,7 @@ impl Storage {
 		Ok(removed_count)
 	}
 
-	pub async fn zcard(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn zcard(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
 		if let Some(meta_val) = self.get_valid_zset_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {

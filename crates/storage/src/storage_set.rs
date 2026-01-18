@@ -17,7 +17,7 @@ impl Storage {
 	async fn get_valid_set_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<SetMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Option<SetMetaValue>, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
 			Some(bytes) => bytes,
@@ -28,7 +28,9 @@ impl Storage {
 			return Ok(None);
 		}
 		if meta_bytes[0] != DataType::Set as u8 {
-			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+			return Err(crate::error::StorageError::wrong_type_simple(
+				crate::data_type::DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
+			));
 		}
 		let meta_val = SetMetaValue::decode(&meta_bytes)?;
 		if meta_val.is_expired() {
@@ -41,7 +43,7 @@ impl Storage {
 	pub(crate) async fn delete_set_members(
 		&self,
 		key: Bytes,
-	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<(), crate::error::StorageError> {
 		// Construct prefix: len(user_key) + user_key
 		let mut prefix = BytesMut::with_capacity(2 + key.len());
 		prefix.put_u16(key.len() as u16);
@@ -84,7 +86,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		members: Vec<Bytes>,
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
@@ -96,10 +98,12 @@ impl Storage {
 				match DataType::from_u8(meta_bytes[0]) {
 					Some(DataType::Set) => SetMetaValue::decode(&meta_bytes)?,
 					_ => {
-						return Err(
-							"WRONGTYPE Operation against a key holding the wrong kind of value"
-								.into(),
-						);
+						let actual_type =
+							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
+						return Err(crate::error::StorageError::wrong_type(
+							DataType::Set,
+							actual_type,
+						));
 					}
 				}
 			}
@@ -154,10 +158,7 @@ impl Storage {
 		Ok(added_count)
 	}
 
-	pub async fn smembers(
-		&self,
-		key: Bytes,
-	) -> Result<Vec<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, crate::error::StorageError> {
 		if self.get_valid_set_meta(&key).await?.is_none() {
 			return Ok(Vec::new());
 		}
@@ -202,7 +203,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		member: Bytes,
-	) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<bool, crate::error::StorageError> {
 		if self.get_valid_set_meta(&key).await?.is_none() {
 			return Ok(false);
 		}
@@ -215,7 +216,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		members: Vec<Bytes>,
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -264,7 +265,7 @@ impl Storage {
 		Ok(removed_count)
 	}
 
-	pub async fn scard(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn scard(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
 		if let Some(meta_val) = self.get_valid_set_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {

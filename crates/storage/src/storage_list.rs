@@ -19,7 +19,7 @@ impl Storage {
 	async fn get_valid_list_meta(
 		&self,
 		key: &Bytes,
-	) -> Result<Option<ListMetaValue>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Option<ListMetaValue>, crate::error::StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
 			Some(bytes) => bytes,
@@ -31,7 +31,9 @@ impl Storage {
 		}
 
 		if meta_bytes[0] != DataType::List as u8 {
-			return Err("WRONGTYPE Operation against a key holding the wrong kind of value".into());
+			return Err(crate::error::StorageError::wrong_type_simple(
+				crate::data_type::DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
+			));
 		}
 
 		let meta_val = ListMetaValue::decode(&meta_bytes)?;
@@ -48,7 +50,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		meta: &ListMetaValue,
-	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<(), crate::error::StorageError> {
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
@@ -69,7 +71,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		elements: Vec<Bytes>,
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		self.list_push(key, elements, true).await
 	}
 
@@ -77,7 +79,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		elements: Vec<Bytes>,
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		self.list_push(key, elements, false).await
 	}
 
@@ -86,7 +88,7 @@ impl Storage {
 		key: Bytes,
 		elements: Vec<Bytes>,
 		is_left: bool,
-	) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<u64, crate::error::StorageError> {
 		if elements.is_empty() {
 			// If key exists, return len. If not, return 0.
 			if let Some(meta) = self.get_valid_list_meta(&key).await? {
@@ -111,10 +113,12 @@ impl Storage {
 					| Some(DataType::Hash)
 					| Some(DataType::Set)
 					| Some(DataType::ZSet) => {
-						return Err(
-							"WRONGTYPE Operation against a key holding the wrong kind of value"
-								.into(),
-						);
+						let actual_type =
+							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
+						return Err(crate::error::StorageError::wrong_type(
+							DataType::List,
+							actual_type,
+						));
 					}
 					Some(DataType::List) => {
 						let val = ListMetaValue::decode(&meta_bytes)?;
@@ -180,7 +184,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		count: Option<usize>,
-	) -> Result<Vec<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<Bytes>, crate::error::StorageError> {
 		self.list_pop(key, count, true).await
 	}
 
@@ -188,7 +192,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		count: Option<usize>,
-	) -> Result<Vec<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<Bytes>, crate::error::StorageError> {
 		self.list_pop(key, count, false).await
 	}
 
@@ -197,7 +201,7 @@ impl Storage {
 		key: Bytes,
 		count: Option<usize>,
 		is_left: bool,
-	) -> Result<Vec<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<Bytes>, crate::error::StorageError> {
 		let Some(mut meta_val) = self.get_valid_list_meta(&key).await? else {
 			return Ok(Vec::new());
 		};
@@ -271,7 +275,7 @@ impl Storage {
 		Ok(results)
 	}
 
-	pub async fn llen(&self, key: Bytes) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn llen(&self, key: Bytes) -> Result<u64, crate::error::StorageError> {
 		if let Some(meta_val) = self.get_valid_list_meta(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -284,7 +288,7 @@ impl Storage {
 		key: Bytes,
 		start: i64,
 		stop: i64,
-	) -> Result<Vec<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Vec<Bytes>, crate::error::StorageError> {
 		let Some(meta_val) = self.get_valid_list_meta(&key).await? else {
 			return Ok(Vec::new());
 		};

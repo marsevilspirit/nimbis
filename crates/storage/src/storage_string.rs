@@ -12,10 +12,7 @@ use crate::string::meta::SetMetaValue;
 use crate::string::value::StringValue;
 
 impl Storage {
-	pub async fn get(
-		&self,
-		key: Bytes,
-	) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, crate::error::StorageError> {
 		let key = StringKey::new(key);
 		let result = self.string_db.get(key.encode()).await?;
 
@@ -42,7 +39,9 @@ impl Storage {
 				// Hash doesn't return value here usually? get() is for string?
 				// get() here is generic string_db get?
 				// If it is Hash, it returns WRONGTYPE. storage_string.rs line 33.
-				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
+				Err(crate::error::StorageError::wrong_type_simple(
+					DataType::String,
+				))
 			}
 			Some(DataType::List) => {
 				let meta_val = ListMetaValue::decode(&bytes)?;
@@ -50,7 +49,9 @@ impl Storage {
 					self.del(key.encode()).await?;
 					return Ok(None);
 				}
-				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
+				Err(crate::error::StorageError::wrong_type_simple(
+					DataType::String,
+				))
 			}
 			Some(DataType::Set) => {
 				let meta_val = SetMetaValue::decode(&bytes)?;
@@ -58,17 +59,17 @@ impl Storage {
 					self.del(key.encode()).await?;
 					return Ok(None);
 				}
-				Err("WRONGTYPE Operation against a key holding the wrong kind of value".into())
+				Err(crate::error::StorageError::wrong_type_simple(
+					DataType::String,
+				))
 			}
-			_ => Err("WRONGTYPE Operation against a key holding the wrong kind of value".into()),
+			_ => Err(crate::error::StorageError::wrong_type_simple(
+				DataType::String,
+			)),
 		}
 	}
 
-	pub async fn set(
-		&self,
-		key: Bytes,
-		value: Bytes,
-	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn set(&self, key: Bytes, value: Bytes) -> Result<(), crate::error::StorageError> {
 		let user_key = key.clone();
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
@@ -102,7 +103,7 @@ impl Storage {
 		Ok(())
 	}
 
-	pub async fn del(&self, key: Bytes) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn del(&self, key: Bytes) -> Result<bool, crate::error::StorageError> {
 		let user_key = key.clone();
 		let key = StringKey::new(key);
 
@@ -141,7 +142,7 @@ impl Storage {
 		&self,
 		key: Bytes,
 		expire_time: u64,
-	) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<bool, crate::error::StorageError> {
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
@@ -204,10 +205,7 @@ impl Storage {
 		}
 	}
 
-	pub async fn ttl(
-		&self,
-		key: Bytes,
-	) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, crate::error::StorageError> {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
@@ -233,10 +231,7 @@ impl Storage {
 		}
 	}
 
-	pub async fn exists(
-		&self,
-		key: Bytes,
-	) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn exists(&self, key: Bytes) -> Result<bool, crate::error::StorageError> {
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
@@ -265,7 +260,7 @@ impl Storage {
 		}
 	}
 
-	pub async fn incr(&self, key: Bytes) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn incr(&self, key: Bytes) -> Result<i64, crate::error::StorageError> {
 		let current_val = self.get(key.clone()).await?;
 
 		let mut int_val: i64 = match current_val {
@@ -273,7 +268,9 @@ impl Storage {
 				// Try to parse string as integer
 				let s = std::str::from_utf8(&bytes)?;
 				s.parse::<i64>()
-					.map_err(|_| "ERR value is not an integer or out of range")?
+					.map_err(|_| crate::error::StorageError::DataInconsistency {
+						message: "ERR value is not an integer or out of range".to_string(),
+					})?
 			}
 			None => 0,
 		};

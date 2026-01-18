@@ -34,7 +34,7 @@ impl Storage {
 	pub async fn open(
 		path: impl AsRef<Path>,
 		shard_id: Option<usize>,
-	) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+	) -> Result<Self, crate::error::StorageError> {
 		let mut path_buf = path.as_ref().to_path_buf();
 		if let Some(id) = shard_id {
 			path_buf.push(format!("shard-{}", id));
@@ -68,7 +68,7 @@ impl Storage {
 		))
 	}
 
-	pub async fn flush_all(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+	pub async fn flush_all(&self) -> Result<(), crate::error::StorageError> {
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
 		// Scanning and deleting everything is slow but correct for tests.
