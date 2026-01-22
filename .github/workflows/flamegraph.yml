@@ -17,7 +17,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -94,7 +94,7 @@ jobs:
           echo "Flamegraph generated at flamegraph.svg"
 
       - name: Upload Flamegraph Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: flamegraph
           path: flamegraph.svg
@@ -102,7 +102,7 @@ jobs:
       - name: Comment on PR
         # Only comment if it's a PR event (not workflow_dispatch, unless we look up the PR)
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v6
+        uses: actions/github-script@v8
         with:
           script: |
             const run_id = context.runId;

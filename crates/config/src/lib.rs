@@ -3,6 +3,7 @@ use quote::format_ident;
 use quote::quote;
 use syn::Data;
 use syn::DeriveInput;
+use syn::Error;
 use syn::Fields;
 use syn::parse_macro_input;
 
@@ -14,9 +15,20 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 	let fields = match input.data {
 		Data::Struct(ref data) => match data.fields {
 			Fields::Named(ref fields) => &fields.named,
-			_ => panic!("OnlineConfig only supports structs with named fields"),
+			_ => {
+				return Error::new_spanned(
+					name,
+					"OnlineConfig only supports structs with named fields",
+				)
+				.to_compile_error()
+				.into();
+			}
 		},
-		_ => panic!("OnlineConfig only supports structs"),
+		_ => {
+			return Error::new_spanned(name, "OnlineConfig only supports structs")
+				.to_compile_error()
+				.into();
+		}
 	};
 
 	let set_match_arms = fields.iter().map(|f| {
