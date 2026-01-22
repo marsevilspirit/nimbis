@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::future;
+use log::warn;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -325,7 +326,7 @@ impl Storage {
 				results.push(val);
 			} else {
 				// Should not happen if consistency is maintained
-				tracing::warn!(
+				warn!(
 					"List element missing for key {:?} at sequence. Potential data inconsistency.",
 					key
 				);

@@ -11,11 +11,11 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+log = { workspace = true }
 object_store = { workspace = true }
 slatedb = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }

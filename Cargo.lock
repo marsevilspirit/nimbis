@@ -1547,13 +1547,13 @@ dependencies = [
  "bytes",
  "chrono",
  "config",
+ "log",
  "num_cpus",
  "resp",
  "storage",
  "telemetry",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2610,12 +2610,12 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "log",
  "object_store 0.13.1",
  "rstest",
  "slatedb",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "ulid",
 ]
 
@@ -2692,6 +2692,7 @@ name = "telemetry"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "log",
  "rstest",
  "thiserror 2.0.18",
  "tracing",

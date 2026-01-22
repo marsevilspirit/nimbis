@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use log::debug;
+use log::error;
 use resp::RespEncoder;
 use resp::RespValue;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tracing::debug;
-use tracing::error;
 
 use crate::cmd::ParsedCmd;
 use crate::worker::CmdRequest;

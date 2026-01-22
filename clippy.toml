@@ -1,0 +1,11 @@
+disallowed-macros = [
+    { path = "tracing::info", reason = "Use log::info instead" },
+    { path = "tracing::warn", reason = "Use log::warn instead" },
+    { path = "tracing::error", reason = "Use log::error instead" },
+    { path = "tracing::debug", reason = "Use log::debug instead" },
+    { path = "tracing::trace", reason = "Use log::trace instead" },
+    { path = "std::eprintln", reason = "Use log::error instead" },
+    { path = "std::eprint", reason = "Use log::error instead" },
+    { path = "std::println", reason = "Use log::info instead" },
+    { path = "std::print", reason = "Use log::info instead" },
+]
