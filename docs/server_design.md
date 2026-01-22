@@ -48,11 +48,18 @@ pub struct Server {
 #### Step 1: Configuration Initialization
 Before creating the server, the main application initializes the configuration:
 ```rust
-config::init_config();       // Load configuration (addr, data_path)
+config::init_config();       // Load configuration (addr, data_path, log_level, etc.)
 telemetry::init();           // Initialize logging/tracing
 ```
 
 The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access.
+
+**Dynamic Configuration**: The server supports runtime configuration updates via the `CONFIG SET` command. For example, the log level can be changed dynamically:
+```
+CONFIG SET log_level debug
+```
+
+This triggers a callback (`on_log_level_change`) that reloads the telemetry subsystem without restarting the server. See [Config Crate](config_crate.md) for details on the configuration system.
 
 #### Step 2: Server Creation (`new`)
 When `Server::new()` is called:

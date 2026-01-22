@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use quote::format_ident;
 use quote::quote;
 use syn::Data;
 use syn::DeriveInput;
@@ -24,11 +25,17 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 		let field_name_str = field_name.as_ref().unwrap().to_string();
 
 		let mut is_immutable = false;
+		let mut callback = None;
+
 		for attr in &f.attrs {
 			if attr.path().is_ident("online_config") {
 				let _ = attr.parse_nested_meta(|meta| {
 					if meta.path.is_ident("immutable") {
 						is_immutable = true;
+					} else if meta.path.is_ident("callback") {
+						let value = meta.value()?;
+						let s: syn::LitStr = value.parse()?;
+						callback = Some(s.value());
 					}
 					Ok(())
 				});
@@ -42,11 +49,21 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 		} else {
+			let callback_invocation = if let Some(cb) = callback {
+				let cb_ident = format_ident!("{}", cb);
+				quote! {
+					self.#cb_ident()?;
+				}
+			} else {
+				quote! {}
+			};
+
 			quote! {
 				#field_name_str => {
 					match #field_type::from_str(value) {
 						Ok(v) => {
 							self.#field_name = v;
+							#callback_invocation
 							Ok(())
 						}
 						Err(_) => Err(format!("Failed to parse value for field '{}'", #field_name_str)),

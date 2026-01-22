@@ -141,3 +141,76 @@ fn test_match_fields_exact() {
 	let fields = TestConfig::match_fields("nonexistent");
 	assert!(fields.is_empty());
 }
+
+#[derive(Clone, Default)]
+struct CallbackLog(std::rc::Rc<std::cell::RefCell<Vec<String>>>);
+
+impl std::fmt::Display for CallbackLog {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{:?}", self.0)
+	}
+}
+
+impl std::str::FromStr for CallbackLog {
+	type Err = String;
+	fn from_str(_: &str) -> Result<Self, Self::Err> {
+		Ok(CallbackLog::default())
+	}
+}
+
+#[derive(OnlineConfig, Default)]
+struct TestCallbackConfig {
+	#[online_config(callback = "on_addr_change")]
+	pub addr: String,
+	#[online_config(callback = "on_port_change")]
+	pub port: u16,
+	#[online_config(immutable)]
+	pub id: i32,
+	// Use cells to track callback invocations because set_field takes &mut self
+	// and we want to verify side effects
+	#[online_config(immutable)]
+	pub callbacks: CallbackLog,
+}
+
+impl TestCallbackConfig {
+	fn on_addr_change(&mut self) -> Result<(), String> {
+		self.callbacks
+			.0
+			.borrow_mut()
+			.push(format!("addr changed to {}", self.addr));
+		Ok(())
+	}
+
+	fn on_port_change(&mut self) -> Result<(), String> {
+		self.callbacks
+			.0
+			.borrow_mut()
+			.push(format!("port changed to {}", self.port));
+		Ok(())
+	}
+}
+
+#[test]
+fn test_callback() {
+	let callbacks = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+	let mut conf = TestCallbackConfig {
+		callbacks: CallbackLog(callbacks.clone()),
+		..Default::default()
+	};
+
+	// Test address change callback
+	conf.set_field("addr", "192.168.1.1").unwrap();
+	assert_eq!(callbacks.borrow().len(), 1);
+	assert_eq!(callbacks.borrow()[0], "addr changed to 192.168.1.1");
+
+	// Test port change callback
+	conf.set_field("port", "9090").unwrap();
+	assert_eq!(callbacks.borrow().len(), 2);
+	assert_eq!(callbacks.borrow()[1], "port changed to 9090");
+
+	// Test immutable field (no callback should be triggered even if we could set
+	// it)
+	assert!(conf.set_field("id", "999").is_err());
+	assert_eq!(callbacks.borrow().len(), 2);
+	assert_eq!(conf.id, 0);
+}

@@ -1,3 +1,23 @@
+//! Configuration module for Nimbis server
+//!
+//! This module provides dynamic configuration management with support for
+//! both immutable and mutable configuration fields. Configuration changes
+//! can trigger callbacks for side effects like reloading the log level.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use nimbis::config::{init_config, SERVER_CONF};
+//!
+//! // Initialize with default configuration
+//! init_config();
+//!
+//! // Access configuration
+//! let config = SERVER_CONF.load();
+//! println!("Server address: {}", config.addr);
+//! ```
+
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -15,6 +35,8 @@ pub struct ServerConfig {
 	pub save: String,
 	#[online_config(immutable)]
 	pub appendonly: String,
+	#[online_config(callback = "on_log_level_change")]
+	pub log_level: String,
 }
 
 impl Default for ServerConfig {
@@ -24,7 +46,23 @@ impl Default for ServerConfig {
 			data_path: "./nimbis_data".to_string(),
 			save: "".to_string(),
 			appendonly: "no".to_string(),
+			log_level: "info".to_string(),
 		}
+	}
+}
+
+impl ServerConfig {
+	/// Callback invoked when log_level configuration changes.
+	///
+	/// This method is called by the OnlineConfig derive macro when the
+	/// log_level field is updated. It triggers a reload of the logging
+	/// subsystem with the new level.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the log level is invalid or if the reload fails.
+	fn on_log_level_change(&self) -> Result<(), String> {
+		telemetry::reload_log_level(&self.log_level).map_err(|e| e.to_string())
 	}
 }
 

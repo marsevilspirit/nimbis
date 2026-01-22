@@ -19,7 +19,7 @@ config = { workspace = true }
 
 ### 2.2 Define Configuration Struct
 
-Derive the `OnlineConfig` trait on your configuration struct. By default, all fields are mutable. You can use the `#[online_config(immutable)]` attribute to mark fields as immutable, or use `#[online_config(mutable)]` to explicitly mark them as mutable (although this is the default behavior, it helps with documentation).
+Derive the `OnlineConfig` trait on your configuration struct. By default, all fields are mutable. You can use the `#[online_config(immutable)]` attribute to mark fields as immutable, or use `#[online_config(callback = "method_name")]` to trigger a callback when the field changes.
 
 ```rust
 use config::OnlineConfig;
@@ -36,6 +36,19 @@ pub struct MyConfig {
     // Immutable, set_field("id", "...") will return an error
     #[online_config(immutable)]
     pub id: i32,
+    
+    // Field with callback - triggers on_log_level_change when updated
+    #[online_config(callback = "on_log_level_change")]
+    pub log_level: String,
+}
+
+impl MyConfig {
+    // Callback method invoked when log_level is updated
+    fn on_log_level_change(&self) -> Result<(), String> {
+        // Perform side effects, e.g., reload logging configuration
+        println!("Log level changed to: {}", self.log_level);
+        Ok(())
+    }
 }
 ```
 
@@ -112,26 +125,64 @@ let input = parse_macro_input!(input as DeriveInput);
 
 ### 3.2 Attribute Processing
 
-For each field, the macro checks if usage of the `#[online_config(immutable)]` attribute exists.
+For each field, the macro checks for `#[online_config(...)]` attributes including `immutable` and `callback`.
 
 ```rust
 let mut is_immutable = false;
+let mut callback = None;
 for attr in &f.attrs {
     if attr.path().is_ident("online_config") {
-        // ... Parse nested meta, look for immutable ...
+        // Parse nested meta for immutable or callback
+        if meta.path.is_ident("callback") {
+            // Extract callback method name
+            callback = Some(method_name);
+        }
     }
 }
 ```
 
-Note: The macro currently ignores unknown attributes (like `mutable`), which means they are treated as default behavior (mutable). This allows us to explicitly write `mutable` without breaking compilation.
+When a `callback` is specified, the generated `set_field` code will invoke the callback method after updating the field value:
+
+```rust
+self.field = new_value;
+self.callback_method()?;  // Invoke callback
+Ok(())
+```
+
+This allows side effects like reloading logging configuration when `log_level` changes.
 
 ### 3.3 Code Generation
 
 The macro uses the `quote` library to generate the implementation of the methods:
 
-1.  **set_field**: Generates a `match` statement to dispatch to the correct field. Converts string values using `FromStr` for mutable fields, and returns errors for immutable ones.
+1.  **set_field**: Generates a `match` statement to dispatch to the correct field. Converts string values using `FromStr` for mutable fields, invokes callbacks if specified, and returns errors for immutable ones.
 2.  **get_field**: Generates a `match` statement to return `self.field.to_string()`.
 3.  **list_fields**: Returns a static vector of string literals generated from field names.
 4.  **match_fields**: Implements efficient string matching logic (using `strip_prefix`/`strip_suffix`) against the static field list to support wildcards.
 
 In this way, we generate efficient field dispatch logic at compile time, avoiding runtime reflection overhead.
+
+## 4. Real-World Example: Dynamic Log Level
+
+The `ServerConfig` in `crates/nimbis/src/config/mod.rs` demonstrates the callback feature:
+
+```rust
+#[derive(Debug, Clone, OnlineConfig)]
+pub struct ServerConfig {
+    #[online_config(immutable)]
+    pub addr: String,
+    
+    #[online_config(callback = "on_log_level_change")]
+    pub log_level: String,
+}
+
+impl ServerConfig {
+    fn on_log_level_change(&self) -> Result<(), String> {
+        // Reload the telemetry subsystem with the new log level
+        telemetry::reload_log_level(&self.log_level)
+            .map_err(|e| e.to_string())
+    }
+}
+```
+
+This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.
