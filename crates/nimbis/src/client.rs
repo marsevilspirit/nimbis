@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use log::debug;
 use resp::RespEncoder;
 use resp::RespParseResult;
 use resp::RespParser;
@@ -10,7 +11,6 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::debug;
 
 use crate::cmd::ParsedCmd;
 use crate::dispatcher::CommandDispatcher;

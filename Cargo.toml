@@ -1,4 +1,5 @@
 [workspace]
+resolver = "3"
 members = [
     "crates/resp",
     "crates/nimbis",
@@ -6,7 +7,6 @@ members = [
     "crates/storage",
     "crates/config",
 ]
-
 
 [workspace.package]
 version = "0.1.0"
@@ -28,6 +28,7 @@ async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.42"
 futures = "0.3.31"
+log = "0.4.29"
 num_cpus = "1.17.0"
 object_store = "0.13.0"
 quote = "1.0.43"
@@ -37,7 +38,7 @@ thiserror = "2.0.17"
 tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
-tracing-subscriber = { version = "0.3.18", features = [
+tracing-subscriber = { version = "0.3.22", features = [
     "env-filter",
     "fmt",
     "registry",

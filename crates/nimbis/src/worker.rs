@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::thread;
 
 use bytes::Bytes;
+use log::debug;
+use log::error;
+use log::warn;
 use resp::RespValue;
 use storage::Storage;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tracing::debug;
-use tracing::error;
-use tracing::warn;
 
 use crate::client::ClientSession;
 use crate::cmd::CmdTable;

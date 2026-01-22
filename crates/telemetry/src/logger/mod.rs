@@ -51,7 +51,7 @@ static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 ///
 /// ```no_run
 /// telemetry::init();
-/// tracing::info!("Server starting");
+/// log::info!("Server starting");
 /// ```
 pub fn init() {
 	// Create env filter with INFO as default level

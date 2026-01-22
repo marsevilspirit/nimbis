@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use log::debug;
+use log::error;
+use log::info;
 use storage::Storage;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tracing::debug;
-use tracing::error;
-use tracing::info;
 
 use crate::cmd::CmdTable;
 use crate::config::SERVER_CONF;
