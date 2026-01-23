@@ -2199,6 +2199,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "criterion",
+ "memchr",
  "rstest",
  "thiserror 2.0.18",
  "tokio",

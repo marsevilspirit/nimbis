@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 bytes = { workspace = true }
+memchr = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
