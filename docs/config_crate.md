@@ -179,7 +179,7 @@ pub struct ServerConfig {
 impl ServerConfig {
     fn on_log_level_change(&self) -> Result<(), String> {
         // Reload the telemetry subsystem with the new log level
-        telemetry::reload_log_level(&self.log_level)
+        telemetry::logger::reload_log_level(&self.log_level)
             .map_err(|e| e.to_string())
     }
 }

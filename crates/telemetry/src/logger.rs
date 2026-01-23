@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::fmt;
@@ -9,21 +8,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Errors that can occur in the telemetry module
-#[derive(Debug, Error)]
-pub enum TelemetryError {
-	/// The logger has not been initialized yet
-	#[error("Logger not initialized")]
-	NotInitialized,
-
-	/// Invalid log level provided
-	#[error("Invalid log level: {0}. Valid levels: trace, debug, info, warn, error")]
-	InvalidLogLevel(String),
-
-	/// Failed to reload the log level
-	#[error("Failed to reload log level: {0}")]
-	ReloadFailed(String),
-}
+use crate::TelemetryError;
 
 /// Custom time formatter that displays time as "YYYY-MM-DD HH:MM:SS.micros"
 struct CustomTimeFormat;
@@ -50,7 +35,7 @@ static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 /// # Example
 ///
 /// ```no_run
-/// telemetry::init();
+/// telemetry::logger::init();
 /// log::info!("Server starting");
 /// ```
 pub fn init() {
@@ -85,7 +70,7 @@ pub fn init() {
 /// # Example
 ///
 /// ```no_run
-/// # use telemetry::reload_log_level;
+/// # use telemetry::logger::reload_log_level;
 /// reload_log_level("debug")?;
 /// # Ok::<(), telemetry::TelemetryError>(())
 /// ```

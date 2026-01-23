@@ -49,7 +49,7 @@ pub struct Server {
 Before creating the server, the main application initializes the configuration:
 ```rust
 config::init_config();       // Load configuration (addr, data_path, log_level, etc.)
-telemetry::init();           // Initialize logging/tracing
+telemetry::logger::init();           // Initialize logging/tracing
 ```
 
 The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access.

@@ -5,7 +5,7 @@ use nimbis::server::Server;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	config::init_config();
-	telemetry::init();
+	telemetry::logger::init();
 
 	logo::show_logo();
 

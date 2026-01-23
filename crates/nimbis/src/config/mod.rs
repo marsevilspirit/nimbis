@@ -25,6 +25,7 @@ use arc_swap::ArcSwap;
 use config::OnlineConfig;
 use log::info;
 use log::warn;
+use telemetry::logger;
 
 #[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
@@ -64,7 +65,7 @@ impl ServerConfig {
 	///
 	/// Returns an error if the log level is invalid or if the reload fails.
 	fn on_log_level_change(&self) -> Result<(), String> {
-		match telemetry::reload_log_level(&self.log_level) {
+		match logger::reload_log_level(&self.log_level) {
 			Ok(()) => {
 				info!("Successfully set config log level to: {}", self.log_level);
 				Ok(())
