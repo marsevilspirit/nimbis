@@ -67,7 +67,7 @@ pub fn init() {
 		.with(
 			fmt::layer()
 				.with_timer(CustomTimeFormat)
-				.with_target(true)
+				.with_target(false)
 				.with_thread_ids(true)
 				.with_line_number(false)
 				.with_file(false),
