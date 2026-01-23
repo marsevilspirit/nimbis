@@ -137,6 +137,8 @@ mod tests {
 	#[case(b"hello", None)]
 	#[case(b"\r\n", Some(0))]
 	#[case(b"multiple\r\nlines\r\n", Some(8))]
+	#[case(b"hello\r", None)]
+	#[case(b"hello\rworld\r\n", Some(11))]
 	fn test_find_crlf(#[case] input: &[u8], #[case] expected: Option<usize>) {
 		assert_eq!(find_crlf(input), expected);
 	}
@@ -150,6 +152,9 @@ mod tests {
 	#[case(b"", Err(()))]
 	#[case(b"-", Err(()))]
 	#[case(b"9223372036854775808", Err(()))] // Overflow
+	#[case(b"9223372036854775807", Ok(i64::MAX))]
+	#[case(b"-9223372036854775808", Ok(i64::MIN))]
+	#[case(b"-9223372036854775809", Err(()))] // Underflow / Overflow
 	fn test_parse_integer(#[case] input: &[u8], #[case] expected: Result<i64, ()>) {
 		let result = parse_integer(input);
 		match expected {
@@ -166,7 +171,7 @@ mod tests {
 	fn test_parse_double(#[case] input: &[u8], #[case] expected: f64) {
 		let result = parse_double(input).unwrap();
 		if expected.is_infinite() {
-			assert_eq!(result.is_infinite(), true);
+			assert!(result.is_infinite());
 			assert_eq!(result.is_sign_positive(), expected.is_sign_positive());
 		} else {
 			assert_eq!(result, expected);
