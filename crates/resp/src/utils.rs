@@ -48,6 +48,33 @@ pub fn peek_line(buf: &[u8]) -> Option<(&[u8], usize)> {
 	find_crlf(buf).map(|pos| (&buf[..pos], pos + 2))
 }
 
+/// Parses a RESP integer from a byte slice.
+///
+/// This is a high-performance, custom implementation that performs manual
+/// parsing and overflow checking. It is designed to be faster than the standard
+/// `std::str::from_utf8().parse()` approach by avoiding UTF-8 validation
+/// and extra string allocations.
+///
+/// ### Input Format
+/// - Optional leading `+` or `-` sign.
+/// - One or more ASCII digits (`0`-`9`).
+///
+/// ### Errors
+/// Returns a [`ParseError::InvalidInteger`] in the following cases:
+/// - **Empty input**: If the input slice is empty or contains only a sign
+///   character.
+/// - **Invalid digits**: If any character is not an ASCII digit (after the
+///   optional sign).
+/// - **Overflow**: If the resulting value exceeds the range of a 64-bit signed
+///   integer (`i64`).
+///
+/// ### Examples
+/// ```
+/// use resp::utils::parse_integer;
+/// assert_eq!(parse_integer(b"123").unwrap(), 123);
+/// assert_eq!(parse_integer(b"-456").unwrap(), -456);
+/// assert_eq!(parse_integer(b"+789").unwrap(), 789);
+/// ```
 #[inline]
 pub fn parse_integer(buf: &[u8]) -> Result<i64, ParseError> {
 	let (digits, negative) = match buf {
