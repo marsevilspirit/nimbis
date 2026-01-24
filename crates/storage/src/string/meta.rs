@@ -103,6 +103,7 @@ impl Expirable for HashMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+
 impl MetaValue for HashMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -186,6 +187,7 @@ impl Expirable for ListMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+
 impl MetaValue for ListMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -251,6 +253,7 @@ impl Expirable for SetMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+
 impl MetaValue for SetMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -316,6 +319,7 @@ impl Expirable for ZSetMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+
 impl MetaValue for ZSetMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
