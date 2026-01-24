@@ -1,11 +1,17 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use slatedb::Db;
+use slatedb::WriteBatch;
+use slatedb::config::WriteOptions;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
+use crate::data_type::DataType;
 use crate::error::StorageError;
+use crate::string::meta::MetaKey;
+use crate::string::meta::MetaValue;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -96,6 +102,72 @@ impl Storage {
 		clear_db(&self.list_db).await?;
 		clear_db(&self.set_db).await?;
 		clear_db(&self.zset_db).await?;
+
+		Ok(())
+	}
+
+	/// Helper to get and validate metadata for any collection type.
+	/// Returns:
+	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
+	/// - Ok(None) if the key doesn't exist or is expired
+	/// - Err if the key exists but is of wrong type
+	pub(crate) async fn get_meta<T: MetaValue>(
+		&self,
+		key: &Bytes,
+	) -> Result<Option<T>, StorageError> {
+		let meta_key = MetaKey::new(key.clone());
+		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
+			Some(bytes) => bytes,
+			None => return Ok(None),
+		};
+
+		if meta_bytes.is_empty() {
+			return Ok(None);
+		}
+
+		let actual_type_u8 = meta_bytes[0];
+		if !T::is_type_match(actual_type_u8) {
+			return Err(StorageError::WrongType {
+				expected: T::data_type(),
+				actual: DataType::from_u8(actual_type_u8).unwrap_or(DataType::String),
+			});
+		}
+
+		let meta_val = T::decode(&meta_bytes)?;
+		if meta_val.is_expired() {
+			self.del(key.clone()).await?;
+			return Ok(None);
+		}
+
+		Ok(Some(meta_val))
+	}
+
+	/// Helper to delete all keys starting with a given prefix from a specific
+	/// database.
+	pub(crate) async fn delete_keys_by_prefix(
+		&self,
+		db: &Arc<Db>,
+		prefix: Bytes,
+	) -> Result<(), StorageError> {
+		let range = prefix.clone()..;
+		let mut stream = db.scan(range).await?;
+		let mut batch = WriteBatch::new();
+		let mut has_keys_to_delete = false;
+
+		while let Some(kv) = stream.next().await? {
+			if !kv.key.starts_with(&prefix) {
+				break;
+			}
+			batch.delete(kv.key);
+			has_keys_to_delete = true;
+		}
+
+		if has_keys_to_delete {
+			let write_opts = WriteOptions {
+				await_durable: false,
+			};
+			db.write_with_options(batch, &write_opts).await?;
+		}
 
 		Ok(())
 	}

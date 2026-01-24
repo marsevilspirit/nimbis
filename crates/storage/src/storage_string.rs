@@ -7,58 +7,16 @@ use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
-use crate::string::meta::HashMetaValue;
+use crate::string::meta::AnyValue;
 use crate::string::meta::ListMetaValue;
-use crate::string::meta::SetMetaValue;
 use crate::string::value::StringValue;
 
 impl Storage {
 	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
-		let key = StringKey::new(key);
-		let result = self.string_db.get(key.encode()).await?;
-
-		let bytes = match result {
-			Some(b) if !b.is_empty() => b,
-			_ => return Ok(None),
-		};
-
-		match DataType::from_u8(bytes[0]) {
-			Some(DataType::String) => {
-				let string_val = StringValue::decode(&bytes)?;
-				if string_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
-				Ok(Some(string_val.value))
-			}
-			Some(DataType::Hash) => {
-				let meta_val = HashMetaValue::decode(&bytes)?;
-				if meta_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
-				Err(StorageError::wrong_type(DataType::String, DataType::Hash))
-			}
-			Some(DataType::List) => {
-				let meta_val = ListMetaValue::decode(&bytes)?;
-				if meta_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
-				Err(StorageError::wrong_type(DataType::String, DataType::List))
-			}
-			Some(DataType::Set) => {
-				let meta_val = SetMetaValue::decode(&bytes)?;
-				if meta_val.is_expired() {
-					self.del(key.encode()).await?;
-					return Ok(None);
-				}
-				Err(StorageError::wrong_type(DataType::String, DataType::Set))
-			}
-			_ => Err(StorageError::wrong_type(
-				DataType::String,
-				DataType::from_u8(bytes[0]).unwrap_or(DataType::String),
-			)),
+		match self.get_meta::<AnyValue>(&key).await? {
+			Some(AnyValue::String(val)) => Ok(Some(val.value)),
+			Some(val) => Err(StorageError::wrong_type(DataType::String, val.data_type())),
+			None => Ok(None),
 		}
 	}
 
@@ -81,6 +39,9 @@ impl Storage {
 				}
 				Some(DataType::Set) => {
 					self.delete_set_members(user_key).await?;
+				}
+				Some(DataType::ZSet) => {
+					self.delete_zset_content(user_key).await?;
 				}
 				_ => {}
 			}
@@ -117,6 +78,9 @@ impl Storage {
 				DataType::Set => {
 					self.delete_set_members(user_key).await?;
 				}
+				DataType::ZSet => {
+					self.delete_zset_content(user_key).await?;
+				}
 				_ => {}
 			}
 		}
@@ -136,37 +100,11 @@ impl Storage {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
-		if let Some(bytes) = self.string_db.get(encoded_key.clone()).await? {
-			if bytes.is_empty() {
-				return Ok(false);
-			}
-
-			let encoded_val = match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => {
-					let mut val = StringValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				Some(DataType::Hash) => {
-					let mut val = HashMetaValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				Some(DataType::List) => {
-					let mut val = ListMetaValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				Some(DataType::Set) => {
-					let mut val = SetMetaValue::decode(&bytes)?;
-					val.expire_at(expire_time);
-					val.encode()
-				}
-				_ => return Ok(false),
-			};
+		if let Some(mut val) = self.get_meta::<AnyValue>(&user_key).await? {
+			val.expire_at(expire_time);
+			let encoded_val = val.encode();
 
 			// Check if already expired immediately
-			// We can verify by decoding again, but we know the expire_time we just set.
 			let now = chrono::Utc::now().timestamp_millis() as u64;
 			if expire_time > 0 && expire_time <= now {
 				self.del(user_key).await?;
@@ -195,23 +133,8 @@ impl Storage {
 	}
 
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
-		let skey = StringKey::new(key);
-		let encoded_key = skey.encode();
-
-		if let Some(bytes) = self.string_db.get(encoded_key).await? {
-			if bytes.is_empty() {
-				return Ok(None);
-			}
-
-			let remaining_ttl = match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => StringValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::Hash) => HashMetaValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::List) => ListMetaValue::decode(&bytes)?.remaining_ttl(),
-				Some(DataType::Set) => SetMetaValue::decode(&bytes)?.remaining_ttl(),
-				_ => return Ok(None),
-			};
-
-			match remaining_ttl {
+		if let Some(val) = self.get_meta::<AnyValue>(&key).await? {
+			match val.remaining_ttl() {
 				Some(duration) => Ok(Some(duration.as_millis() as i64)),
 				None => Ok(Some(-1)),
 			}
@@ -221,32 +144,7 @@ impl Storage {
 	}
 
 	pub async fn exists(&self, key: Bytes) -> Result<bool, StorageError> {
-		let user_key = key.clone();
-		let skey = StringKey::new(key);
-		let encoded_key = skey.encode();
-
-		if let Some(bytes) = self.string_db.get(encoded_key).await? {
-			if bytes.is_empty() {
-				return Ok(false);
-			}
-
-			let is_expired = match DataType::from_u8(bytes[0]) {
-				Some(DataType::String) => StringValue::decode(&bytes)?.is_expired(),
-				Some(DataType::Hash) => HashMetaValue::decode(&bytes)?.is_expired(),
-				Some(DataType::List) => ListMetaValue::decode(&bytes)?.is_expired(),
-				Some(DataType::Set) => SetMetaValue::decode(&bytes)?.is_expired(),
-				_ => return Ok(false),
-			};
-
-			if is_expired {
-				self.del(user_key).await?; // Lazy delete
-				Ok(false)
-			} else {
-				Ok(true)
-			}
-		} else {
-			Ok(false)
-		}
+		Ok(self.get_meta::<AnyValue>(&key).await?.is_some())
 	}
 
 	pub async fn incr(&self, key: Bytes) -> Result<i64, StorageError> {
