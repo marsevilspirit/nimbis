@@ -5,7 +5,6 @@ use bytes::BytesMut;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
-use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::set::member_key::SetMemberKey;
@@ -27,29 +26,11 @@ impl Storage {
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
 
-		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
-			if meta_bytes.is_empty() {
-				SetMetaValue::new(0)
-			} else {
-				match DataType::from_u8(meta_bytes[0]) {
-					Some(DataType::Set) => SetMetaValue::decode(&meta_bytes)?,
-					_ => {
-						let actual_type =
-							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-						return Err(StorageError::wrong_type(DataType::Set, actual_type));
-					}
-				}
-			}
-		} else {
-			SetMetaValue::new(0)
+		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
+			Some(meta) => meta,
+			None => SetMetaValue::new(0),
 		};
-
-		if meta_val.is_expired() {
-			self.delete_set_members(key.clone()).await?;
-			meta_val = SetMetaValue::new(0);
-		}
 
 		let mut added_count = 0;
 		let write_opts = WriteOptions {

@@ -6,7 +6,6 @@ use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
-use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::storage::Storage;
@@ -22,32 +21,6 @@ impl Storage {
 		p.put_u16(key.len() as u16);
 		p.extend_from_slice(key);
 		p.freeze()
-	}
-
-	// Helper to get and validate zset metadata.
-	async fn get_valid_zset_meta(
-		&self,
-		key: &Bytes,
-	) -> Result<Option<ZSetMetaValue>, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		if let Some(meta_bytes) = self.string_db.get(meta_key.encode()).await? {
-			if meta_bytes.is_empty() {
-				return Ok(None);
-			}
-			if meta_bytes[0] != DataType::ZSet as u8 {
-				let actual_type = DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-				return Err(StorageError::wrong_type(DataType::ZSet, actual_type));
-			}
-			let meta_val = ZSetMetaValue::decode(&meta_bytes)?;
-			if meta_val.is_expired() {
-				self.delete_zset_content(key.clone()).await?;
-				self.string_db.delete(meta_key.encode()).await?;
-				return Ok(None);
-			}
-			Ok(Some(meta_val))
-		} else {
-			Ok(None)
-		}
 	}
 
 	pub(crate) async fn delete_zset_content(&self, key: Bytes) -> Result<(), StorageError> {
@@ -104,35 +77,28 @@ impl Storage {
 
 		// Parallel fetch meta and members
 		let (meta_res, members_res) = tokio::join!(
-			self.string_db.get(meta_encoded_key.clone()),
+			self.get_meta::<ZSetMetaValue>(&key),
 			future::join_all(member_futs)
 		);
 
-		let current_meta_bytes = meta_res?;
-
 		let mut old_values: Vec<_> = members_res.into_iter().collect::<Result<_, _>>()?;
 
-		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
-			if meta_bytes.is_empty() {
-				ZSetMetaValue::new(0)
-			} else {
-				match DataType::from_u8(meta_bytes[0]) {
-					Some(DataType::ZSet) => ZSetMetaValue::decode(&meta_bytes)?,
-					_ => {
-						let actual_type =
-							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-						return Err(StorageError::wrong_type(DataType::ZSet, actual_type));
-					}
-				}
-			}
-		} else {
-			ZSetMetaValue::new(0)
+		let mut meta_val = match meta_res? {
+			Some(val) => val,
+			None => ZSetMetaValue::new(0),
 		};
 
-		if meta_val.is_expired() {
-			self.delete_zset_content(key.clone()).await?;
-			meta_val = ZSetMetaValue::new(0);
-			// Key expired, so old members are conceptually gone
+		// If meta is new (len 0), treat all as new.
+		// get_meta already handles expiration by deleting content, so if we get
+		// None/empty here, it's effectively empty. However, we just fetched
+		// old_values. If the key was expired by get_meta, old_values might contain data
+		// that is now "gone". But wait, get_meta calls del() which deletes zset
+		// content. If get_meta found it expired, it deletes content.
+		// But we ran join_all(member_futs) CONCURRENTLY with get_meta.
+		// So member_futs might have returned data before deletion happened.
+		// If meta_val.len == 0 (implies new or expired-then-deleted), we should treat
+		// old_values as None.
+		if meta_val.len == 0 {
 			for val in &mut old_values {
 				*val = None;
 			}
@@ -217,7 +183,7 @@ impl Storage {
 		stop: isize,
 		with_scores: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
-		if let Some(meta) = self.get_valid_zset_meta(&key).await? {
+		if let Some(meta) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			// Adjust indices
 			let len = meta.len as isize;
 			let start = if start < 0 { len + start } else { start };
@@ -285,7 +251,7 @@ impl Storage {
 	}
 
 	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
-		if self.get_valid_zset_meta(&key).await?.is_none() {
+		if self.get_meta::<ZSetMetaValue>(&key).await?.is_none() {
 			return Ok(None);
 		}
 
@@ -303,7 +269,7 @@ impl Storage {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
-		let mut meta_val = match self.get_valid_zset_meta(&key).await? {
+		let mut meta_val = match self.get_meta::<ZSetMetaValue>(&key).await? {
 			Some(val) => val,
 			None => return Ok(0),
 		};
@@ -376,7 +342,7 @@ impl Storage {
 	}
 
 	pub async fn zcard(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = self.get_valid_zset_meta(&key).await? {
+		if let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)

@@ -6,7 +6,6 @@ use futures::future;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
-use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::hash::field_key::HashFieldKey;
@@ -41,36 +40,24 @@ impl Storage {
 
 		// Parallel fetch meta and field
 		let (meta_res, field_res) = tokio::join!(
-			self.string_db.get(meta_encoded_key.clone()),
+			self.get_meta::<HashMetaValue>(&key),
 			self.hash_db.get(encoded_field_key.clone())
 		);
 
-		let current_meta_bytes = meta_res?;
-		let existing_field_raw = field_res?;
-
-		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
-			if meta_bytes.is_empty() {
-				HashMetaValue::new(0)
-			} else {
-				match DataType::from_u8(meta_bytes[0]) {
-					Some(DataType::String) => {
-						return Err(StorageError::wrong_type(DataType::Hash, DataType::String));
-					}
-					_ => HashMetaValue::decode(&meta_bytes)?,
-				}
-			}
-		} else {
-			HashMetaValue::new(0)
+		let mut meta_val = match meta_res? {
+			Some(val) => val,
+			None => HashMetaValue::new(0),
 		};
 
-		// Check expiration
-		let mut is_new_field = existing_field_raw.is_none();
+		let existing_field_raw = field_res?;
 
-		if meta_val.is_expired() {
-			self.delete_hash_fields(key.clone()).await?;
-			meta_val = HashMetaValue::new(0);
-			is_new_field = true;
-		}
+		// If meta was missing/expired (len 0), treat as new field even if loose field
+		// existed (zombie/deleted)
+		let is_new_field = if meta_val.len == 0 {
+			true
+		} else {
+			existing_field_raw.is_none()
+		};
 
 		// Set the field in hash_db
 		let write_opts = WriteOptions {
