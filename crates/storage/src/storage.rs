@@ -55,11 +55,15 @@ impl Storage {
 
 		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
 
+		// Create a single shared cache for all databases in this shard
+		let cache = Arc::new(FoyerCache::new());
+
 		let open_db = |name: &'static str| {
 			let store = object_store.clone();
+			let cache = cache.clone();
 			async move {
 				Db::builder(slatedb::object_store::path::Path::from(name), store)
-					.with_memory_cache(Arc::new(FoyerCache::new()))
+					.with_memory_cache(cache)
 					.build()
 					.await
 			}
