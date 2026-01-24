@@ -32,6 +32,23 @@ It leverages multiple `SlateDB` instances (5 isolated databases total):
 - **Isolated Storage**: Each data type has its own database instance for better isolation and performance.
 - **Sharded Storage**: Each worker owns its own `Storage` instance in `{data_path}/shard-{id}/` for zero-lock contention.
 
+### Unified Metadata Management
+
+To handle different data types uniformly, the storage layer uses a few key abstractions:
+
+- **`MetaValue` Trait**: Defined in `crates/storage/src/string/meta.rs`, this trait provides a common interface for all metadata and value types stored in the `string_db`. It requires implementations for decoding, encoding, and checking the type code (`is_type_match`).
+- **`get_meta<T: MetaValue>`**: A generic helper method in the `Storage` struct that encapsulates the logic for:
+  1. Fetching raw bytes from `string_db`.
+  2. Performing type-code validation.
+  3. Decoding the metadata into type `T`.
+  4. Performing application-level lazy expiration checks (including lazy deletion).
+- **`AnyValue` Enum**: A wrapper enum that implements `MetaValue` and can represent any valid Redis data type stored in Nimbis. This allows core commands like `GET`, `EXPIRE`, and `TTL` to operate without type-specific logic.
+
+### Prefix-Based Deletion
+
+For collection types (Hash and Set), Nimbis provides a centralized helper:
+- **`delete_keys_by_prefix`**: Scans a specific SlateDB instance for all keys starting with a prefix (constructed from the user key) and deletes them in a batch. This is used for cleanup when a collection key is overwritten or explicitly deleted.
+
 ### String Operations
 
 String-specific operations (`get` and `set`) are implemented in `crates/storage/src/storage_string.rs`.
@@ -62,6 +79,7 @@ impl Storage {
 - **Binary Format**:
   - `[DataType::String (1 byte)] [expire_time (8 bytes BE)] [payload (remainder)]`
   - `expire_time` is milliseconds since epoch. `0` means no expiration.
+- **Implementation**: Uses `get_meta::<AnyValue>` to handle type checking and expiration uniformly for core operations.
 
 ### Hash Operations
 
@@ -82,7 +100,8 @@ impl Storage {
 - **Binary Format (Metadata)**:
   - `[DataType::Hash (1 byte)] [field_count (8 bytes BE)] [expire_time (8 bytes BE)]`
 - **Fields**: Stored in `hash_db` using `HashFieldKey` (`user_key` + `len(field)` as u32 BigEndian + `field`).
-- **Strict Metadata Check**: Hash read operations (`hget`, `hmget`, `hgetall`, `hlen`) perform a strict metadata check. If the metadata in `string_db` is missing (due to expiration or key deletion), the command treats the hash as non-existent, even if orphaned fields remain in `hash_db`. This ensures consistent lazy expiration behavior.
+- **Strict Metadata Check**: All hash operations use `get_meta::<HashMetaValue>` to perform strict type and expiration validation. If metadata is missing or expired, the hash is treated as empty.
+- **Cleanup**: Uses `delete_keys_by_prefix` to remove all fields from `hash_db`.
 
 ### List Operations
 
@@ -101,6 +120,7 @@ impl Storage {
 
 - **Metadata**: Stored in `string_db` using `ListMetaValue` (`len`, `head`, `tail`, `expire_time`).
 - **Elements**: Stored in `list_db` using `ListElementKey` (`user_key` + `sequence`).
+- **Strict Metadata Check**: Uses `get_meta::<ListMetaValue>` for unified validation.
 - **Deque Implementation**: Uses `head` and `tail` pointers to support efficient `push` and `pop` from both ends. `ListMetaValue` tracks the valid range of sequence numbers.
 
 ### Set Operations
@@ -119,6 +139,8 @@ impl Storage {
 
 - **Metadata**: Stored in `string_db` using `SetMetaValue` (`len`, `expire_time`).
 - **Members**: Stored in `set_db` using `SetMemberKey` (`user_key` + `len(member)` + `member`).
+- **Strict Metadata Check**: Uses `get_meta::<SetMetaValue>` for unified validation.
+- **Cleanup**: Uses `delete_keys_by_prefix` to remove all members from `set_db`.
 - **Efficiency**: `SCARD` works in O(1) by reading metadata. `SMEMBERS` scans a range in `set_db`.
 
 ### Sorted Set (ZSet) Operations

@@ -22,7 +22,7 @@ Expiration information is stored as part of the value's metadata in the `string_
 
 ### Dual-Layer Expiration
 1.  **Native SlateDB TTL**: When `EXPIRE` is called, Nimbis sets a native SlateDB TTL (`PutOptions { ttl }`). This allows SlateDB's compaction process to eventually reclaim space automatically.
-2.  **Application-Level Lazy Expiration**: To satisfy Redis's strong consistency requirements, every read operation (`get`, `hget`, `exists`, `ttl`) checks the encoded `expire_time` against the current clock.
+2.  **Application-Level Lazy Expiration**: Handled uniformly by the `get_meta<T>` helper. Every operation on a key first retrieves the metadata and checks the encoded `expire_time` against the current clock.
 
 ### Hash Type Specifics (Strict Metadata Check)
 Hashes use a "Master Expiration" pattern:
@@ -48,14 +48,15 @@ pub trait Expirable {
 ```
 
 #### Implementations
-Both `StringValue` and `HashMetaValue` implement this trait:
-- **StringValue** ([`crates/storage/src/string/value.rs`](../crates/storage/src/string/value.rs)): Stores expiration alongside the string value.
-- **HashMetaValue** ([`crates/storage/src/string/meta.rs`](../crates/storage/src/string/meta.rs)): Stores expiration in the hash metadata.
+All data types store meta in `string_db` and implement `Expirable` and `MetaValue`:
+- **StringValue**
+- **HashMetaValue**, **ListMetaValue**, **SetMetaValue**, **ZSetMetaValue**
+- **AnyValue**: An abstraction for any of the above.
 
 #### Benefits
-- **DRY Principle**: Expiration logic (`is_expired`, `expire_at`, `expire_after`, `remaining_ttl`) is defined once.
-- **Type Safety**: Trait bounds ensure consistent expiration behavior across all value types.
-- **Extensibility**: Future data types (e.g., Lists, Sets) can easily adopt expiration by implementing `Expirable`.
+- **DRY Principle**: Expiration logic and metadata retrieval are defined once in `get_meta`.
+- **Type Safety**: Trait-based dispatch ensures consistent behavior.
+- **Unified Generic Operations**: `AnyValue` allows generic commands (`TTL`, `EXISTS`, etc.) to be implemented without type-specific boilerplate.
 
 ## 4. Key Logic Points
 
@@ -84,6 +85,7 @@ sequenceDiagram
 
     C->>S: GET key
     S->>ST: get(key)
+    ST->>ST: get_meta::<AnyValue>(key)
     ST->>DB: get(encoded_key)
     DB-->>ST: return bytes [type, expire_at, value]
     alt is_expired(expire_at)

@@ -179,17 +179,21 @@ All keys start in the `String DB`, which acts as the source of truth for the key
 - **Hash operations** use `WriteBatch` for atomic field updates
 
 ### Expiration
-
-All data types that store metadata in String DB implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`), providing unified TTL management:
-- `StringValue` (String type)
-- `HashMetaValue` (Hash type)
-- `ListMetaValue` (List type)
-- `SetMetaValue` (Set type)
-- `ZSetMetaValue` (Sorted Set type)
-
-### Type Safety
-
-The type code in the metadata ensures type safety:
-- Operations check the type code before proceeding
-- `WRONGTYPE` error returned if type mismatch detected
-- Prevents accidental data corruption from type conflicts
+ 
+ All data types that store metadata in String DB implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`) and the `MetaValue` trait (in `crates/storage/src/string/meta.rs`), providing unified TTL management:
+ - `StringValue` (String type)
+ - `HashMetaValue` (Hash type)
+ - `ListMetaValue` (List type)
+ - `SetMetaValue` (Set type)
+ - `ZSetMetaValue` (Sorted Set type)
+ 
+ The `AnyValue` enum abstracts over all these types, allowing unified read operations and lazy expiration checks.
+ 
+ ### Type Safety
+ 
+ Nimbis leverages a centralized `get_meta<T>` helper to ensure type safety:
+ - Operations use `get_meta` with the expected metadata type.
+ - `AnyValue` is used for generic operations (`EXPIRE`, `EXISTS`, `TTL`, `GET`).
+ - The helper performs strict type-code validation before decoding.
+ - `WRONGTYPE` error is returned automatically if a type mismatch is detected.
+ - Lazy expiration is handled uniformly within `get_meta`.
