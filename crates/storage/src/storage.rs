@@ -5,6 +5,7 @@ use bytes::Bytes;
 use slatedb::Db;
 use slatedb::WriteBatch;
 use slatedb::config::WriteOptions;
+use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
@@ -56,7 +57,12 @@ impl Storage {
 
 		let open_db = |name: &'static str| {
 			let store = object_store.clone();
-			async move { Db::open(slatedb::object_store::path::Path::from(name), store).await }
+			async move {
+				Db::builder(slatedb::object_store::path::Path::from(name), store)
+					.with_memory_cache(Arc::new(FoyerCache::new()))
+					.build()
+					.await
+			}
 		};
 
 		let (string_db, hash_db, list_db, set_db, zset_db) = tokio::try_join!(
