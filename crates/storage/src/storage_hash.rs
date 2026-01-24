@@ -1,3 +1,4 @@
+use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -161,9 +162,6 @@ impl Storage {
 	}
 
 	pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, StorageError> {
-		use bytes::Buf;
-		use bytes::BytesMut;
-
 		// Check if the hash exists and is valid
 		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
 			return Ok(Vec::new());

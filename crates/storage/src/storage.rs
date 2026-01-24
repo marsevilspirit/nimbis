@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use slatedb::Db;
+use slatedb::WriteBatch;
+use slatedb::config::WriteOptions;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
@@ -147,26 +149,24 @@ impl Storage {
 		db: &Arc<Db>,
 		prefix: Bytes,
 	) -> Result<(), StorageError> {
-		use slatedb::config::WriteOptions;
-
 		let range = prefix.clone()..;
 		let mut stream = db.scan(range).await?;
-		let mut keys_to_delete = Vec::new();
+		let mut batch = WriteBatch::new();
+		let mut has_keys_to_delete = false;
 
 		while let Some(kv) = stream.next().await? {
 			if !kv.key.starts_with(&prefix) {
 				break;
 			}
-			keys_to_delete.push(kv.key);
+			batch.delete(kv.key);
+			has_keys_to_delete = true;
 		}
 
-		if !keys_to_delete.is_empty() {
+		if has_keys_to_delete {
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};
-			for k in keys_to_delete {
-				db.delete_with_options(k, &write_opts).await?;
-			}
+			db.write_with_options(batch, &write_opts).await?;
 		}
 
 		Ok(())
