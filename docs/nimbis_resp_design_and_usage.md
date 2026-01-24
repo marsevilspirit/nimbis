@@ -13,14 +13,30 @@
 - **Encoder (`encoder.rs`)**: Responsible for serializing `RespValue` into byte streams and writing them to a buffer.
 - **Error (`error.rs`)**: Provides detailed error types, distinguishing between parsing and encoding errors.
 
-### 1.2 Zero-copy Design
+### 1.2 Inline Command Support
+
+`nimbis-resp` supports **inline commands**, which are simple text-based commands used for debugging and telnet-style connections. This is an alternative to the binary RESP protocol format.
+
+**Format:** `COMMAND arg1 arg2 ...\r\n`
+
+**Features:**
+- Commands are parsed by splitting on whitespace
+- Maximum command length: 64KB (preventing DoS attacks)
+- UTF-8 validation for all arguments
+- Empty lines and whitespace-only lines are ignored
+- The first character must be a printable ASCII character (0x21-0x7E) or space
+
+**Limitations:**
+- Does not support quoted strings with spaces (e.g., `SET key "value with spaces"` will be parsed as `["SET", "key", "\"value", "with", "spaces\""]`)
+
+### 1.3 Zero-copy Design
 
 To achieve extreme performance, `nimbis-resp` extensively uses the `bytes` crate.
 
 - **Parsing Process**: When parsing Bulk Strings or other types carrying data, the parser does not copy the data but returns a `Bytes` object. `Bytes` is a reference-counted handle to the underlying memory, making the passing of strings and binary data almost cost-free.
 - **Memory View**: After reading data from a TCP stream into a `BytesMut` buffer, the parsed `RespValue` merely holds a slice of this buffer. Data is only copied when the user explicitly takes ownership (e.g., converting to a String).
 
-### 1.3 Type System and Enums
+### 1.4 Type System and Enums
 
 The `RespValue` enum is the core data structure of the library, unifying RESP2 and RESP3 handling:
 
@@ -45,7 +61,7 @@ pub enum RespValue {
 
 This design makes handling polymorphic responses simple and safe, allowing elegant handling of various Redis return values using Rust's pattern matching.
 
-### 1.4 Parsing and Encoding Mechanisms
+### 1.5 Parsing and Encoding Mechanisms
 
 - **Parser (`RespParser`)**: Uses a stateful, resumable parsing strategy.
     1. Maintains a stack of frames to track nested structures (Arrays, Maps, etc.).
