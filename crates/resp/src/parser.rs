@@ -206,7 +206,43 @@ impl RespParser {
 			SET => self.start_set(buf),
 			PUSH => self.start_push(buf),
 
-			_ => Err(ParseError::InvalidTypeMarker(type_marker as char)),
+			_ => self.parse_inline_command(buf),
+		}
+	}
+
+	fn parse_inline_command(
+		&mut self,
+		buf: &mut BytesMut,
+	) -> Result<Option<ParsedItem>, ParseError> {
+		if let Some((line, total_len)) = peek_line(buf) {
+			// This is an inline command.
+			// Format: "CMD arg1 arg2 ...\r\n"
+			// Split by whitespace and return as Array of BulkStrings.
+
+			// We need to valid UTF-8 to split by whitespace easily.
+			// Best effort conversion.
+			let s = std::str::from_utf8(line)
+				.map_err(|e| ParseError::InvalidFormat(format!("Invalid inline command: {}", e)))?;
+
+			let parts: Vec<&str> = s.split_whitespace().collect();
+			if parts.is_empty() {
+				// Empty line? Just consume and return error or empty array?
+				// Redis usually ignores empty newlines or treats as ping?
+				// Nimbis: treat as empty command -> Array([]) which server can handle/ignore.
+				// Or error? Let's return empty array.
+				buf.advance(total_len);
+				return Ok(Some(ParsedItem::Value(RespValue::Array(Vec::new()))));
+			}
+
+			let args: Vec<RespValue> = parts
+				.into_iter()
+				.map(|p| RespValue::BulkString(Bytes::copy_from_slice(p.as_bytes())))
+				.collect();
+
+			buf.advance(total_len);
+			Ok(Some(ParsedItem::Value(RespValue::Array(args))))
+		} else {
+			Ok(None)
 		}
 	}
 
@@ -568,6 +604,48 @@ mod tests {
 			assert_eq!(arr.len(), 2);
 			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("foo")));
 			assert_eq!(arr[1], RespValue::BulkString(Bytes::from("bar")));
+		} else {
+			panic!("Expected Array, got {:?}", value);
+		}
+	}
+
+	#[test]
+	fn test_parse_inline_ping() {
+		let mut buf = BytesMut::from(&b"PING\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+		// Should parse as ["PING"]
+		if let RespValue::Array(arr) = value {
+			assert_eq!(arr.len(), 1);
+			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("PING")));
+		} else {
+			panic!("Expected Array, got {:?}", value);
+		}
+	}
+
+	#[test]
+	fn test_parse_inline_set() {
+		let mut buf = BytesMut::from(&b"SET key val\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+		// Should parse as ["SET", "key", "val"]
+		if let RespValue::Array(arr) = value {
+			assert_eq!(arr.len(), 3);
+			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("SET")));
+			assert_eq!(arr[1], RespValue::BulkString(Bytes::from("key")));
+			assert_eq!(arr[2], RespValue::BulkString(Bytes::from("val")));
+		} else {
+			panic!("Expected Array, got {:?}", value);
+		}
+	}
+
+	#[test]
+	fn test_parse_inline_with_extra_spaces() {
+		let mut buf = BytesMut::from(&b"  GET    key  \r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+		// Should parse as ["GET", "key"]
+		if let RespValue::Array(arr) = value {
+			assert_eq!(arr.len(), 2);
+			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("GET")));
+			assert_eq!(arr[1], RespValue::BulkString(Bytes::from("key")));
 		} else {
 			panic!("Expected Array, got {:?}", value);
 		}

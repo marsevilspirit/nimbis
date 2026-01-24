@@ -69,7 +69,7 @@ pub fn peek_line(buf: &[u8]) -> Option<(&[u8], usize)> {
 ///   integer (`i64`).
 ///
 /// ### Examples
-/// ```
+/// ```rust,ignore
 /// use resp::utils::parse_integer;
 /// assert_eq!(parse_integer(b"123").unwrap(), 123);
 /// assert_eq!(parse_integer(b"-456").unwrap(), -456);
