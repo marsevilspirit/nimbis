@@ -40,6 +40,9 @@ impl Storage {
 				Some(DataType::Set) => {
 					self.delete_set_members(user_key).await?;
 				}
+				Some(DataType::ZSet) => {
+					self.delete_zset_content(user_key).await?;
+				}
 				_ => {}
 			}
 		}
@@ -74,6 +77,9 @@ impl Storage {
 				}
 				DataType::Set => {
 					self.delete_set_members(user_key).await?;
+				}
+				DataType::ZSet => {
+					self.delete_zset_content(user_key).await?;
 				}
 				_ => {}
 			}

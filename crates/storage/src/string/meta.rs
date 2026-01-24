@@ -8,7 +8,8 @@ use crate::error::DecoderError;
 use crate::expirable::Expirable;
 use crate::string::value::StringValue;
 
-/// Trait for metadata values stored in the string database.
+/// Trait for values stored in the string database that carry TTL and type
+/// information.
 pub trait MetaValue: Expirable + Sized {
 	/// Decode the value from bytes.
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError>;
@@ -16,6 +17,11 @@ pub trait MetaValue: Expirable + Sized {
 	fn is_type_match(type_code: u8) -> bool;
 	/// Encode the value to bytes.
 	fn encode(&self) -> Bytes;
+	/// Return the expected data type for this meta value, if specific.
+	/// Used for better error messages on type mismatch.
+	fn data_type() -> Option<DataType> {
+		None
+	}
 }
 
 impl MetaValue for StringValue {
@@ -25,6 +31,10 @@ impl MetaValue for StringValue {
 
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::String as u8
+	}
+
+	fn data_type() -> Option<DataType> {
+		Some(DataType::String)
 	}
 
 	fn encode(&self) -> Bytes {
@@ -113,6 +123,10 @@ impl MetaValue for HashMetaValue {
 		type_code == DataType::Hash as u8
 	}
 
+	fn data_type() -> Option<DataType> {
+		Some(DataType::Hash)
+	}
+
 	fn encode(&self) -> Bytes {
 		self.encode()
 	}
@@ -197,6 +211,10 @@ impl MetaValue for ListMetaValue {
 		type_code == DataType::List as u8
 	}
 
+	fn data_type() -> Option<DataType> {
+		Some(DataType::List)
+	}
+
 	fn encode(&self) -> Bytes {
 		self.encode()
 	}
@@ -263,6 +281,10 @@ impl MetaValue for SetMetaValue {
 		type_code == DataType::Set as u8
 	}
 
+	fn data_type() -> Option<DataType> {
+		Some(DataType::Set)
+	}
+
 	fn encode(&self) -> Bytes {
 		self.encode()
 	}
@@ -327,6 +349,10 @@ impl MetaValue for ZSetMetaValue {
 
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::ZSet as u8
+	}
+
+	fn data_type() -> Option<DataType> {
+		Some(DataType::ZSet)
 	}
 
 	fn encode(&self) -> Bytes {

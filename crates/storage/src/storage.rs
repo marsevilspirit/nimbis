@@ -128,7 +128,7 @@ impl Storage {
 		let actual_type_u8 = meta_bytes[0];
 		if !T::is_type_match(actual_type_u8) {
 			return Err(StorageError::WrongType {
-				expected: None,
+				expected: T::data_type(),
 				actual: DataType::from_u8(actual_type_u8).unwrap_or(DataType::String),
 			});
 		}
