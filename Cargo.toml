@@ -33,7 +33,7 @@ memchr = "2.7.6"
 num_cpus = "1.17.0"
 object_store = "0.13.1"
 quote = "1.0.43"
-slatedb = "0.10.1"
+slatedb = { version = "0.10.1", features = ["foyer"] }
 syn = { version = "2.0.114", features = ["full"] }
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }

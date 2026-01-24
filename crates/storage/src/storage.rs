@@ -5,6 +5,7 @@ use bytes::Bytes;
 use slatedb::Db;
 use slatedb::WriteBatch;
 use slatedb::config::WriteOptions;
+use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
@@ -54,9 +55,18 @@ impl Storage {
 
 		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
 
+		// Create a single shared cache for all databases in this shard
+		let cache = Arc::new(FoyerCache::new());
+
 		let open_db = |name: &'static str| {
 			let store = object_store.clone();
-			async move { Db::open(slatedb::object_store::path::Path::from(name), store).await }
+			let cache = cache.clone();
+			async move {
+				Db::builder(slatedb::object_store::path::Path::from(name), store)
+					.with_memory_cache(cache)
+					.build()
+					.await
+			}
 		};
 
 		let (string_db, hash_db, list_db, set_db, zset_db) = tokio::try_join!(
