@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: just-check
+        name: just check
+        entry: just check
+        language: system
+        types: [rust]
+        pass_filenames: false
