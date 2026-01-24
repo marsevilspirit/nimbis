@@ -1,4 +1,3 @@
-use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -15,38 +14,6 @@ use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	// Helper to get and validate hash metadata.
-	// Returns:
-	// - Ok(Some(meta)) if the key is a valid, non-expired Hash
-	// - Ok(None) if the key doesn't exist or is expired
-	// - Err if the key exists but is of wrong type (e.g., String)
-	async fn get_valid_hash_meta(
-		&self,
-		key: &Bytes,
-	) -> Result<Option<HashMetaValue>, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
-			None => return Ok(None),
-		};
-
-		if meta_bytes.is_empty() {
-			return Ok(None);
-		}
-		if meta_bytes[0] != DataType::Hash as u8 {
-			return Err(StorageError::wrong_type(
-				DataType::Hash,
-				DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
-			));
-		}
-		let meta_val = HashMetaValue::decode(&meta_bytes)?;
-		if meta_val.is_expired() {
-			self.del(key.clone()).await?;
-			return Ok(None);
-		}
-		Ok(Some(meta_val))
-	}
-
 	// Helper to delete all fields of a hash.
 	// Used when overwriting a Hash with a String, or deleting a Hash.
 	// TODO: This function is temporary; once the compaction filter is implemented,
@@ -58,36 +25,7 @@ impl Storage {
 		prefix.extend_from_slice(&key);
 		let prefix = prefix.freeze();
 
-		let range = prefix.clone()..;
-		let mut stream = self.hash_db.scan(range).await?;
-		let mut keys_to_delete = Vec::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			if !k.starts_with(&prefix) {
-				break;
-			}
-			// Verify suffix (should be at least 4 bytes for field_len)
-			let suffix = &k[prefix.len()..];
-			if suffix.len() < 4 {
-				continue;
-			}
-			let mut buf = suffix;
-			let field_len = buf.get_u32() as usize;
-			if buf.len() != field_len {
-				continue;
-			}
-
-			keys_to_delete.push(k);
-		}
-
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		for k in keys_to_delete {
-			self.hash_db.delete_with_options(k, &write_opts).await?;
-		}
-		Ok(())
+		self.delete_keys_by_prefix(&self.hash_db, prefix).await
 	}
 
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
@@ -165,7 +103,7 @@ impl Storage {
 
 	pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, StorageError> {
 		// Check if the hash exists and is valid
-		if self.get_valid_hash_meta(&key).await?.is_none() {
+		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
 			return Ok(None);
 		}
 
@@ -175,7 +113,7 @@ impl Storage {
 	}
 
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = self.get_valid_hash_meta(&key).await? {
+		if let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
@@ -188,7 +126,7 @@ impl Storage {
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, StorageError> {
 		// Check if the hash exists and is valid
-		if self.get_valid_hash_meta(&key).await?.is_none() {
+		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
 			return Ok(vec![None; fields.len()]);
 		}
 
@@ -227,7 +165,7 @@ impl Storage {
 		use bytes::BytesMut;
 
 		// Check if the hash exists and is valid
-		if self.get_valid_hash_meta(&key).await?.is_none() {
+		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
 			return Ok(Vec::new());
 		}
 
@@ -273,7 +211,7 @@ impl Storage {
 		let meta_encoded_key = meta_key.encode();
 
 		// check meta
-		let mut meta_val = match self.get_valid_hash_meta(&key).await? {
+		let mut meta_val = match self.get_meta::<HashMetaValue>(&key).await? {
 			Some(meta) => meta,
 			None => return Ok(0),
 		};

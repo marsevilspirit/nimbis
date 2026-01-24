@@ -4,7 +4,6 @@ use log::warn;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
-use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::expirable::Expirable;
 use crate::list::element_key::ListElementKey;
@@ -13,41 +12,6 @@ use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	/// Helper to get and validate list metadata.
-	/// Returns:
-	/// - Ok(Some(meta)) if the key is a valid, non-expired List
-	/// - Ok(None) if the key doesn't exist or is expired
-	/// - Err if the key exists but is of wrong type
-	async fn get_valid_list_meta(
-		&self,
-		key: &Bytes,
-	) -> Result<Option<ListMetaValue>, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
-			None => return Ok(None),
-		};
-
-		if meta_bytes.is_empty() {
-			return Ok(None);
-		}
-
-		if meta_bytes[0] != DataType::List as u8 {
-			return Err(StorageError::wrong_type(
-				DataType::List,
-				DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
-			));
-		}
-
-		let meta_val = ListMetaValue::decode(&meta_bytes)?;
-		if meta_val.is_expired() {
-			self.del(key.clone()).await?;
-			return Ok(None);
-		}
-
-		Ok(Some(meta_val))
-	}
-
 	// Helper to delete all elements of a list.
 	pub(crate) async fn delete_list_elements(
 		&self,
@@ -86,7 +50,7 @@ impl Storage {
 	) -> Result<u64, StorageError> {
 		if elements.is_empty() {
 			// If key exists, return len. If not, return 0.
-			if let Some(meta) = self.get_valid_list_meta(&key).await? {
+			if let Some(meta) = self.get_meta::<ListMetaValue>(&key).await? {
 				return Ok(meta.len);
 			} else {
 				return Ok(0);
@@ -96,37 +60,10 @@ impl Storage {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
-		// Check type and get current meta
-		let current_meta_bytes = self.string_db.get(meta_encoded_key.clone()).await?;
-
-		let mut meta_val = if let Some(meta_bytes) = current_meta_bytes {
-			if meta_bytes.is_empty() {
-				ListMetaValue::new()
-			} else {
-				match DataType::from_u8(meta_bytes[0]) {
-					Some(DataType::String)
-					| Some(DataType::Hash)
-					| Some(DataType::Set)
-					| Some(DataType::ZSet) => {
-						let actual_type =
-							DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String);
-						return Err(StorageError::wrong_type(DataType::List, actual_type));
-					}
-					Some(DataType::List) => {
-						let val = ListMetaValue::decode(&meta_bytes)?;
-						if val.is_expired() {
-							self.delete_list_elements(key.clone(), &val).await?;
-							ListMetaValue::new()
-						} else {
-							val
-						}
-					}
-					None => ListMetaValue::new(),
-				}
-			}
-		} else {
-			ListMetaValue::new()
-		};
+		let mut meta_val = self
+			.get_meta::<ListMetaValue>(&key)
+			.await?
+			.unwrap_or_default();
 
 		let write_opts = WriteOptions {
 			await_durable: false,
@@ -186,7 +123,7 @@ impl Storage {
 		count: Option<usize>,
 		is_left: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
-		let Some(mut meta_val) = self.get_valid_list_meta(&key).await? else {
+		let Some(mut meta_val) = self.get_meta::<ListMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};
 
@@ -260,7 +197,7 @@ impl Storage {
 	}
 
 	pub async fn llen(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = self.get_valid_list_meta(&key).await? {
+		if let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
@@ -273,7 +210,7 @@ impl Storage {
 		start: i64,
 		stop: i64,
 	) -> Result<Vec<Bytes>, StorageError> {
-		let Some(meta_val) = self.get_valid_list_meta(&key).await? else {
+		let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};
 

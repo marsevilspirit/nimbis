@@ -14,31 +14,6 @@ use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
 
 impl Storage {
-	// Helper to get and validate set metadata.
-	async fn get_valid_set_meta(&self, key: &Bytes) -> Result<Option<SetMetaValue>, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
-			None => return Ok(None),
-		};
-
-		if meta_bytes.is_empty() {
-			return Ok(None);
-		}
-		if meta_bytes[0] != DataType::Set as u8 {
-			return Err(StorageError::wrong_type(
-				DataType::Set,
-				DataType::from_u8(meta_bytes[0]).unwrap_or(DataType::String),
-			));
-		}
-		let meta_val = SetMetaValue::decode(&meta_bytes)?;
-		if meta_val.is_expired() {
-			self.del(key.clone()).await?;
-			return Ok(None);
-		}
-		Ok(Some(meta_val))
-	}
-
 	pub(crate) async fn delete_set_members(&self, key: Bytes) -> Result<(), StorageError> {
 		// Construct prefix: len(user_key) + user_key
 		let mut prefix = BytesMut::with_capacity(2 + key.len());
@@ -46,36 +21,7 @@ impl Storage {
 		prefix.extend_from_slice(&key);
 		let prefix = prefix.freeze();
 
-		let range = prefix.clone()..;
-		let mut stream = self.set_db.scan(range).await?;
-		let mut keys_to_delete = Vec::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			if !k.starts_with(&prefix) {
-				break;
-			}
-			// Verify suffix (should be at least 4 bytes for member_len)
-			let suffix = &k[prefix.len()..];
-			if suffix.len() < 4 {
-				continue;
-			}
-			let mut buf = suffix;
-			let member_len = buf.get_u32() as usize;
-			if buf.len() != member_len {
-				continue;
-			}
-
-			keys_to_delete.push(k);
-		}
-
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		for k in keys_to_delete {
-			self.set_db.delete_with_options(k, &write_opts).await?;
-		}
-		Ok(())
+		self.delete_keys_by_prefix(&self.set_db, prefix).await
 	}
 
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
@@ -148,7 +94,7 @@ impl Storage {
 	}
 
 	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, StorageError> {
-		if self.get_valid_set_meta(&key).await?.is_none() {
+		if self.get_meta::<SetMetaValue>(&key).await?.is_none() {
 			return Ok(Vec::new());
 		}
 
@@ -189,7 +135,7 @@ impl Storage {
 	}
 
 	pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, StorageError> {
-		if self.get_valid_set_meta(&key).await?.is_none() {
+		if self.get_meta::<SetMetaValue>(&key).await?.is_none() {
 			return Ok(false);
 		}
 
@@ -201,7 +147,7 @@ impl Storage {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
-		let mut meta_val = match self.get_valid_set_meta(&key).await? {
+		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
 			Some(val) => val,
 			None => return Ok(0),
 		};
@@ -247,7 +193,7 @@ impl Storage {
 	}
 
 	pub async fn scard(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = self.get_valid_set_meta(&key).await? {
+		if let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)

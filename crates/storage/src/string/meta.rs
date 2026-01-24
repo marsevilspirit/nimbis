@@ -6,6 +6,31 @@ use bytes::BytesMut;
 use crate::data_type::DataType;
 use crate::error::DecoderError;
 use crate::expirable::Expirable;
+use crate::string::value::StringValue;
+
+/// Trait for metadata values stored in the string database.
+pub trait MetaValue: Expirable + Sized {
+	/// Decode the value from bytes.
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError>;
+	/// Check if the given type code matches this meta value type.
+	fn is_type_match(type_code: u8) -> bool;
+	/// Encode the value to bytes.
+	fn encode(&self) -> Bytes;
+}
+
+impl MetaValue for StringValue {
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		Self::decode(bytes)
+	}
+
+	fn is_type_match(type_code: u8) -> bool {
+		type_code == DataType::String as u8
+	}
+
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+}
 
 #[derive(Debug, PartialEq)]
 pub struct MetaKey {
@@ -78,6 +103,19 @@ impl Expirable for HashMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+impl MetaValue for HashMetaValue {
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		Self::decode(bytes)
+	}
+
+	fn is_type_match(type_code: u8) -> bool {
+		type_code == DataType::Hash as u8
+	}
+
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+}
 
 #[derive(Debug, PartialEq)]
 pub struct ListMetaValue {
@@ -148,6 +186,19 @@ impl Expirable for ListMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+impl MetaValue for ListMetaValue {
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		Self::decode(bytes)
+	}
+
+	fn is_type_match(type_code: u8) -> bool {
+		type_code == DataType::List as u8
+	}
+
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+}
 
 #[derive(Debug, PartialEq)]
 pub struct SetMetaValue {
@@ -200,6 +251,19 @@ impl Expirable for SetMetaValue {
 		self.expire_time = timestamp;
 	}
 }
+impl MetaValue for SetMetaValue {
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		Self::decode(bytes)
+	}
+
+	fn is_type_match(type_code: u8) -> bool {
+		type_code == DataType::Set as u8
+	}
+
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+}
 
 #[derive(Debug, PartialEq)]
 pub struct ZSetMetaValue {
@@ -250,6 +314,130 @@ impl Expirable for ZSetMetaValue {
 
 	fn set_expire_time(&mut self, timestamp: u64) {
 		self.expire_time = timestamp;
+	}
+}
+impl MetaValue for ZSetMetaValue {
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		Self::decode(bytes)
+	}
+
+	fn is_type_match(type_code: u8) -> bool {
+		type_code == DataType::ZSet as u8
+	}
+
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+}
+
+/// Enum representing any value or metadata stored in the string database.
+pub enum AnyValue {
+	String(StringValue),
+	Hash(HashMetaValue),
+	List(ListMetaValue),
+	Set(SetMetaValue),
+	ZSet(ZSetMetaValue),
+}
+
+impl AnyValue {
+	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		if bytes.is_empty() {
+			return Err(DecoderError::Empty);
+		}
+		match DataType::from_u8(bytes[0]) {
+			Some(DataType::String) => Ok(Self::String(StringValue::decode(bytes)?)),
+			Some(DataType::Hash) => Ok(Self::Hash(HashMetaValue::decode(bytes)?)),
+			Some(DataType::List) => Ok(Self::List(ListMetaValue::decode(bytes)?)),
+			Some(DataType::Set) => Ok(Self::Set(SetMetaValue::decode(bytes)?)),
+			Some(DataType::ZSet) => Ok(Self::ZSet(ZSetMetaValue::decode(bytes)?)),
+			None => Err(DecoderError::InvalidType),
+		}
+	}
+
+	pub fn data_type(&self) -> DataType {
+		match self {
+			Self::String(_) => DataType::String,
+			Self::Hash(_) => DataType::Hash,
+			Self::List(_) => DataType::List,
+			Self::Set(_) => DataType::Set,
+			Self::ZSet(_) => DataType::ZSet,
+		}
+	}
+
+	pub fn encode(&self) -> Bytes {
+		match self {
+			Self::String(v) => v.encode(),
+			Self::Hash(v) => v.encode(),
+			Self::List(v) => v.encode(),
+			Self::Set(v) => v.encode(),
+			Self::ZSet(v) => v.encode(),
+		}
+	}
+}
+
+impl Expirable for AnyValue {
+	fn expire_time(&self) -> u64 {
+		match self {
+			Self::String(v) => v.expire_time(),
+			Self::Hash(v) => v.expire_time(),
+			Self::List(v) => v.expire_time(),
+			Self::Set(v) => v.expire_time(),
+			Self::ZSet(v) => v.expire_time(),
+		}
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		match self {
+			Self::String(v) => v.set_expire_time(timestamp),
+			Self::Hash(v) => v.set_expire_time(timestamp),
+			Self::List(v) => v.set_expire_time(timestamp),
+			Self::Set(v) => v.set_expire_time(timestamp),
+			Self::ZSet(v) => v.set_expire_time(timestamp),
+		}
+	}
+}
+
+impl From<StringValue> for AnyValue {
+	fn from(v: StringValue) -> Self {
+		Self::String(v)
+	}
+}
+
+impl From<HashMetaValue> for AnyValue {
+	fn from(v: HashMetaValue) -> Self {
+		Self::Hash(v)
+	}
+}
+
+impl From<ListMetaValue> for AnyValue {
+	fn from(v: ListMetaValue) -> Self {
+		Self::List(v)
+	}
+}
+
+impl From<SetMetaValue> for AnyValue {
+	fn from(v: SetMetaValue) -> Self {
+		Self::Set(v)
+	}
+}
+
+impl From<ZSetMetaValue> for AnyValue {
+	fn from(v: ZSetMetaValue) -> Self {
+		Self::ZSet(v)
+	}
+}
+
+impl MetaValue for AnyValue {
+	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+		Self::decode(bytes)
+	}
+
+	fn is_type_match(_type_code: u8) -> bool {
+		true
+	}
+
+	fn encode(&self) -> Bytes {
+		self.encode()
 	}
 }
 
