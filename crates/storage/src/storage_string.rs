@@ -25,10 +25,10 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
-		let meta_opt = self.string_db.get(key.encode()).await?;
+		let meta = self.string_db.get(key.encode()).await?;
 
 		// Clean up if it's a Hash or List
-		if let Some(meta) = meta_opt {
+		if let Some(meta) = meta {
 			match meta.first().and_then(|&b| DataType::from_u8(b)) {
 				Some(DataType::Hash) => {
 					self.delete_hash_fields(user_key).await?;
