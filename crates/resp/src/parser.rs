@@ -206,43 +206,92 @@ impl RespParser {
 			SET => self.start_set(buf),
 			PUSH => self.start_push(buf),
 
-			_ => self.parse_inline_command(buf),
+			_ => {
+				if Self::is_possible_inline_type_marker(type_marker) {
+					self.parse_inline_command(buf)
+				} else {
+					Err(ParseError::InvalidTypeMarker(type_marker as char))
+				}
+			}
 		}
+	}
+
+	/// Checks if a byte is a valid start for an inline command (printable ASCII
+	/// or space). Also allows '\r' to support empty lines (CRLF).
+	#[inline]
+	fn is_possible_inline_type_marker(c: u8) -> bool {
+		c.is_ascii_graphic() || c == b' ' || c == b'\r'
 	}
 
 	fn parse_inline_command(
 		&mut self,
 		buf: &mut BytesMut,
 	) -> Result<Option<ParsedItem>, ParseError> {
-		if let Some((line, total_len)) = peek_line(buf) {
-			// This is an inline command.
-			// Format: "CMD arg1 arg2 ...\r\n"
-			// Split by whitespace and return as Array of BulkStrings.
+		loop {
+			if let Some((line, total_len)) = peek_line(buf) {
+				// Add a length check to prevent DoS from very long inline commands.
+				const MAX_INLINE_COMMAND_LEN: usize = 65536; // 64KB
+				if line.len() > MAX_INLINE_COMMAND_LEN {
+					return Err(ParseError::InvalidFormat(format!(
+						"Inline command exceeds maximum length of {} bytes",
+						MAX_INLINE_COMMAND_LEN
+					)));
+				}
 
-			// We need to valid UTF-8 to split by whitespace easily.
-			// Best effort conversion.
-			let s = std::str::from_utf8(line)
-				.map_err(|e| ParseError::InvalidFormat(format!("Invalid inline command: {}", e)))?;
+				// Check if the first byte is a printable ASCII character.
+				// This prevents interpreting binary data or weird control characters as inline
+				// commands. Allowed: 0x21-0x7E (printable) and 0x20 (space).
+				if !line.is_empty() {
+					let first_char = line[0];
+					if !(first_char.is_ascii_graphic() || first_char == b' ') {
+						// This should have been caught by parse_step ->
+						// is_possible_inline_type_marker But we keep it as a secondary safety
+						// check or for direct calls
+						return Err(ParseError::InvalidFormat(format!(
+							"Inline command must start with a printable ASCII character, found: 0x{:02X}",
+							first_char
+						)));
+					}
+				}
 
-			let parts: Vec<&str> = s.split_whitespace().collect();
-			if parts.is_empty() {
-				// Empty line? Just consume and return error or empty array?
-				// Redis usually ignores empty newlines or treats as ping?
-				// Nimbis: treat as empty command -> Array([]) which server can handle/ignore.
-				// Or error? Let's return empty array.
+				// We need valid UTF-8 to split by whitespace easily.
+				// Best effort conversion.
+				let s = std::str::from_utf8(line).map_err(|e| {
+					ParseError::InvalidFormat(format!("Invalid inline command: {}", e))
+				})?;
+
+				let parts: Vec<&str> = s.split_whitespace().collect();
+				if parts.is_empty() {
+					// Empty line or whitespace only? Just consume and continue looking.
+					// Redis ignores empty newlines.
+					buf.advance(total_len);
+					continue;
+				}
+
+				// This is an inline command.
+				// Format: "CMD arg1 arg2 ...\r\n"
+				// Split by whitespace and return as Array of BulkStrings.
+				//
+				// NOTE: This simple parsing does NOT support quoted strings with spaces.
+				// E.g. `SET key "value with spaces"` will be parsed as ["SET", "key",
+				// "\"value", "with", "spaces\""]. This is consistent with Redis inline
+				// protocol which is meant for simple telnet usage.
+
+				// NOTE: We use Bytes::copy_from_slice which allocates new memory for each
+				// argument. Since split_whitespace() returns slices that may not be
+				// contiguous in the original buffer (due to skipped whitespace), zero-copy
+				// slicing is complex here. Given inline commands are typically short
+				// control commands, this copy is acceptable.
+				let args: Vec<RespValue> = parts
+					.into_iter()
+					.map(|p| RespValue::BulkString(Bytes::copy_from_slice(p.as_bytes())))
+					.collect();
+
 				buf.advance(total_len);
-				return Ok(Some(ParsedItem::Value(RespValue::Array(Vec::new()))));
+				return Ok(Some(ParsedItem::Value(RespValue::Array(args))));
+			} else {
+				return Ok(None);
 			}
-
-			let args: Vec<RespValue> = parts
-				.into_iter()
-				.map(|p| RespValue::BulkString(Bytes::copy_from_slice(p.as_bytes())))
-				.collect();
-
-			buf.advance(total_len);
-			Ok(Some(ParsedItem::Value(RespValue::Array(args))))
-		} else {
-			Ok(None)
 		}
 	}
 
@@ -609,45 +658,74 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn test_parse_inline_ping() {
-		let mut buf = BytesMut::from(&b"PING\r\n"[..]);
+	use rstest::rstest;
+
+	#[rstest]
+	#[case(b"PING\r\n", vec!["PING"])]
+	#[case(b"SET key val\r\n", vec!["SET", "key", "val"])]
+	#[case(b"  GET    key  \r\n", vec!["GET", "key"])]
+	#[case(b"\r\nPING\r\n", vec!["PING"])] // Empty line skipped
+	#[case(b" \r\nPING\r\n", vec!["PING"])] // Whitespace only line skipped
+	#[case(b" PING\r\n", vec!["PING"])] // Starts with space
+	#[case(b"GET\tkey\r\n", vec!["GET", "key"])] // Tab separator
+	#[case(b"SET key \"val with spaces\"\r\n", vec!["SET", "key", "\"val", "with", "spaces\""])] // Quotes not handled
+	fn test_parse_inline_command_valid(#[case] input: &[u8], #[case] expected: Vec<&str>) {
+		let mut buf = BytesMut::from(input);
 		let value = parse(&mut buf).unwrap();
-		// Should parse as ["PING"]
-		if let RespValue::Array(arr) = value {
-			assert_eq!(arr.len(), 1);
-			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("PING")));
+
+		if expected.is_empty() {
+			if let RespValue::Array(arr) = value {
+				assert!(arr.is_empty(), "Expected empty array, got {:?}", arr);
+			} else {
+				panic!("Expected Array, got {:?}", value);
+			}
 		} else {
-			panic!("Expected Array, got {:?}", value);
+			if let RespValue::Array(arr) = value {
+				assert_eq!(arr.len(), expected.len());
+				for (i, expected_str) in expected.iter().enumerate() {
+					assert_eq!(
+						arr[i],
+						RespValue::BulkString(Bytes::copy_from_slice(expected_str.as_bytes()))
+					);
+				}
+			} else {
+				panic!("Expected Array, got {:?}", value);
+			}
 		}
 	}
 
-	#[test]
-	fn test_parse_inline_set() {
-		let mut buf = BytesMut::from(&b"SET key val\r\n"[..]);
-		let value = parse(&mut buf).unwrap();
-		// Should parse as ["SET", "key", "val"]
-		if let RespValue::Array(arr) = value {
-			assert_eq!(arr.len(), 3);
-			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("SET")));
-			assert_eq!(arr[1], RespValue::BulkString(Bytes::from("key")));
-			assert_eq!(arr[2], RespValue::BulkString(Bytes::from("val")));
-		} else {
-			panic!("Expected Array, got {:?}", value);
-		}
+	#[rstest]
+	#[case(b"PING \x80\r\n", "Invalid inline command")] // Invalid UTF-8
+	#[case(b"\x01PING\r\n", "Invalid type marker")] // Control char start -> InvalidTypeMarker
+	#[case(b"\x7FPING\r\n", "Invalid type marker")] // Non-printable start -> InvalidTypeMarker
+	fn test_parse_inline_command_invalid(#[case] input: &[u8], #[case] error_msg_part: &str) {
+		let mut buf = BytesMut::from(input);
+		let result = parse(&mut buf);
+		// Check string representation because error types differ (InvalidFormat vs
+		// InvalidTypeMarker)
+		assert!(
+			result
+				.as_ref()
+				.unwrap_err()
+				.to_string()
+				.contains(error_msg_part),
+			"Expected error containing '{}', got {:?}",
+			error_msg_part,
+			result
+		);
 	}
 
 	#[test]
-	fn test_parse_inline_with_extra_spaces() {
-		let mut buf = BytesMut::from(&b"  GET    key  \r\n"[..]);
-		let value = parse(&mut buf).unwrap();
-		// Should parse as ["GET", "key"]
-		if let RespValue::Array(arr) = value {
-			assert_eq!(arr.len(), 2);
-			assert_eq!(arr[0], RespValue::BulkString(Bytes::from("GET")));
-			assert_eq!(arr[1], RespValue::BulkString(Bytes::from("key")));
-		} else {
-			panic!("Expected Array, got {:?}", value);
-		}
+	fn test_parse_inline_command_too_long() {
+		// 64KB + 1 byte
+		let mut big_cmd = Vec::new();
+		big_cmd.extend(std::iter::repeat(b'a').take(65537));
+		big_cmd.extend_from_slice(b"\r\n");
+		let mut buf = BytesMut::from(&big_cmd[..]);
+
+		let result = parse(&mut buf);
+		assert!(
+			matches!(result, Err(ParseError::InvalidFormat(msg)) if msg.contains("exceeds maximum length"))
+		);
 	}
 }
