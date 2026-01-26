@@ -25,6 +25,7 @@ check: check-workspace check-code-fmt
     cargo check --workspace
     cargo fmt -- --check
     cargo clippy --workspace -- -D warnings
+    rustfmt --check scripts/*.rs
 
 # Check workspace dependencies
 [private]
@@ -42,6 +43,7 @@ check-code-fmt:
 [group: 'misc']
 fmt:
     cargo fmt --all
+    rustfmt scripts/*.rs
 
 # Clean build artifacts
 [group: 'clean']

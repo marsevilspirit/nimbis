@@ -33,6 +33,20 @@ jobs:
           
           sudo systemctl stop redis-server
 
+      - name: Run Redis Benchmark with Pipeline
+        run: |
+          # Start Redis Server
+          sudo systemctl start redis-server
+          sleep 5
+          
+          echo "Warmup on Redis (Pipeline)..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on Redis (Pipeline)..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_redis_pipeline.txt || true
+          
+          sudo systemctl stop redis-server
+
       - name: Checkout Main
         uses: actions/checkout@v6
         with:
@@ -69,6 +83,22 @@ jobs:
           
           kill $NIMBIS_PID
 
+      - name: Build and Run Main with Pipeline
+        working-directory: main_branch
+        run: |
+          ./target/release/nimbis &
+          NIMBIS_PID=$!
+          echo "Nimbis (Main) started with PID $NIMBIS_PID"
+          sleep 10 # Wait for server start
+          
+          echo "Warmup on Main (Pipeline)..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on Main (Pipeline)..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > ../benchmark_main_pipeline.txt || true
+          
+          kill $NIMBIS_PID
+
       - name: Build and Run PR
         working-directory: pr_branch
         run: |
@@ -86,6 +116,22 @@ jobs:
           
           kill $NIMBIS_PID
 
+      - name: Build and Run PR with Pipeline
+        working-directory: pr_branch
+        run: |
+          ./target/release/nimbis &
+          NIMBIS_PID=$!
+          echo "Nimbis (PR) started with PID $NIMBIS_PID"
+          sleep 10 # Wait for server start
+          
+          echo "Warmup on PR (Pipeline)..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on PR (Pipeline)..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > ../benchmark_pr_pipeline.txt || true
+          
+          kill $NIMBIS_PID
+
       - name: Compare Results
         id: compare
         working-directory: pr_branch
@@ -94,7 +140,14 @@ jobs:
           # benchmark files are in ../ (root of workspace)
           
           # output to a file to handle newlines easily in github-script or step output
-          rust-script scripts/compare_benchmarks.rs ../benchmark_main.txt ../benchmark_pr.txt ../benchmark_redis.txt > ../benchmark_report.md
+          rust-script scripts/compare_benchmarks.rs \
+            --main ../benchmark_main.txt \
+            --pr ../benchmark_pr.txt \
+            --redis ../benchmark_redis.txt \
+            --main-pipeline ../benchmark_main_pipeline.txt \
+            --pr-pipeline ../benchmark_pr_pipeline.txt \
+            --redis-pipeline ../benchmark_redis_pipeline.txt \
+            > ../benchmark_report.md
           
           cat ../benchmark_report.md
 
