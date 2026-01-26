@@ -1,5 +1,6 @@
 #!/usr/bin/env rust-script
-//! Check that all dependencies use workspace = true and are sorted alphabetically
+//! Check that all dependencies use workspace = true and are sorted
+//! alphabetically
 //!
 //! ```cargo
 //! [dependencies]
