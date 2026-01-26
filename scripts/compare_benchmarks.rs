@@ -27,11 +27,11 @@ struct Args {
 
 	/// Main branch pipeline benchmark output file
 	#[arg(long)]
-	main_pipeline: Option<String>,
+	main_pipeline: String,
 
 	/// PR branch pipeline benchmark output file
 	#[arg(long)]
-	pr_pipeline: Option<String>,
+	pr_pipeline: String,
 
 	/// Redis pipeline benchmark output file
 	#[arg(long)]
@@ -52,22 +52,24 @@ fn main() {
 		redis_map.as_ref(),
 	);
 
-	// Print pipeline mode table if files are provided
-	if let (Some(main_p), Some(pr_p)) = (args.main_pipeline.as_ref(), args.pr_pipeline.as_ref()) {
-		let (main_pipeline_map, pr_pipeline_map, redis_pipeline_map) =
-			read_and_parse_benchmarks(main_p, pr_p, args.redis_pipeline.as_ref(), "pipeline");
+	// Print pipeline mode table
+	let (main_pipeline_map, pr_pipeline_map, redis_pipeline_map) = read_and_parse_benchmarks(
+		&args.main_pipeline,
+		&args.pr_pipeline,
+		args.redis_pipeline.as_ref(),
+		"pipeline",
+	);
 
-		println!();
-		println!("---");
-		println!();
+	println!();
+	println!("---");
+	println!();
 
-		print_comparison_table(
-			"### Pipeline Benchmark Comparison (-P 50) ⚡",
-			&main_pipeline_map,
-			&pr_pipeline_map,
-			redis_pipeline_map.as_ref(),
-		);
-	}
+	print_comparison_table(
+		"### Pipeline Benchmark Comparison (-P 50) ⚡",
+		&main_pipeline_map,
+		&pr_pipeline_map,
+		redis_pipeline_map.as_ref(),
+	);
 
 	println!();
 	println!("*Comparison triggered by automated benchmark.*");
