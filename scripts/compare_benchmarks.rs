@@ -3,6 +3,19 @@
 //! regex = "1"
 //! clap = { version = "4", features = ["derive"] }
 //! ```
+//!
+//! This script compares benchmark results between two branches (typically Main
+//! and PR) and optionally against Redis. It generates a Markdown table
+//! summarizing the requests per second (RPS) and the percentage difference.
+//!
+//! Usage:
+//!     rust-script scripts/compare_benchmarks.rs \
+//!         --main <main_bench_file> \
+//!         --pr <pr_bench_file> \
+//!         --main-pipeline <main_pipeline_file> \
+//!         --pr-pipeline <pr_pipeline_file> \
+//!         [--redis <redis_bench_file>] \
+//!         [--redis-pipeline <redis_pipeline_file>]
 
 use std::collections::HashMap;
 use std::fs;
