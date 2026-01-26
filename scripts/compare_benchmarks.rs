@@ -1,32 +1,52 @@
-#!/usr/bin/env rust-script
 //! ```cargo
 //! [dependencies]
 //! regex = "1"
+//! clap = { version = "4", features = ["derive"] }
 //! ```
 
 use std::collections::HashMap;
-use std::env;
 use std::fs;
-use std::process;
 
+use clap::Parser;
 use regex::Regex;
 
-fn main() {
-	let args: Vec<String> = env::args().collect();
-	if args.len() < 3 {
-		eprintln!(
-			"Usage: {} <main_benchmark_file> <pr_benchmark_file> [redis_benchmark_file] [main_pipeline_file] [pr_pipeline_file] [redis_pipeline_file]",
-			args[0]
-		);
-		process::exit(1);
-	}
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+	/// Main branch benchmark output file
+	#[arg(long)]
+	main: String,
 
-	let main_file = &args[1];
-	let pr_file = &args[2];
-	let redis_file = if args.len() > 3 { Some(&args[3]) } else { None };
-	let main_pipeline_file = if args.len() > 4 { Some(&args[4]) } else { None };
-	let pr_pipeline_file = if args.len() > 5 { Some(&args[5]) } else { None };
-	let redis_pipeline_file = if args.len() > 6 { Some(&args[6]) } else { None };
+	/// PR branch benchmark output file
+	#[arg(long)]
+	pr: String,
+
+	/// Redis benchmark output file
+	#[arg(long)]
+	redis: Option<String>,
+
+	/// Main branch pipeline benchmark output file
+	#[arg(long)]
+	main_pipeline: Option<String>,
+
+	/// PR branch pipeline benchmark output file
+	#[arg(long)]
+	pr_pipeline: Option<String>,
+
+	/// Redis pipeline benchmark output file
+	#[arg(long)]
+	redis_pipeline: Option<String>,
+}
+
+fn main() {
+	let args = Args::parse();
+
+	let main_file = &args.main;
+	let pr_file = &args.pr;
+	let redis_file = args.redis.as_ref();
+	let main_pipeline_file = args.main_pipeline.as_ref();
+	let pr_pipeline_file = args.pr_pipeline.as_ref();
+	let redis_pipeline_file = args.redis_pipeline.as_ref();
 
 	let main_content = fs::read_to_string(main_file).expect("Failed to read main file");
 	let pr_content = fs::read_to_string(pr_file).expect("Failed to read pr file");
