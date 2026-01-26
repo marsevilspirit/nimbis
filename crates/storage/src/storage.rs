@@ -182,3 +182,152 @@ impl Storage {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use rstest::*;
+
+	use super::*;
+
+	struct TestContext {
+		storage: Storage,
+		path: std::path::PathBuf,
+	}
+
+	impl Drop for TestContext {
+		fn drop(&mut self) {
+			let _ = std::fs::remove_dir_all(&self.path);
+		}
+	}
+
+	#[fixture]
+	async fn ctx() -> TestContext {
+		let timestamp = ulid::Ulid::new().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_test_storage_{}", timestamp));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+		TestContext { storage, path }
+	}
+
+	async fn run_prefix_delete_test(
+		ctx: &TestContext,
+		prefix: &str,
+		matching_keys: Vec<&str>,
+		non_matching_keys: Vec<&str>,
+	) {
+		let prefix_bytes = Bytes::from(prefix.to_string());
+		let value = Bytes::from("value");
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+
+		for key in matching_keys.iter().chain(non_matching_keys.iter()) {
+			ctx.storage
+				.string_db
+				.put_with_options(
+					Bytes::from(key.to_string()),
+					value.clone(),
+					&Default::default(),
+					&write_opts,
+				)
+				.await
+				.unwrap();
+		}
+
+		ctx.storage
+			.delete_keys_by_prefix(&ctx.storage.string_db, prefix_bytes)
+			.await
+			.unwrap();
+
+		for key in &matching_keys {
+			assert!(
+				ctx.storage
+					.string_db
+					.get(Bytes::from(key.to_string()))
+					.await
+					.unwrap()
+					.is_none()
+			);
+		}
+		for key in &non_matching_keys {
+			assert!(
+				ctx.storage
+					.string_db
+					.get(Bytes::from(key.to_string()))
+					.await
+					.unwrap()
+					.is_some()
+			);
+		}
+	}
+
+	#[rstest]
+	#[case("test:", vec![], vec![])]
+	#[case("test:", vec!["test:key1"], vec![])]
+	#[case("test:", vec!["test:key1", "test:key2", "test:key3"], vec![])]
+	#[case("test:", vec!["test:key1", "test:key2"], vec!["other:key1", "test", "testing:key"])]
+	#[case("test:", vec![], vec!["other:key1", "another:key2"])]
+	#[case("user:123:", vec!["user:123:name", "user:123:email"], vec!["user:456:name"])]
+	#[case("用户:", vec!["用户:张三", "用户:李四"], vec!["管理员:王五"])]
+	#[case("\x00\x01\x02:", vec!["\x00\x01\x02:key1"], vec!["normal:key"])]
+	#[case("key:\n\t", vec!["key:\n\tvalue"], vec!["key:other"])]
+	#[tokio::test]
+	async fn test_delete_keys_by_prefix(
+		#[future] ctx: TestContext,
+		#[case] prefix: &str,
+		#[case] matching_keys: Vec<&str>,
+		#[case] non_matching_keys: Vec<&str>,
+	) {
+		run_prefix_delete_test(&ctx.await, prefix, matching_keys, non_matching_keys).await;
+	}
+
+	#[rstest]
+	#[case("string_db", "hash_db")]
+	#[case("list_db", "set_db")]
+	#[case("zset_db", "string_db")]
+	#[tokio::test]
+	async fn test_delete_keys_by_prefix_different_databases(
+		#[future] ctx: TestContext,
+		#[case] db1_name: &str,
+		#[case] db2_name: &str,
+	) {
+		let ctx = ctx.await;
+		let get_db = |name: &str| match name {
+			"string_db" => &ctx.storage.string_db,
+			"hash_db" => &ctx.storage.hash_db,
+			"list_db" => &ctx.storage.list_db,
+			"set_db" => &ctx.storage.set_db,
+			"zset_db" => &ctx.storage.zset_db,
+			_ => panic!("Unknown database"),
+		};
+		let (db1, db2) = (get_db(db1_name), get_db(db2_name));
+		let (prefix, key, value) = (
+			Bytes::from("test:"),
+			Bytes::from("test:key1"),
+			Bytes::from("value"),
+		);
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+
+		db1.put_with_options(key.clone(), value.clone(), &Default::default(), &write_opts)
+			.await
+			.unwrap();
+		db2.put_with_options(key.clone(), value, &Default::default(), &write_opts)
+			.await
+			.unwrap();
+
+		ctx.storage
+			.delete_keys_by_prefix(db1, prefix.clone())
+			.await
+			.unwrap();
+		assert!(db1.get(key.clone()).await.unwrap().is_none());
+		assert!(db2.get(key.clone()).await.unwrap().is_some());
+
+		ctx.storage
+			.delete_keys_by_prefix(db2, prefix)
+			.await
+			.unwrap();
+		assert!(db2.get(key).await.unwrap().is_none());
+	}
+}
