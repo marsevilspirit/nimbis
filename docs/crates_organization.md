@@ -5,16 +5,25 @@ Nimbis is organized as a Cargo workspace with multiple focused crates:
 ## Core Crates
 
 ### `config`
-Configuration management system with derive macros for easy configuration handling.
+Shared configuration management system providing a global singleton and field-level access macros.
 
 **Location**: `crates/config/`
 
 **Key Components**:
-- `Config` derive macro
-- Field setting and getting with type safety
-- Immutable field support
+- `SERVER_CONF` global singleton
+- `server_config!` access macro
+- Shared `Cli` and `ServerConfig` types
 
 **Documentation**: See [Config Crate](config_crate.md)
+
+### `config-derive`
+Procedural macros for the configuration system.
+
+**Location**: `crates/config-derive/`
+
+**Key Components**:
+- `OnlineConfig` derive macro
+- Attribute parsing for `immutable` and `callback`
 
 ### `resp`
 RESP (REdis Serialization Protocol) parser and implementation.
@@ -73,7 +82,9 @@ nimbis
 │   ├── slatedb
 │   └── object_store
 ├── telemetry
+│   └── config
 └── config
+    └── config-derive
 ```
 
 ## Adding a New Command

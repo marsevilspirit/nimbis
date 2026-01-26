@@ -112,7 +112,7 @@ let matches = MyConfig::match_fields("*");     // Match all
 
 ## 3. Implementation Principle
 
-The core of the `config` crate is a procedural macro `online_config_derive`, located in `crates/config/src/lib.rs`.
+The core of the `config` crate's dynamic logic is the `OnlineConfig` derive macro, located in `crates/config-derive/src/lib.rs`.
 
 ### 3.1 AST Parsing
 
@@ -164,9 +164,10 @@ In this way, we generate efficient field dispatch logic at compile time, avoidin
 
 ## 4. Real-World Example: Dynamic Log Level
 
-The `ServerConfig` in `crates/nimbis/src/config/mod.rs` demonstrates the callback feature:
+The `ServerConfig` in `crates/config/src/lib.rs` demonstrates the callback feature and how it's accessed via the macro:
 
 ```rust
+// crates/config/src/lib.rs
 #[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
     #[online_config(immutable)]
@@ -178,11 +179,23 @@ pub struct ServerConfig {
 
 impl ServerConfig {
     fn on_log_level_change(&self) -> Result<(), String> {
-        // Reload the telemetry subsystem with the new log level
-        telemetry::logger::reload_log_level(&self.log_level)
-            .map_err(|e| e.to_string())
+        // Triggered by CONFIG SET log_level ...
+        // side effects...
+        Ok(())
     }
 }
+```
+
+### 4.1 Accessing Configuration
+
+Instead of manually loading the global `SERVER_CONF`, prefer using the `server_config!` macro for brevity:
+
+```rust
+// Access a specific field (returns &field)
+let level = config::server_config!(log_level);
+
+// Access the full guard for complex operations
+let current = config::server_config!(load);
 ```
 
 This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.
