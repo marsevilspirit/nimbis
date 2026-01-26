@@ -52,6 +52,10 @@ fn main() {
 		redis_map.as_ref(),
 	);
 
+	println!();
+	println!("---");
+	println!();
+
 	// Print pipeline mode table
 	let (main_pipeline_map, pr_pipeline_map, redis_pipeline_map) = read_and_parse_benchmarks(
 		&args.main_pipeline,
@@ -59,10 +63,6 @@ fn main() {
 		args.redis_pipeline.as_ref(),
 		"pipeline",
 	);
-
-	println!();
-	println!("---");
-	println!();
 
 	print_comparison_table(
 		"### Pipeline Benchmark Comparison (-P 50) ⚡",
