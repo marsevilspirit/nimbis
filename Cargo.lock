@@ -417,6 +417,7 @@ dependencies = [
  "clap",
  "config-derive",
  "log",
+ "telemetry",
 ]
 
 [[package]]
@@ -2794,7 +2795,6 @@ name = "telemetry"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "config",
  "log",
  "rstest",
  "thiserror 2.0.18",

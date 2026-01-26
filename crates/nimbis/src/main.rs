@@ -7,8 +7,8 @@ use nimbis::server::Server;
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	let args = Cli::parse();
 
+	telemetry::logger::init(&args.log_level);
 	config::setup(args);
-	telemetry::logger::init();
 
 	logo::show_logo();
 

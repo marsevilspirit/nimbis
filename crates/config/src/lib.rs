@@ -59,11 +59,7 @@ pub struct ServerConfig {
 
 impl ServerConfig {
 	fn on_log_level_change(&self) -> Result<(), String> {
-		if let Some(cb) = LOG_LEVEL_CALLBACK.get() {
-			cb(&self.log_level)
-		} else {
-			Ok(())
-		}
+		telemetry::logger::reload_log_level(&self.log_level).map_err(|e| e.to_string())
 	}
 }
 
@@ -114,14 +110,6 @@ impl GlobalConfig {
 }
 
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
-
-type LogLevelCallback = fn(&str) -> Result<(), String>;
-static LOG_LEVEL_CALLBACK: OnceLock<LogLevelCallback> = OnceLock::new();
-
-/// Set the callback for when log_level changes
-pub fn set_log_level_callback(cb: LogLevelCallback) {
-	let _ = LOG_LEVEL_CALLBACK.set(cb);
-}
 
 /// Helper macro to access server configuration fields
 ///

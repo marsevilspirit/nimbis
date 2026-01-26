@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-use config::server_config;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::fmt;
@@ -36,20 +35,16 @@ static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 /// # Example
 ///
 /// ```no_run
-/// config::setup(args);  // Initialize config first
-/// telemetry::logger::init();
+/// let args = Cli::parse();
+/// telemetry::logger::init(&args.log_level);
 /// log::info!("Server starting");
 /// ```
-pub fn init() {
-	// Get level from global config
-	let level = server_config!(log_level);
+pub fn init(level: &str) {
+	// Initialize with provided level
 	let env_filter = EnvFilter::new(level);
 
 	let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
 	let _ = RELOAD_HANDLE.set(reload_handle);
-
-	// Register callback for dynamic log level updates
-	config::set_log_level_callback(|level| reload_log_level(level).map_err(|e| e.to_string()));
 
 	// Initialize the subscriber with formatting layer
 	tracing_subscriber::registry()

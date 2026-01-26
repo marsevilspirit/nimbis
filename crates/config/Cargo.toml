@@ -12,3 +12,4 @@ config-derive = { workspace = true }
 arc-swap = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
+telemetry = { workspace = true }
