@@ -4,14 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Configuration procedural macros for Nimbis"
-
-[lib]
-proc-macro = true
+description = "Runtime configuration for Nimbis"
 
 [dependencies]
-quote = { workspace = true }
-syn = { workspace = true }
+config-derive = { workspace = true }
 
-[dev-dependencies]
-rstest = { workspace = true }
+arc-swap = { workspace = true }
+clap = { workspace = true }
+log = { workspace = true }

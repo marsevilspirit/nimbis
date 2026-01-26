@@ -1,183 +1,146 @@
-use proc_macro::TokenStream;
-use quote::format_ident;
-use quote::quote;
-use syn::Data;
-use syn::DeriveInput;
-use syn::Error;
-use syn::Fields;
-use syn::parse_macro_input;
+//! Configuration module for Nimbis server
+//!
+//! This module provides dynamic configuration management with support for
+//! both immutable and mutable configuration fields. Configuration changes
+//! can trigger callbacks for side effects like reloading the log level.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use config::{init_config, SERVER_CONF};
+//!
+//! // Initialize with default configuration
+//! init_config();
+//!
+//! // Access configuration
+//! let config = SERVER_CONF.load();
+//! println!("Server address: {}", config.addr);
+//! ```
 
-#[proc_macro_derive(OnlineConfig, attributes(online_config))]
-pub fn online_config_derive(input: TokenStream) -> TokenStream {
-	let input = parse_macro_input!(input as DeriveInput);
-	let name = input.ident;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::OnceLock;
 
-	let fields = match input.data {
-		Data::Struct(ref data) => match data.fields {
-			Fields::Named(ref fields) => &fields.named,
-			_ => {
-				return Error::new_spanned(
-					name,
-					"OnlineConfig only supports structs with named fields",
-				)
-				.to_compile_error()
-				.into();
-			}
-		},
-		_ => {
-			return Error::new_spanned(name, "OnlineConfig only supports structs")
-				.to_compile_error()
-				.into();
+use arc_swap::ArcSwap;
+pub use clap::Parser;
+pub use config_derive::OnlineConfig;
+
+/// Command-line arguments for the server
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+	/// Port to listen on
+	#[arg(short, long, default_value_t = 6379)]
+	pub port: u16,
+
+	/// Host to bind to
+	#[arg(long, default_value = "127.0.0.1")]
+	pub host: String,
+
+	/// Log level (trace, debug, info, warn, error)
+	#[arg(short, long, default_value = "info")]
+	pub log_level: String,
+}
+
+#[derive(Debug, Clone, OnlineConfig)]
+pub struct ServerConfig {
+	#[online_config(immutable)]
+	pub addr: String,
+	#[online_config(immutable)]
+	pub data_path: String,
+	// Support redis-benchmark
+	#[online_config(immutable)]
+	pub save: String,
+	#[online_config(immutable)]
+	pub appendonly: String,
+	pub log_level: String,
+}
+
+impl Default for ServerConfig {
+	fn default() -> Self {
+		Self {
+			addr: "127.0.0.1:6379".to_string(),
+			data_path: "./nimbis_data".to_string(),
+			save: "".to_string(),
+			appendonly: "no".to_string(),
+			log_level: "info".to_string(),
 		}
+	}
+}
+
+pub struct GlobalConfig {
+	inner: OnceLock<ArcSwap<ServerConfig>>,
+}
+
+impl Default for GlobalConfig {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl GlobalConfig {
+	pub const fn new() -> Self {
+		Self {
+			inner: OnceLock::new(),
+		}
+	}
+
+	pub fn init(&self, config: ServerConfig) {
+		let _ = self.inner.set(ArcSwap::from_pointee(config));
+	}
+
+	pub fn load(&self) -> arc_swap::Guard<Arc<ServerConfig>> {
+		self.inner.get().expect("Config is not initialized").load()
+	}
+
+	/// Update the configuration with a new one
+	pub fn update(&self, new_config: ServerConfig) {
+		self.inner
+			.get()
+			.expect("Config is not initialized")
+			.store(Arc::new(new_config));
+	}
+}
+
+pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
+
+/// Helper macro to access server configuration fields
+///
+/// Usage: `server_config!(field_name)`
+#[macro_export]
+macro_rules! server_config {
+	($field:ident) => {
+		&$crate::SERVER_CONF.load().$field
+	};
+}
+
+/// Setup configuration from CLI arguments
+pub fn setup(args: Cli) {
+	let addr = format!("{}:{}", args.host, args.port);
+
+	let config = ServerConfig {
+		addr,
+		log_level: args.log_level.clone(),
+		..ServerConfig::default()
 	};
 
-	let set_match_arms = fields.iter().map(|f| {
-		let field_name = &f.ident;
-		let field_type = &f.ty;
-		let field_name_str = field_name.as_ref().unwrap().to_string();
+	SERVER_CONF.init(config);
+}
 
-		let mut is_immutable = false;
-		let mut callback = None;
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-		for attr in &f.attrs {
-			if attr.path().is_ident("online_config") {
-				let _ = attr.parse_nested_meta(|meta| {
-					if meta.path.is_ident("immutable") {
-						is_immutable = true;
-					} else if meta.path.is_ident("callback") {
-						let value = meta.value()?;
-						let s: syn::LitStr = value.parse()?;
-						callback = Some(s.value());
-					}
-					Ok(())
-				});
-			}
-		}
+	#[test]
+	fn test_config_singleton() {
+		// Initialize with default values
+		let config = ServerConfig::default();
 
-		if is_immutable {
-			quote! {
-				#field_name_str => {
-					Err(format!("Field '{}' is immutable", #field_name_str))
-				}
-			}
-		} else {
-			let callback_invocation = if let Some(cb) = callback {
-				let cb_ident = format_ident!("{}", cb);
-				quote! {
-					self.#cb_ident()?;
-				}
-			} else {
-				quote! {}
-			};
+		// Try to init. If it's already initialized (by other tests), this is a no-op
+		// due to our idempotent implementation.
+		SERVER_CONF.init(config);
 
-			quote! {
-				#field_name_str => {
-					match #field_type::from_str(value) {
-						Ok(v) => {
-							self.#field_name = v;
-							#callback_invocation
-							Ok(())
-						}
-						Err(_) => Err(format!("Failed to parse value for field '{}'", #field_name_str)),
-					}
-				}
-			}
-		}
-	});
-
-	// Generate match arms for get_field
-	let get_match_arms = fields.iter().map(|f| {
-		let field_name = &f.ident;
-		let field_name_str = field_name.as_ref().unwrap().to_string();
-
-		quote! {
-			#field_name_str => Ok(self.#field_name.to_string()),
-		}
-	});
-
-	// Generate field names array for list_fields
-	let field_names: Vec<_> = fields
-		.iter()
-		.map(|f| {
-			let field_name_str = f.ident.as_ref().unwrap().to_string();
-			quote! { #field_name_str }
-		})
-		.collect();
-
-	// Generate match arms for getting all fields
-	let all_fields_pairs = fields.iter().map(|f| {
-		let field_name = &f.ident;
-		let field_name_str = field_name.as_ref().unwrap().to_string();
-
-		quote! {
-			(#field_name_str.to_string(), self.#field_name.to_string())
-		}
-	});
-
-	let expanded = quote! {
-		impl #name {
-			pub fn set_field(&mut self, key: &str, value: &str) -> Result<(), String> {
-				match key {
-					#(#set_match_arms)*
-					_ => Err(format!("Field '{}' not found", key)),
-				}
-			}
-
-			pub fn get_field(&self, key: &str) -> Result<String, String> {
-				match key {
-					#(#get_match_arms)*
-					_ => Err(format!("Field '{}' not found", key)),
-				}
-			}
-
-			/// List all available field names
-			pub fn list_fields() -> Vec<&'static str> {
-				vec![#(#field_names),*]
-			}
-
-			/// Get all fields as key-value pairs
-			pub fn get_all_fields(&self) -> Vec<(String, String)> {
-				vec![#(#all_fields_pairs),*]
-			}
-
-			/// Match fields by wildcard pattern
-			/// Supports:
-			/// - "*" for all fields
-			/// - "prefix*" for prefix matching
-			/// - "*suffix" for suffix matching
-			pub fn match_fields(pattern: &str) -> Vec<&'static str> {
-				let all_fields = Self::list_fields();
-
-				if pattern == "*" {
-					return all_fields;
-				}
-
-				if let Some(stripped) = pattern.strip_prefix('*') {
-					if let Some(middle) = stripped.strip_suffix('*') {
-						// Contains match: *middle*
-						all_fields.into_iter()
-							.filter(|field| field.contains(middle))
-							.collect()
-					} else {
-						// Suffix match: *suffix
-						all_fields.into_iter()
-							.filter(|field| field.ends_with(stripped))
-							.collect()
-					}
-				} else if let Some(prefix) = pattern.strip_suffix('*') {
-					// Prefix match: prefix*
-					all_fields.into_iter()
-						.filter(|field| field.starts_with(prefix))
-						.collect()
-				} else {
-					// Exact match
-					all_fields.into_iter()
-						.filter(|field| *field == pattern)
-						.collect()
-				}
-			}
-		}
-	};
-
-	TokenStream::from(expanded)
+		// Now verify access via load()
+		assert_eq!(*server_config!(addr), "127.0.0.1:6379");
+	}
 }

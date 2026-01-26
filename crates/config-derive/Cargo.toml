@@ -1,0 +1,18 @@
+[package]
+name = "config-derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Configuration procedural macros for Nimbis"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = { workspace = true }
+syn = { workspace = true }
+
+[dev-dependencies]
+config = { workspace = true }
+rstest = { workspace = true }

@@ -6,6 +6,7 @@ members = [
     "crates/telemetry",
     "crates/storage",
     "crates/config",
+    "crates/config-derive",
 ]
 
 [workspace.package]
@@ -18,6 +19,7 @@ repository = "https://github.com/marsevilspirit/nimbis"
 [workspace.dependencies]
 # Local Dependencies
 config = { path = "crates/config" }
+config-derive = { path = "crates/config-derive" }
 resp = { path = "crates/resp" }
 storage = { path = "crates/storage" }
 telemetry = { path = "crates/telemetry" }
@@ -27,6 +29,7 @@ arc-swap = "1.8.0"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"
+clap = { version = "4.5.54", features = ["derive"] }
 futures = "0.3.31"
 log = "0.4.29"
 memchr = "2.7.6"

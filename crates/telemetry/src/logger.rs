@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
 
+use config::server_config;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::fmt;
@@ -25,23 +26,24 @@ type ReloadHandle = reload::Handle<EnvFilter, Registry>;
 
 static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 
-/// Initialize the logger with default configuration
+/// Initialize the logger with configuration from SERVER_CONF
 ///
 /// This sets up a console logger with:
-/// - INFO level by default (can be overridden with RUST_LOG env var)
+/// - The log level from `config::SERVER_CONF`
 /// - Structured output with timestamps in format: YYYY-MM-DD HH:MM:SS.micros
 /// - Target/module information
 ///
 /// # Example
 ///
 /// ```no_run
+/// config::setup(args);  // Initialize config first
 /// telemetry::logger::init();
 /// log::info!("Server starting");
 /// ```
 pub fn init() {
-	// Create env filter with INFO as default level
-	// Can be overridden by RUST_LOG environment variable
-	let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+	// Get level from global config
+	let level = server_config!(log_level);
+	let env_filter = EnvFilter::new(level);
 
 	let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
 	let _ = RELOAD_HANDLE.set(reload_handle);

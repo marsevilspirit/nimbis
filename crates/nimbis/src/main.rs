@@ -1,10 +1,13 @@
-use nimbis::config;
+use config::Cli;
+use config::Parser;
 use nimbis::logo;
 use nimbis::server::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-	config::init_config();
+	let args = Cli::parse();
+
+	config::setup(args);
 	telemetry::logger::init();
 
 	logo::show_logo();
