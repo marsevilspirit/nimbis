@@ -48,6 +48,9 @@ pub fn init() {
 	let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
 	let _ = RELOAD_HANDLE.set(reload_handle);
 
+	// Register callback for dynamic log level updates
+	config::set_log_level_callback(|level| reload_log_level(level).map_err(|e| e.to_string()));
+
 	// Initialize the subscriber with formatting layer
 	tracing_subscriber::registry()
 		.with(filter_layer)
