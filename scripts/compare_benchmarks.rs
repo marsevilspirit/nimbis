@@ -41,21 +41,8 @@ struct Args {
 fn main() {
 	let args = Args::parse();
 
-	let main_file = &args.main;
-	let pr_file = &args.pr;
-	let redis_file = args.redis.as_ref();
-	let main_pipeline_file = args.main_pipeline.as_ref();
-	let pr_pipeline_file = args.pr_pipeline.as_ref();
-	let redis_pipeline_file = args.redis_pipeline.as_ref();
-
-	let main_content = fs::read_to_string(main_file).expect("Failed to read main file");
-	let pr_content = fs::read_to_string(pr_file).expect("Failed to read pr file");
-	let redis_content =
-		redis_file.map(|f| fs::read_to_string(f).expect("Failed to read redis file"));
-
-	let main_map = parse_benchmark(&main_content);
-	let pr_map = parse_benchmark(&pr_content);
-	let redis_map = redis_content.as_ref().map(|c| parse_benchmark(c));
+	let (main_map, pr_map, redis_map) =
+		read_and_parse_benchmarks(&args.main, &args.pr, args.redis.as_ref(), "");
 
 	// Print default mode table
 	print_comparison_table(
@@ -66,17 +53,9 @@ fn main() {
 	);
 
 	// Print pipeline mode table if files are provided
-	if let (Some(main_p), Some(pr_p)) = (main_pipeline_file, pr_pipeline_file) {
-		let main_pipeline_content =
-			fs::read_to_string(main_p).expect("Failed to read main pipeline file");
-		let pr_pipeline_content =
-			fs::read_to_string(pr_p).expect("Failed to read pr pipeline file");
-		let redis_pipeline_content = redis_pipeline_file
-			.map(|f| fs::read_to_string(f).expect("Failed to read redis pipeline file"));
-
-		let main_pipeline_map = parse_benchmark(&main_pipeline_content);
-		let pr_pipeline_map = parse_benchmark(&pr_pipeline_content);
-		let redis_pipeline_map = redis_pipeline_content.as_ref().map(|c| parse_benchmark(c));
+	if let (Some(main_p), Some(pr_p)) = (args.main_pipeline.as_ref(), args.pr_pipeline.as_ref()) {
+		let (main_pipeline_map, pr_pipeline_map, redis_pipeline_map) =
+			read_and_parse_benchmarks(main_p, pr_p, args.redis_pipeline.as_ref(), "pipeline");
 
 		println!();
 		println!("---");
@@ -92,6 +71,32 @@ fn main() {
 
 	println!();
 	println!("*Comparison triggered by automated benchmark.*");
+}
+
+fn read_and_parse_benchmarks(
+	main_file: &str,
+	pr_file: &str,
+	redis_file: Option<&String>,
+	benchmark_type: &str,
+) -> (
+	HashMap<String, f64>,
+	HashMap<String, f64>,
+	Option<HashMap<String, f64>>,
+) {
+	let main_content = fs::read_to_string(main_file)
+		.unwrap_or_else(|_| panic!("Failed to read main {} benchmark file", benchmark_type));
+	let pr_content = fs::read_to_string(pr_file)
+		.unwrap_or_else(|_| panic!("Failed to read pr {} benchmark file", benchmark_type));
+	let redis_content = redis_file.map(|f| {
+		fs::read_to_string(f)
+			.unwrap_or_else(|_| panic!("Failed to read redis {} benchmark file", benchmark_type))
+	});
+
+	let main_map = parse_benchmark(&main_content);
+	let pr_map = parse_benchmark(&pr_content);
+	let redis_map = redis_content.as_ref().map(|c| parse_benchmark(c));
+
+	(main_map, pr_map, redis_map)
 }
 
 fn print_comparison_table(
