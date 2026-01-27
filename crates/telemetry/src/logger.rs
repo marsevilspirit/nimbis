@@ -25,12 +25,16 @@ type ReloadHandle = reload::Handle<EnvFilter, Registry>;
 
 static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 
-/// Initialize the logger with configuration from SERVER_CONF
+/// Initialize the logger with the provided log level
 ///
 /// This sets up a console logger with:
-/// - The log level from `config::SERVER_CONF`
+/// - The log level from the `level` parameter
 /// - Structured output with timestamps in format: YYYY-MM-DD HH:MM:SS.micros
 /// - Target/module information
+///
+/// # Arguments
+///
+/// * `level` - The log level filter string (e.g., "info", "debug", "warn")
 ///
 /// # Example
 ///

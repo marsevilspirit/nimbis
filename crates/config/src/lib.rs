@@ -7,10 +7,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use config::{init_config, SERVER_CONF};
+//! use config::{Cli, Parser, SERVER_CONF, setup};
 //!
-//! // Initialize with default configuration
-//! init_config();
+//! // In a real app, this would be called in main.rs
+//! let args = Cli::parse();
+//! setup(args);
 //!
 //! // Access configuration
 //! let config = SERVER_CONF.load();

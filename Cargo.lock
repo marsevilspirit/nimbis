@@ -1635,7 +1635,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap",
  "config",
  "log",
  "num_cpus",

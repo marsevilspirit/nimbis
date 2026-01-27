@@ -191,11 +191,11 @@ impl ServerConfig {
 Instead of manually loading the global `SERVER_CONF`, prefer using the `server_config!` macro for brevity:
 
 ```rust
-// Access a specific field (returns &field)
+// Access a specific field (returns the field value)
 let level = config::server_config!(log_level);
 
-// Access the full guard for complex operations
-let current = config::server_config!(load);
+// Access the full configuration Guard for complex operations
+let current = config::SERVER_CONF.load();
 ```
 
 This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.

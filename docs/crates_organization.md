@@ -82,9 +82,9 @@ nimbis
 │   ├── slatedb
 │   └── object_store
 ├── telemetry
-│   └── config
 └── config
-    └── config-derive
+    ├── config-derive
+    └── telemetry
 ```
 
 ## Adding a New Command

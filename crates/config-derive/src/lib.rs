@@ -31,7 +31,9 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 		}
 	};
 
-	let set_match_arms = fields.iter().map(|f| {
+	let mut parse_errors: Vec<syn::Error> = Vec::new();
+
+	let set_match_arms: Vec<_> = fields.iter().map(|f| {
 		let field_name = &f.ident;
 		let field_type = &f.ty;
 		let field_name_str = field_name.as_ref().unwrap().to_string();
@@ -41,16 +43,21 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 
 		for attr in &f.attrs {
 			if attr.path().is_ident("online_config") {
-				let _ = attr.parse_nested_meta(|meta| {
+				if let Err(e) = attr.parse_nested_meta(|meta| {
 					if meta.path.is_ident("immutable") {
 						is_immutable = true;
+						Ok(())
 					} else if meta.path.is_ident("callback") {
 						let value = meta.value()?;
 						let s: syn::LitStr = value.parse()?;
 						callback = Some(s.value());
+						Ok(())
+					} else {
+						Err(meta.error("unsupported attribute for online_config; expected `immutable` or `callback`"))
 					}
-					Ok(())
-				});
+				}) {
+					parse_errors.push(e);
+				}
 			}
 		}
 
@@ -83,7 +90,13 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 				}
 			}
 		}
-	});
+	}).collect();
+
+	// Return early if there were any parsing errors
+	if !parse_errors.is_empty() {
+		let errors = parse_errors.into_iter().map(|e| e.to_compile_error());
+		return quote! { #(#errors)* }.into();
+	}
 
 	// Generate match arms for get_field
 	let get_match_arms = fields.iter().map(|f| {

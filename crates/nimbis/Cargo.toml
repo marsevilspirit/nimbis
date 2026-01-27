@@ -16,7 +16,6 @@ arc-swap = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
 log = { workspace = true }
 num_cpus = { workspace = true }
 thiserror = { workspace = true }

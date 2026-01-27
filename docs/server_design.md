@@ -49,8 +49,8 @@ pub struct Server {
 Before creating the server, the main application initializes the configuration:
 ```rust
 let args = Cli::parse();
-config::setup(args);         // Initialize global config from CLI args
-telemetry::logger::init();   // Initialize logging/tracing (parameter-less)
+telemetry::logger::init(&args.log_level); // Initialize logging/tracing with log level
+config::setup(args); // Initialize global config from CLI args
 ```
 
 The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access.
