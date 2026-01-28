@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use config::SERVER_CONF;
+use config::ServerConfig;
 use resp::RespValue;
 use storage::Storage;
 
@@ -85,7 +87,7 @@ impl Cmd for ConfigGetCommand {
 		// Check if pattern contains wildcard
 		if pattern.contains('*') {
 			// Get matching field names
-			let matched_fields = crate::config::ServerConfig::match_fields(&pattern);
+			let matched_fields = ServerConfig::match_fields(&pattern);
 
 			if matched_fields.is_empty() {
 				// No fields matched
@@ -93,7 +95,7 @@ impl Cmd for ConfigGetCommand {
 			}
 
 			// Get current config
-			let config = crate::config::SERVER_CONF.load();
+			let config = SERVER_CONF.load();
 
 			// Build result array: [key1, value1, key2, value2, ...]
 			let mut result = Vec::new();
@@ -107,7 +109,7 @@ impl Cmd for ConfigGetCommand {
 			RespValue::array(result)
 		} else {
 			// Exact match - original behavior
-			match crate::config::SERVER_CONF.load().get_field(&pattern) {
+			match SERVER_CONF.load().get_field(&pattern) {
 				Ok(value) => {
 					// CONFIG GET returns an array: [field_name, field_value]
 					RespValue::array(vec![
@@ -147,14 +149,14 @@ impl Cmd for ConfigSetCommand {
 		let value = String::from_utf8_lossy(&args[1]);
 
 		// Load current config, clone it, and modify
-		let current = crate::config::SERVER_CONF.load();
+		let current = SERVER_CONF.load();
 		let mut new_config = (**current).clone();
 
 		// Try to set the field
 		match new_config.set_field(&field_name, &value) {
 			Ok(_) => {
 				// Update to the new config
-				crate::config::SERVER_CONF.update(new_config);
+				SERVER_CONF.update(new_config);
 				RespValue::simple_string("OK")
 			}
 			Err(e) => RespValue::error(e),
