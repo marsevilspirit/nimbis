@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
 pub use clap::Parser;
-pub use config_derive::OnlineConfig;
+pub use macros::OnlineConfig;
 
 /// Command-line arguments for the server
 #[derive(Parser, Debug)]

@@ -33,64 +33,68 @@ pub fn online_config_derive(input: TokenStream) -> TokenStream {
 
 	let mut parse_errors: Vec<syn::Error> = Vec::new();
 
-	let set_match_arms: Vec<_> = fields.iter().map(|f| {
-		let field_name = &f.ident;
-		let field_type = &f.ty;
-		let field_name_str = field_name.as_ref().unwrap().to_string();
+	let set_match_arms: Vec<_> = fields
+		.iter()
+		.map(|f| {
+			let field_name = &f.ident;
+			let field_type = &f.ty;
+			let field_name_str = field_name.as_ref().unwrap().to_string();
 
-		let mut is_immutable = false;
-		let mut callback = None;
+			let mut is_immutable = false;
+			let mut callback = None;
 
-		for attr in &f.attrs {
-			if attr.path().is_ident("online_config") {
-				if let Err(e) = attr.parse_nested_meta(|meta| {
-					if meta.path.is_ident("immutable") {
-						is_immutable = true;
-						Ok(())
-					} else if meta.path.is_ident("callback") {
-						let value = meta.value()?;
-						let s: syn::LitStr = value.parse()?;
-						callback = Some(s.value());
-						Ok(())
-					} else {
-						Err(meta.error("unsupported attribute for online_config; expected `immutable` or `callback`"))
-					}
-				}) {
+			for attr in &f.attrs {
+				if attr.path().is_ident("online_config")
+					&& let Err(e) = attr.parse_nested_meta(|meta| {
+						if meta.path.is_ident("immutable") {
+							is_immutable = true;
+							Ok(())
+						} else if meta.path.is_ident("callback") {
+							let value = meta.value()?;
+							let s: syn::LitStr = value.parse()?;
+							callback = Some(s.value());
+							Ok(())
+						} else {
+							Err(meta.error(
+								"unsupported attribute for online_config; expected `immutable` or `callback`",
+							))
+						}
+					}) {
 					parse_errors.push(e);
 				}
 			}
-		}
 
-		if is_immutable {
-			quote! {
-				#field_name_str => {
-					Err(format!("Field '{}' is immutable", #field_name_str))
-				}
-			}
-		} else {
-			let callback_invocation = if let Some(cb) = callback {
-				let cb_ident = format_ident!("{}", cb);
+			if is_immutable {
 				quote! {
-					self.#cb_ident()?;
+					#field_name_str => {
+						Err(format!("Field '{}' is immutable", #field_name_str))
+					}
 				}
 			} else {
-				quote! {}
-			};
+				let callback_invocation = if let Some(cb) = callback {
+					let cb_ident = format_ident!("{}", cb);
+					quote! {
+						self.#cb_ident()?;
+					}
+				} else {
+					quote! {}
+				};
 
-			quote! {
-				#field_name_str => {
-					match #field_type::from_str(value) {
-						Ok(v) => {
-							self.#field_name = v;
-							#callback_invocation
-							Ok(())
+				quote! {
+					#field_name_str => {
+						match #field_type::from_str(value) {
+							Ok(v) => {
+								self.#field_name = v;
+								#callback_invocation
+								Ok(())
+							}
+							Err(_) => Err(format!("Failed to parse value for field '{}'", #field_name_str)),
 						}
-						Err(_) => Err(format!("Failed to parse value for field '{}'", #field_name_str)),
 					}
 				}
 			}
-		}
-	}).collect();
+		})
+		.collect();
 
 	// Return early if there were any parsing errors
 	if !parse_errors.is_empty() {

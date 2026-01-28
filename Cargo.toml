@@ -6,7 +6,7 @@ members = [
     "crates/telemetry",
     "crates/storage",
     "crates/config",
-    "crates/config-derive",
+    "crates/macros",
 ]
 
 [workspace.package]
@@ -19,7 +19,7 @@ repository = "https://github.com/marsevilspirit/nimbis"
 [workspace.dependencies]
 # Local Dependencies
 config = { path = "crates/config" }
-config-derive = { path = "crates/config-derive" }
+macros = { path = "crates/macros" }
 resp = { path = "crates/resp" }
 storage = { path = "crates/storage" }
 telemetry = { path = "crates/telemetry" }

@@ -7,7 +7,7 @@ license.workspace = true
 description = "Runtime configuration for Nimbis"
 
 [dependencies]
-config-derive = { workspace = true }
+macros = { workspace = true }
 
 arc-swap = { workspace = true }
 clap = { workspace = true }
