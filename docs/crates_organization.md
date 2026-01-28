@@ -16,10 +16,10 @@ Shared configuration management system providing a global singleton and field-le
 
 **Documentation**: See [Config Crate](config_crate.md)
 
-### `config-derive`
-Procedural macros for the configuration system.
+### `macros`
+Procedural macros for the configuration system (and future shared macros).
 
-**Location**: `crates/config-derive/`
+**Location**: `crates/macros/`
 
 **Key Components**:
 - `OnlineConfig` derive macro
@@ -83,7 +83,7 @@ nimbis
 │   └── object_store
 ├── telemetry
 └── config
-    ├── config-derive
+    ├── macros
     └── telemetry
 ```
 

@@ -112,7 +112,7 @@ let matches = MyConfig::match_fields("*");     // Match all
 
 ## 3. Implementation Principle
 
-The core of the `config` crate's dynamic logic is the `OnlineConfig` derive macro, located in `crates/config-derive/src/lib.rs`.
+The core of the `config` crate's dynamic logic is the `OnlineConfig` derive macro, located in `crates/macros/src/lib.rs`.
 
 ### 3.1 AST Parsing
 
