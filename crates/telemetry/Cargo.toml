@@ -16,4 +16,5 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+config = { workspace = true }
 rstest = { workspace = true }

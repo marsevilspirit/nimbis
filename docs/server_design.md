@@ -48,6 +48,8 @@ pub struct Server {
 #### Step 1: Configuration Initialization
 Before creating the server, the main application initializes the configuration:
 ```rust
+use config::{Cli, Parser};
+
 let args = Cli::parse();
 telemetry::logger::init(&args.log_level); // Initialize logging/tracing with log level
 config::setup(args); // Initialize global config from CLI args
