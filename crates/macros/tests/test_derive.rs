@@ -1,13 +1,11 @@
 use std::str::FromStr;
 
-use config::OnlineConfig;
+use macros::OnlineConfig;
 use rstest::rstest;
 
 #[derive(OnlineConfig, Default)]
 struct TestConfig {
-	#[online_config(mutable)]
 	pub addr: String,
-	#[online_config(mutable)]
 	pub port: u16,
 	#[online_config(immutable)]
 	pub id: i32,

@@ -1,10 +1,10 @@
 [package]
-name = "config"
+name = "macros"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Configuration procedural macros for Nimbis"
+description = "Procedural macros for Nimbis"
 
 [lib]
 proc-macro = true
@@ -14,4 +14,5 @@ quote = { workspace = true }
 syn = { workspace = true }
 
 [dev-dependencies]
+
 rstest = { workspace = true }

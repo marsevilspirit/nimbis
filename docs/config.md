@@ -1,20 +1,23 @@
-# Config Crate Design and Usage Documentation
+# Config Design and Usage Documentation
 
-The `config` crate provides a lightweight online configuration update mechanism for the Nimbis project. It uses Rust's procedural macros to automatically generate methods for dynamically updating fields in configuration structs, supporting runtime configuration modification via string key-value pairs.
+The `config` module in the `nimbis` crate provides a lightweight online configuration update mechanism for the Nimbis project. It uses Rust's procedural macros to automatically generate methods for dynamically updating fields in configuration structs, supporting runtime configuration modification via string key-value pairs.
 
 ## 1. Introduction
 
-During service operation, we often need to dynamically adjust certain parameters (such as timeout duration, cache size, etc.) without restarting the service. The `config` crate simplifies this implementation significantly through the `OnlineConfig` derive macro. By simply adding annotations to the configuration struct, you can obtain type-safe dynamic update capabilities.
+During service operation, we often need to dynamically adjust certain parameters (such as timeout duration, cache size, etc.) without restarting the service. The `config` module simplifies this implementation significantly through the `OnlineConfig` derive macro. By simply adding annotations to the configuration struct, you can obtain type-safe dynamic update capabilities.
 
 ## 2. Usage
 
-### 2.1 Add Dependency
+### 2.1 Dependency
 
-Ensure that the `config` crate is included in your `Cargo.toml`:
+The `config` module is part of the `nimbis` crate. It depends on the `macros` crate for the `OnlineConfig` derive macro.
 
+#### `crates/nimbis/Cargo.toml`
 ```toml
 [dependencies]
-config = { workspace = true }
+macros = { workspace = true }
+clap = { workspace = true }
+# ... other dependencies
 ```
 
 ### 2.2 Define Configuration Struct
@@ -22,7 +25,7 @@ config = { workspace = true }
 Derive the `OnlineConfig` trait on your configuration struct. By default, all fields are mutable. You can use the `#[online_config(immutable)]` attribute to mark fields as immutable, or use `#[online_config(callback = "method_name")]` to trigger a callback when the field changes.
 
 ```rust
-use config::OnlineConfig;
+use crate::config::OnlineConfig;
 
 #[derive(Default, OnlineConfig)]
 pub struct MyConfig {
@@ -44,7 +47,7 @@ pub struct MyConfig {
 
 impl MyConfig {
     // Callback method invoked when log_level is updated
-    fn on_log_level_change(&self) -> Result<(), String> {
+    fn on_log_level_change(&mut self) -> Result<(), String> {
         // Perform side effects, e.g., reload logging configuration
         println!("Log level changed to: {}", self.log_level);
         Ok(())
@@ -97,61 +100,23 @@ pub fn get_all_fields(&self) -> Vec<(String, String)>
 pub fn match_fields(pattern: &str) -> Vec<&'static str>
 ```
 
-Example:
+### 2.5 Global Configuration
+
+Nimbis uses a global singleton for configuration access:
 
 ```rust
-// List all
-let fields = MyConfig::list_fields();
-assert!(fields.contains(&"addr"));
+use crate::config::SERVER_CONF;
 
-// Wildcard matching
-let matches = MyConfig::match_fields("*port"); // Suffix match
-let matches = MyConfig::match_fields("addr*"); // Prefix match
-let matches = MyConfig::match_fields("*");     // Match all
+// Access configuration
+let config = SERVER_CONF.load();
+println!("Addr: {}", config.addr);
 ```
 
 ## 3. Implementation Principle
 
-The core of the `config` crate's dynamic logic is the `OnlineConfig` derive macro, located in `crates/macros/src/lib.rs`.
+The core of the `config` module's dynamic logic is the `OnlineConfig` derive macro, located in `crates/macros/src/lib.rs`.
 
-### 3.1 AST Parsing
-
-The macro first uses the `syn` library to parse the input Rust Abstract Syntax Tree (AST), extracting the struct's name and field information.
-
-```rust
-let input = parse_macro_input!(input as DeriveInput);
-// ... Extract Named fields from Data::Struct ...
-```
-
-### 3.2 Attribute Processing
-
-For each field, the macro checks for `#[online_config(...)]` attributes including `immutable` and `callback`.
-
-```rust
-let mut is_immutable = false;
-let mut callback = None;
-for attr in &f.attrs {
-    if attr.path().is_ident("online_config") {
-        // Parse nested meta for immutable or callback
-        if meta.path.is_ident("callback") {
-            // Extract callback method name
-            callback = Some(method_name);
-        }
-    }
-}
-```
-
-When a `callback` is specified, the generated `set_field` code will invoke the callback method after updating the field value:
-
-```rust
-self.field = new_value;
-self.callback_method()?;  // Invoke callback
-Ok(())
-```
-
-This allows side effects like reloading logging configuration when `log_level` changes.
-
-### 3.3 Code Generation
+### 3.1 Code Generation
 
 The macro uses the `quote` library to generate the implementation of the methods:
 
@@ -160,14 +125,12 @@ The macro uses the `quote` library to generate the implementation of the methods
 3.  **list_fields**: Returns a static vector of string literals generated from field names.
 4.  **match_fields**: Implements efficient string matching logic (using `strip_prefix`/`strip_suffix`) against the static field list to support wildcards.
 
-In this way, we generate efficient field dispatch logic at compile time, avoiding runtime reflection overhead.
-
 ## 4. Real-World Example: Dynamic Log Level
 
-The `ServerConfig` in `crates/config/src/lib.rs` demonstrates the callback feature and how it's accessed via the macro:
+The `ServerConfig` in `crates/nimbis/src/config.rs` demonstrates the callback feature and how it's accessed via the macro:
 
 ```rust
-// crates/config/src/lib.rs
+// crates/nimbis/src/config.rs
 #[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
     #[online_config(immutable)]
@@ -175,14 +138,6 @@ pub struct ServerConfig {
     
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
-}
-
-impl ServerConfig {
-    fn on_log_level_change(&self) -> Result<(), String> {
-        // Triggered by CONFIG SET log_level ...
-        // side effects...
-        Ok(())
-    }
 }
 ```
 
@@ -192,10 +147,10 @@ Instead of manually loading the global `SERVER_CONF`, prefer using the `server_c
 
 ```rust
 // Access a specific field (returns the field value)
-let level = config::server_config!(log_level);
+let level = server_config!(log_level);
 
 // Access the full configuration Guard for complex operations
-let current = config::SERVER_CONF.load();
+let current = SERVER_CONF.load();
 ```
 
 This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.

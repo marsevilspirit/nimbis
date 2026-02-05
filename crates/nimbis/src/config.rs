@@ -7,10 +7,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use nimbis::config::{init_config, SERVER_CONF};
+//! use nimbis::config::{Cli, Parser, SERVER_CONF, setup};
 //!
-//! // Initialize with default configuration
-//! init_config();
+//! // In a real app, this would be called in main.rs
+//! let args = Cli::parse();
+//! setup(args);
 //!
 //! // Access configuration
 //! let config = SERVER_CONF.load();
@@ -22,10 +23,25 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
-use config::OnlineConfig;
-use log::info;
-use log::warn;
-use telemetry::logger;
+pub use clap::Parser;
+pub use macros::OnlineConfig;
+
+/// Command-line arguments for the server
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+	/// Port to listen on
+	#[arg(short, long, default_value_t = 6379)]
+	pub port: u16,
+
+	/// Host to bind to
+	#[arg(long, default_value = "127.0.0.1")]
+	pub host: String,
+
+	/// Log level (trace, debug, info, warn, error)
+	#[arg(short, long, default_value = "info")]
+	pub log_level: String,
+}
 
 #[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
@@ -42,6 +58,12 @@ pub struct ServerConfig {
 	pub log_level: String,
 }
 
+impl ServerConfig {
+	fn on_log_level_change(&self) -> Result<(), String> {
+		telemetry::logger::reload_log_level(&self.log_level).map_err(|e| e.to_string())
+	}
+}
+
 impl Default for ServerConfig {
 	fn default() -> Self {
 		Self {
@@ -50,34 +72,6 @@ impl Default for ServerConfig {
 			save: "".to_string(),
 			appendonly: "no".to_string(),
 			log_level: "info".to_string(),
-		}
-	}
-}
-
-impl ServerConfig {
-	/// Callback invoked when log_level configuration changes.
-	///
-	/// This method is called by the OnlineConfig derive macro when the
-	/// log_level field is updated. It triggers a reload of the logging
-	/// subsystem with the new level.
-	///
-	/// # Errors
-	///
-	/// Returns an error if the log level is invalid or if the reload fails.
-	fn on_log_level_change(&self) -> Result<(), String> {
-		match logger::reload_log_level(&self.log_level) {
-			Ok(()) => {
-				info!("Successfully set config log level to: {}", self.log_level);
-				Ok(())
-			}
-			Err(e) => {
-				let err_msg = e.to_string();
-				warn!(
-					"Failed to set config log level to {}: {}",
-					self.log_level, err_msg
-				);
-				Err(err_msg)
-			}
 		}
 	}
 }
@@ -118,8 +112,27 @@ impl GlobalConfig {
 
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 
-pub fn init_config() {
-	SERVER_CONF.init(ServerConfig::default());
+/// Helper macro to access server configuration fields
+///
+/// Usage: `server_config!(field_name)`
+#[macro_export]
+macro_rules! server_config {
+	($field:ident) => {
+		&$crate::config::SERVER_CONF.load().$field
+	};
+}
+
+/// Setup configuration from CLI arguments
+pub fn setup(args: Cli) {
+	let addr = format!("{}:{}", args.host, args.port);
+
+	let config = ServerConfig {
+		addr,
+		log_level: args.log_level.clone(),
+		..ServerConfig::default()
+	};
+
+	SERVER_CONF.init(config);
 }
 
 #[cfg(test)]
@@ -136,6 +149,6 @@ mod tests {
 		SERVER_CONF.init(config);
 
 		// Now verify access via load()
-		assert_eq!(SERVER_CONF.load().addr, "127.0.0.1:6379");
+		assert_eq!(*server_config!(addr), "127.0.0.1:6379");
 	}
 }
