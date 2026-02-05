@@ -36,6 +36,7 @@ object_store = "0.13.1"
 quote = "1.0.44"
 slatedb = { git = "https://github.com/slatedb/slatedb.git", rev = "b1e9e7a63b2bd174b3b43b79681640ce9c4baec4", features = [
     "foyer",
+    "compaction_filters",
 ] }
 syn = { version = "2.0.114", features = ["full"] }
 thiserror = "2.0.18"

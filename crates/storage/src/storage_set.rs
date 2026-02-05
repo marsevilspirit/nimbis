@@ -29,7 +29,7 @@ impl Storage {
 
 		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
 			Some(meta) => meta,
-			None => SetMetaValue::new(0),
+			None => SetMetaValue::new(self.version_generator.next(), 0),
 		};
 
 		let mut added_count = 0;
@@ -39,7 +39,7 @@ impl Storage {
 		let put_opts = PutOptions::default();
 
 		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), member);
+			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
 			let encoded_member_key = member_key.encode();
 
 			if self.set_db.get(encoded_member_key.clone()).await?.is_none() {
@@ -75,14 +75,15 @@ impl Storage {
 	}
 
 	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, StorageError> {
-		if self.get_meta::<SetMetaValue>(&key).await?.is_none() {
+		let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? else {
 			return Ok(Vec::new());
-		}
+		};
 
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
+		// Construct prefix: len(user_key) + user_key + version
+		let mut prefix = BytesMut::with_capacity(2 + key.len() + 8);
 		prefix.put_u16(key.len() as u16);
 		prefix.extend_from_slice(&key);
+		prefix.put_u64(meta_val.version);
 		let prefix = prefix.freeze();
 
 		let range = prefix.clone()..;
@@ -95,7 +96,7 @@ impl Storage {
 				break;
 			}
 
-			// Parse member: prefix + len(u32) + member
+			// Parse member: prefix (key_len+key+version) + member_len(u32) + member
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -116,11 +117,11 @@ impl Storage {
 	}
 
 	pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, StorageError> {
-		if self.get_meta::<SetMetaValue>(&key).await?.is_none() {
+		let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? else {
 			return Ok(false);
-		}
+		};
 
-		let member_key = SetMemberKey::new(key, member);
+		let member_key = SetMemberKey::new(key, meta_val.version, member);
 		Ok(self.set_db.get(member_key.encode()).await?.is_some())
 	}
 
@@ -139,7 +140,7 @@ impl Storage {
 		};
 
 		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), member);
+			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
 			let encoded_key = member_key.encode();
 
 			if self.set_db.get(encoded_key.clone()).await?.is_some() {

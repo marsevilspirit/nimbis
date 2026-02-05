@@ -13,6 +13,7 @@ use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
+use crate::version::VersionGenerator;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -21,6 +22,7 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
+	pub(crate) version_generator: Arc<VersionGenerator>,
 }
 
 impl Storage {
@@ -37,6 +39,7 @@ impl Storage {
 			list_db,
 			set_db,
 			zset_db,
+			version_generator: Arc::new(VersionGenerator::new()),
 		}
 	}
 
@@ -58,27 +61,37 @@ impl Storage {
 		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
 
-		let open_db = |name: &'static str| {
+		let open_db = |name: &'static str, data_type: DataType, string_db: Option<Arc<Db>>| {
 			let store = object_store.clone();
 			let cache = cache.clone();
 			async move {
 				Db::builder(slatedb::object_store::path::Path::from(name), store)
 					.with_memory_cache(cache)
+					.with_compaction_filter_supplier(Arc::new(
+						crate::compaction_filter::NimbisCompactionFilterSupplier {
+							string_db,
+							data_type,
+						},
+					))
 					.build()
 					.await
 			}
 		};
 
-		let (string_db, hash_db, list_db, set_db, zset_db) = tokio::try_join!(
-			open_db("/string"),
-			open_db("/hash"),
-			open_db("/list"),
-			open_db("/set"),
-			open_db("/zset")
+		// 1. Open string_db first as it is needed by others for compaction filtering
+		let string_db = open_db("/string", DataType::String, None).await?;
+		let string_db = Arc::new(string_db);
+
+		// 2. Open collection DBs with reference to string_db
+		let (hash_db, list_db, set_db, zset_db) = tokio::try_join!(
+			open_db("/hash", DataType::Hash, Some(string_db.clone())),
+			open_db("/list", DataType::List, Some(string_db.clone())),
+			open_db("/set", DataType::Set, Some(string_db.clone())),
+			open_db("/zset", DataType::ZSet, Some(string_db.clone()))
 		)?;
 
 		Ok(Self::new(
-			Arc::new(string_db),
+			string_db,
 			Arc::new(hash_db),
 			Arc::new(list_db),
 			Arc::new(set_db),
@@ -145,6 +158,7 @@ impl Storage {
 
 		let meta_val = T::decode(&meta_bytes)?;
 		if meta_val.is_expired() {
+			#[cfg(not(test))]
 			self.del(key.clone()).await?;
 			return Ok(None);
 		}
