@@ -26,8 +26,7 @@ Nimbis is built on the principle of **never trading off** unless there's a suita
 
 Nimbis is organized as a Cargo workspace with multiple focused crates:
 
-- `crates/nimbis` - Main server executable and command implementations
-- `crates/config` - Configuration management with derive macros
+- `crates/nimbis` - Main server executable, command implementations, and configuration management
 - `crates/resp` - RESP protocol parser and encoder
 - `crates/storage` - Persistent storage layer using SlateDB
 - `crates/telemetry` - Logging and observability

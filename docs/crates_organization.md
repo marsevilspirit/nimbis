@@ -2,22 +2,10 @@
 
 Nimbis is organized as a Cargo workspace with multiple focused crates:
 
-## Core Crates
-
-### `config`
-Shared configuration management system providing a global singleton and field-level access macros.
-
-**Location**: `crates/config/`
-
-**Key Components**:
-- `SERVER_CONF` global singleton
-- `server_config!` access macro
-- Shared `Cli` and `ServerConfig` types
-
-**Documentation**: See [Config Crate](config_crate.md)
+## Component Crates
 
 ### `macros`
-Procedural macros for the configuration system (and future shared macros).
+Procedural macros for the configuration system.
 
 **Location**: `crates/macros/`
 
@@ -59,18 +47,19 @@ Logging and observability infrastructure.
 - Logger initialization
 - Tracing setup
 
-### `nimbis`
-The main server executable, integrating all the above crates and implementing the command system.
+### `nimbis` (Main Crate)
+The main executable, integrating all crates, implementing the command system and managing configuration.
 
 **Location**: `crates/nimbis/`
 
 **Key Components**:
+- **Configuration Management** (`src/config.rs`): Global `SERVER_CONF`, `server_config!` macro, and dynamic update logic.
 - `Server` struct
 - TCP connection handling
 - **Command System** (`src/cmd/`): Meta, Trait, and concrete command implementations (GET, SET, HSET, etc.)
 - Request processing
 
-**Documentation**: See [Server Design](server_design.md) and [Command System Implementation](cmd_implementation.md)
+**Documentation**: See [Server Design](server_design.md), [Config Design](config.md), and [Command System Implementation](cmd_implementation.md)
 
 ## Dependency Graph
 
@@ -82,10 +71,9 @@ nimbis
 │   ├── slatedb
 │   └── object_store
 ├── telemetry
-└── config
-    ├── macros
-    └── telemetry
+└── macros (transitive via config)
 ```
+
 
 ## Adding a New Command
 

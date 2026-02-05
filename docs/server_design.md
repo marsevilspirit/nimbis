@@ -48,11 +48,11 @@ pub struct Server {
 #### Step 1: Configuration Initialization
 Before creating the server, the main application initializes the configuration:
 ```rust
-use config::{Cli, Parser};
+use nimbis::config::{Cli, Parser};
 
 let args = Cli::parse();
 telemetry::logger::init(&args.log_level); // Initialize logging/tracing with log level
-config::setup(args); // Initialize global config from CLI args
+nimbis::config::setup(args); // Initialize global config from CLI args
 ```
 
 The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access.
@@ -62,7 +62,7 @@ The configuration is stored in a thread-safe global state (`SERVER_CONF`) using 
 CONFIG SET log_level debug
 ```
 
-This triggers a callback (`on_log_level_change`) on the configuration object. The `telemetry` crate uses the `server_config!` macro to access the current log level and updates itself via the `reload` handle. See [Config Crate](config_crate.md) for details on the configuration system.
+This triggers a callback (`on_log_level_change`) on the configuration object. The `telemetry` crate uses the `server_config!` macro (exported at the crate root of `nimbis`) to access the current log level and updates itself via the `reload` handle. See [Config Design](config.md) for details on the configuration system.
 
 #### Step 2: Server Creation (`new`)
 When `Server::new()` is called:
