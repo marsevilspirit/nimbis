@@ -135,9 +135,12 @@ The `ServerConfig` in `crates/nimbis/src/config.rs` demonstrates the callback fe
 pub struct ServerConfig {
     #[online_config(immutable)]
     pub addr: String,
-    
+
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
+
+    #[online_config(immutable)]
+    pub worker_threads: usize,
 }
 ```
 
