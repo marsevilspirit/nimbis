@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use config::{Cli, Parser, SERVER_CONF, setup};
+//! use nimbis::config::{Cli, Parser, SERVER_CONF, setup};
 //!
 //! // In a real app, this would be called in main.rs
 //! let args = Cli::parse();
@@ -118,7 +118,7 @@ pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 #[macro_export]
 macro_rules! server_config {
 	($field:ident) => {
-		&$crate::SERVER_CONF.load().$field
+		&$crate::config::SERVER_CONF.load().$field
 	};
 }
 

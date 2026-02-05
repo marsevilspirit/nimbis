@@ -14,5 +14,5 @@ quote = { workspace = true }
 syn = { workspace = true }
 
 [dev-dependencies]
-config = { workspace = true }
+
 rstest = { workspace = true }

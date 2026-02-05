@@ -1,5 +1,5 @@
-use config::Cli;
-use config::Parser;
+use nimbis::config::Cli;
+use nimbis::config::Parser;
 use nimbis::logo;
 use nimbis::server::Server;
 
@@ -8,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	let args = Cli::parse();
 
 	telemetry::logger::init(&args.log_level);
-	config::setup(args);
+	nimbis::config::setup(args);
 
 	logo::show_logo();
 

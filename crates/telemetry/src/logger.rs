@@ -39,10 +39,8 @@ static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 /// # Example
 ///
 /// ```no_run
-/// use config::{Cli, Parser};
-///
-/// let args = Cli::parse();
-/// telemetry::logger::init(&args.log_level);
+/// // let args = Cli::parse();
+/// telemetry::logger::init("info");
 /// log::info!("Server starting");
 /// ```
 pub fn init(level: &str) {

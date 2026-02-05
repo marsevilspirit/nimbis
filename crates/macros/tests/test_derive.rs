@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use config::OnlineConfig;
+use macros::OnlineConfig;
 use rstest::rstest;
 
 #[derive(OnlineConfig, Default)]

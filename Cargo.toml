@@ -5,7 +5,6 @@ members = [
     "crates/nimbis",
     "crates/telemetry",
     "crates/storage",
-    "crates/config",
     "crates/macros",
 ]
 
@@ -18,7 +17,6 @@ repository = "https://github.com/marsevilspirit/nimbis"
 
 [workspace.dependencies]
 # Local Dependencies
-config = { path = "crates/config" }
 macros = { path = "crates/macros" }
 resp = { path = "crates/resp" }
 storage = { path = "crates/storage" }

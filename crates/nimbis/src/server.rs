@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use config::server_config;
 use log::debug;
 use log::error;
 use log::info;
@@ -10,6 +9,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 use crate::cmd::CmdTable;
+use crate::server_config;
 use crate::worker::Worker;
 use crate::worker::WorkerMessage;
 

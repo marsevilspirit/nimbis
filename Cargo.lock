@@ -410,17 +410,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "config"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "clap",
- "log",
- "macros",
- "telemetry",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1496,7 +1485,6 @@ dependencies = [
 name = "macros"
 version = "0.1.0"
 dependencies = [
- "config",
  "quote",
  "rstest",
  "syn 2.0.114",
@@ -1635,8 +1623,9 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "config",
+ "clap",
  "log",
+ "macros",
  "num_cpus",
  "resp",
  "storage",
@@ -2794,7 +2783,6 @@ name = "telemetry"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "config",
  "log",
  "rstest",
  "thiserror 2.0.18",

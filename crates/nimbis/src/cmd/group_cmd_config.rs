@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use config::SERVER_CONF;
-use config::ServerConfig;
 use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
 use super::CmdMeta;
+use crate::config::SERVER_CONF;
+use crate::config::ServerConfig;
 
 /// Config group command implementation
 pub struct ConfigGroupCmd {
