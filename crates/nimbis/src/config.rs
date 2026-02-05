@@ -41,6 +41,10 @@ pub struct Cli {
 	/// Log level (trace, debug, info, warn, error)
 	#[arg(short, long, default_value = "info")]
 	pub log_level: String,
+
+	/// Number of worker threads (default: number of CPU cores)
+	#[arg(long)]
+	pub worker_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, OnlineConfig)]
@@ -56,6 +60,8 @@ pub struct ServerConfig {
 	pub appendonly: String,
 	#[online_config(callback = "on_log_level_change")]
 	pub log_level: String,
+	#[online_config(immutable)]
+	pub worker_threads: usize,
 }
 
 impl ServerConfig {
@@ -72,6 +78,7 @@ impl Default for ServerConfig {
 			save: "".to_string(),
 			appendonly: "no".to_string(),
 			log_level: "info".to_string(),
+			worker_threads: num_cpus::get(),
 		}
 	}
 }
@@ -129,6 +136,7 @@ pub fn setup(args: Cli) {
 	let config = ServerConfig {
 		addr,
 		log_level: args.log_level.clone(),
+		worker_threads: args.worker_threads.unwrap_or(num_cpus::get()),
 		..ServerConfig::default()
 	};
 

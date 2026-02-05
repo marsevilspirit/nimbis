@@ -26,8 +26,8 @@ impl Server {
 
 		let cmd_table = Arc::new(CmdTable::new());
 
-		// Determine number of workers based on CPU cores
-		let workers_num = num_cpus::get();
+		// Determine number of workers from config
+		let workers_num = *server_config!(worker_threads);
 		let mut workers = Vec::with_capacity(workers_num);
 
 		// First pass: create channels
