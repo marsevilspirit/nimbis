@@ -34,7 +34,9 @@ memchr = "2.7.6"
 num_cpus = "1.17.0"
 object_store = "0.13.1"
 quote = "1.0.44"
-slatedb = { version = "0.10.1", features = ["foyer"] }
+slatedb = { git = "https://github.com/slatedb/slatedb.git", rev = "b1e9e7a63b2bd174b3b43b79681640ce9c4baec4", features = [
+    "foyer",
+] }
 syn = { version = "2.0.114", features = ["full"] }
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
