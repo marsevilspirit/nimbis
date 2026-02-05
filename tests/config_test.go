@@ -2,6 +2,8 @@ package tests
 
 import (
 	"context"
+	"runtime"
+	"strconv"
 
 	"github.com/marsevilspirit/nimbis/tests/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -47,12 +49,13 @@ var _ = Describe("CONFIG Commands", func() {
 		It("should get all fields with * wildcard", func() {
 			result, err := rdb.ConfigGet(ctx, "*").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(HaveLen(5)) // addr, data_path, save, appendonly
+			Expect(result).To(HaveLen(6)) // addr, data_path, save, appendonly, log_level, worker_threads
 			Expect(result).To(HaveKeyWithValue("addr", "127.0.0.1:6379"))
 			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))
+			Expect(result).To(HaveKeyWithValue("worker_threads", strconv.Itoa(runtime.NumCPU())))
 		})
 
 		It("should match fields with prefix wildcard", func() {
