@@ -121,11 +121,13 @@ pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 
 /// Helper macro to access server configuration fields
 ///
-/// Usage: `server_config!(field_name)`
+/// Usage:
+/// - For Copy types (numbers): `let n = server_config!(worker_threads);`
+/// - For Borrowed types (Strings): `let s = &server_config!(addr);`
 #[macro_export]
 macro_rules! server_config {
 	($field:ident) => {
-		&$crate::config::SERVER_CONF.load().$field
+		$crate::config::SERVER_CONF.load().$field
 	};
 }
 
@@ -157,6 +159,10 @@ mod tests {
 		SERVER_CONF.init(config);
 
 		// Now verify access via load()
-		assert_eq!(*server_config!(addr), "127.0.0.1:6379");
+		let addr = &server_config!(addr);
+		assert_eq!(addr, "127.0.0.1:6379");
+
+		let threads = server_config!(worker_threads);
+		assert_eq!(threads, num_cpus::get());
 	}
 }

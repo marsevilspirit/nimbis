@@ -21,13 +21,13 @@ impl Server {
 	// Create a new server instance
 	pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 		// Ensure data directory exists
-		let data_path = server_config!(data_path);
+		let data_path = &server_config!(data_path);
 		std::fs::create_dir_all(data_path)?;
 
 		let cmd_table = Arc::new(CmdTable::new());
 
 		// Determine number of workers from config
-		let workers_num = *server_config!(worker_threads);
+		let workers_num = server_config!(worker_threads);
 		let mut workers = Vec::with_capacity(workers_num);
 
 		// First pass: create channels
@@ -67,7 +67,7 @@ impl Server {
 	}
 
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let addr = server_config!(addr);
+		let addr: &String = &server_config!(addr);
 		let listener = TcpListener::bind(addr).await?;
 		info!("Nimbis server listening on {}", addr);
 
