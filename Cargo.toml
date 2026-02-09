@@ -23,7 +23,7 @@ storage = { path = "crates/storage" }
 telemetry = { path = "crates/telemetry" }
 
 # Dependencies
-arc-swap = "1.8.0"
+arc-swap = "1.8.1"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"
