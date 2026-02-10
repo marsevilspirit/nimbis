@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use slatedb::Db;
-use slatedb::WriteBatch;
-use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
@@ -78,11 +76,11 @@ impl Storage {
 			}
 		};
 
-		// 1. Open string_db first as it is needed by others for compaction filtering
+		// Open string_db first as it is needed by others for compaction filtering
 		let string_db = open_db("/string", DataType::String, None).await?;
 		let string_db = Arc::new(string_db);
 
-		// 2. Open collection DBs with reference to string_db
+		// Open collection DBs with reference to string_db
 		let (hash_db, list_db, set_db, zset_db) = tokio::try_join!(
 			open_db("/hash", DataType::Hash, Some(string_db.clone())),
 			open_db("/list", DataType::List, Some(string_db.clone())),
@@ -165,36 +163,6 @@ impl Storage {
 
 		Ok(Some(meta_val))
 	}
-
-	/// Helper to delete all keys starting with a given prefix from a specific
-	/// database.
-	pub(crate) async fn delete_keys_by_prefix(
-		&self,
-		db: &Arc<Db>,
-		prefix: Bytes,
-	) -> Result<(), StorageError> {
-		let range = prefix.clone()..;
-		let mut stream = db.scan(range).await?;
-		let mut batch = WriteBatch::new();
-		let mut has_keys_to_delete = false;
-
-		while let Some(kv) = stream.next().await? {
-			if !kv.key.starts_with(&prefix) {
-				break;
-			}
-			batch.delete(kv.key);
-			has_keys_to_delete = true;
-		}
-
-		if has_keys_to_delete {
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			db.write_with_options(batch, &write_opts).await?;
-		}
-
-		Ok(())
-	}
 }
 
 #[cfg(test)]
@@ -223,125 +191,132 @@ mod tests {
 		TestContext { storage, path }
 	}
 
-	async fn run_prefix_delete_test(
-		ctx: &TestContext,
-		prefix: &str,
-		matching_keys: Vec<&str>,
-		non_matching_keys: Vec<&str>,
-	) {
-		let prefix_bytes = Bytes::from(prefix.to_string());
-		let value = Bytes::from("value");
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-
-		for key in matching_keys.iter().chain(non_matching_keys.iter()) {
-			ctx.storage
-				.string_db
-				.put_with_options(
-					Bytes::from(key.to_string()),
-					value.clone(),
-					&Default::default(),
-					&write_opts,
-				)
-				.await
-				.unwrap();
-		}
-
-		ctx.storage
-			.delete_keys_by_prefix(&ctx.storage.string_db, prefix_bytes)
-			.await
-			.unwrap();
-
-		for key in &matching_keys {
-			assert!(
-				ctx.storage
-					.string_db
-					.get(Bytes::from(key.to_string()))
-					.await
-					.unwrap()
-					.is_none()
-			);
-		}
-		for key in &non_matching_keys {
-			assert!(
-				ctx.storage
-					.string_db
-					.get(Bytes::from(key.to_string()))
-					.await
-					.unwrap()
-					.is_some()
-			);
-		}
-	}
-
 	#[rstest]
-	#[case("test:", vec![], vec![])]
-	#[case("test:", vec!["test:key1"], vec![])]
-	#[case("test:", vec!["test:key1", "test:key2", "test:key3"], vec![])]
-	#[case("test:", vec!["test:key1", "test:key2"], vec!["other:key1", "test", "testing:key"])]
-	#[case("test:", vec![], vec!["other:key1", "another:key2"])]
-	#[case("user:123:", vec!["user:123:name", "user:123:email"], vec!["user:456:name"])]
-	#[case("用户:", vec!["用户:张三", "用户:李四"], vec!["管理员:王五"])]
-	#[case("\x00\x01\x02:", vec!["\x00\x01\x02:key1"], vec!["normal:key"])]
-	#[case("key:\n\t", vec!["key:\n\tvalue"], vec!["key:other"])]
 	#[tokio::test]
-	async fn test_delete_keys_by_prefix(
-		#[future] ctx: TestContext,
-		#[case] prefix: &str,
-		#[case] matching_keys: Vec<&str>,
-		#[case] non_matching_keys: Vec<&str>,
-	) {
-		run_prefix_delete_test(&ctx.await, prefix, matching_keys, non_matching_keys).await;
-	}
-
-	#[rstest]
-	#[case("string_db", "hash_db")]
-	#[case("list_db", "set_db")]
-	#[case("zset_db", "string_db")]
-	#[tokio::test]
-	async fn test_delete_keys_by_prefix_different_databases(
-		#[future] ctx: TestContext,
-		#[case] db1_name: &str,
-		#[case] db2_name: &str,
-	) {
+	async fn test_lazy_delete_zombie_isolation(#[future] ctx: TestContext) {
 		let ctx = ctx.await;
-		let get_db = |name: &str| match name {
-			"string_db" => &ctx.storage.string_db,
-			"hash_db" => &ctx.storage.hash_db,
-			"list_db" => &ctx.storage.list_db,
-			"set_db" => &ctx.storage.set_db,
-			"zset_db" => &ctx.storage.zset_db,
-			_ => panic!("Unknown database"),
-		};
-		let (db1, db2) = (get_db(db1_name), get_db(db2_name));
-		let (prefix, key, value) = (
-			Bytes::from("test:"),
-			Bytes::from("test:key1"),
-			Bytes::from("value"),
+		let key = Bytes::from("zombie_gen_test");
+
+		// ZSET: Add member (Version 1)
+		ctx.storage
+			.zadd(key.clone(), vec![(1.0, Bytes::from("old_member"))])
+			.await
+			.unwrap();
+
+		// Verify it's there
+		let stored = ctx.storage.zrange(key.clone(), 0, -1, false).await.unwrap();
+		assert_eq!(stored, vec![Bytes::from("old_member")]);
+
+		// DEL (Logical Delete - only Meta)
+		ctx.storage.del(key.clone()).await.unwrap();
+
+		// Verify empty
+		let exists = ctx.storage.exists(key.clone()).await.unwrap();
+		assert!(!exists);
+
+		// ZSET: Re-create (Version 2)
+		ctx.storage
+			.zadd(key.clone(), vec![(2.0, Bytes::from("new_member"))])
+			.await
+			.unwrap();
+
+		// ONLY new member is visible
+		// "old_member" is still in RocksDB but should be invisible due to version
+		// mismatch
+		let stored = ctx.storage.zrange(key.clone(), 0, -1, false).await.unwrap();
+		assert_eq!(stored.len(), 1);
+		assert_eq!(stored[0], Bytes::from("new_member"));
+	}
+
+	/// Verifies that after a logical delete (O(1)), the compaction filter
+	/// correctly identifies all orphaned data for physical reclamation. This
+	/// test detects potential "data leaks" where stale data remains on disk
+	/// permanently.
+	#[rstest]
+	#[tokio::test]
+	async fn test_physical_cleanup_after_logical_delete(#[future] ctx: TestContext) {
+		use slatedb::CompactionFilter;
+
+		use crate::compaction_filter::NimbisCompactionFilter;
+		use crate::data_type::DataType;
+
+		let ctx = ctx.await;
+		let key = Bytes::from("leak_test_set");
+
+		// SADD: Add multiple members
+		let members: Vec<Bytes> = (0..10)
+			.map(|i| Bytes::from(format!("member_{}", i)))
+			.collect();
+		let added = ctx
+			.storage
+			.sadd(key.clone(), members.clone())
+			.await
+			.unwrap();
+		assert_eq!(added, 10);
+
+		// Verify all members are logically visible
+		let stored = ctx.storage.smembers(key.clone()).await.unwrap();
+		assert_eq!(stored.len(), 10);
+
+		// DEL: Logical delete (O(1) - only meta is removed)
+		let deleted = ctx.storage.del(key.clone()).await.unwrap();
+		assert!(deleted, "DEL should succeed");
+
+		// Verify logically empty
+		let exists = ctx.storage.exists(key.clone()).await.unwrap();
+		assert!(!exists);
+
+		// KEY VERIFICATION: Scan raw set_db to prove physical data still exists
+		let scan_range = ..;
+		let mut stream = ctx
+			.storage
+			.set_db
+			.scan::<Bytes, _>(scan_range)
+			.await
+			.unwrap();
+		let mut raw_count = 0;
+		let mut raw_entries = Vec::new();
+		while let Some(kv) = stream.next().await.unwrap() {
+			raw_count += 1;
+			raw_entries.push(kv);
+		}
+		// Physical data should still be present (zombie data)
+		assert!(
+			raw_count >= 10,
+			"Expected at least 10 physical entries, found {}. Data was physically deleted instead of lazily!",
+			raw_count
 		);
-		let write_opts = WriteOptions {
-			await_durable: false,
+
+		// Run compaction filter logic on all raw entries
+		let mut filter = NimbisCompactionFilter {
+			string_db: Some(ctx.storage.string_db.clone()),
+			data_type: DataType::Set,
 		};
 
-		db1.put_with_options(key.clone(), value.clone(), &Default::default(), &write_opts)
-			.await
-			.unwrap();
-		db2.put_with_options(key.clone(), value, &Default::default(), &write_opts)
-			.await
-			.unwrap();
+		let mut reclaimed_count = 0;
+		for kv in &raw_entries {
+			let entry = slatedb::RowEntry {
+				key: kv.key.clone(),
+				value: slatedb::ValueDeletable::Value(kv.value.clone()),
+				seq: 0,
+				create_ts: None,
+				expire_ts: None,
+			};
+			let decision = filter.filter(&entry).await.unwrap();
+			if decision
+				== slatedb::CompactionFilterDecision::Modify(slatedb::ValueDeletable::Tombstone)
+			{
+				reclaimed_count += 1;
+			}
+		}
 
-		ctx.storage
-			.delete_keys_by_prefix(db1, prefix.clone())
-			.await
-			.unwrap();
-		assert!(db1.get(key.clone()).await.unwrap().is_none());
-		assert!(db2.get(key.clone()).await.unwrap().is_some());
-
-		ctx.storage
-			.delete_keys_by_prefix(db2, prefix)
-			.await
-			.unwrap();
-		assert!(db2.get(key).await.unwrap().is_none());
+		// ALL orphaned entries should be marked for reclamation
+		assert_eq!(
+			reclaimed_count,
+			raw_count,
+			"Data leak detected! {} out of {} entries were NOT reclaimed by the compaction filter",
+			raw_count - reclaimed_count,
+			raw_count
+		);
 	}
 }

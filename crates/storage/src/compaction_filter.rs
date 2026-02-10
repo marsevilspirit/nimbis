@@ -18,8 +18,8 @@ use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 
 pub struct NimbisCompactionFilter {
-	string_db: Option<Arc<Db>>,
-	data_type: DataType,
+	pub(crate) string_db: Option<Arc<Db>>,
+	pub(crate) data_type: DataType,
 }
 
 impl NimbisCompactionFilter {
@@ -98,32 +98,18 @@ impl CompactionFilter for NimbisCompactionFilter {
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
-				// Check Type and Version
-				match any_val {
-					AnyValue::Hash(m) if self.data_type == DataType::Hash => {
-						if m.version != version {
-							return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-						}
-					}
-					AnyValue::List(m) if self.data_type == DataType::List => {
-						if m.version != version {
-							return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-						}
-					}
-					AnyValue::Set(m) if self.data_type == DataType::Set => {
-						if m.version != version {
-							return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-						}
-					}
-					AnyValue::ZSet(m) if self.data_type == DataType::ZSet => {
-						if m.version != version {
-							return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-						}
-					}
-					_ => {
-						// Type mismatch -> Orphaned sub-key (collision) -> Delete
-						return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-					}
+				// Check Type
+				if any_val.data_type() != self.data_type {
+					// Type mismatch -> Orphaned sub-key (collision) -> Delete
+					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
+				}
+
+				// Check Version
+				if any_val
+					.version()
+					.is_some_and(|meta_version| meta_version != version)
+				{
+					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
 				Ok(CompactionFilterDecision::Keep)
@@ -282,6 +268,138 @@ mod tests {
 		assert_eq!(
 			filter.filter(&invalid_entry).await.unwrap(),
 			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
+		);
+	}
+
+	#[tokio::test]
+	async fn test_compaction_reclaims_orphaned_data() {
+		use std::sync::Arc;
+
+		use bytes::BufMut;
+		use bytes::BytesMut;
+		use slatedb::Db;
+		use slatedb::config::WriteOptions;
+		use slatedb::object_store::local::LocalFileSystem;
+		use slatedb::object_store::path::Path;
+
+		use crate::string::meta::SetMetaValue;
+
+		// Setup string_db
+		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::new()));
+		tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+		let object_store = Arc::new(LocalFileSystem::new_with_prefix(&temp_dir).unwrap());
+
+		let string_db = Db::builder(Path::from("/string"), object_store)
+			.build()
+			.await
+			.unwrap();
+		let string_db = Arc::new(string_db);
+
+		// Put Metadata for a Set (version=42, len=3)
+		let user_key = Bytes::from("myset");
+		let meta_key = MetaKey::new(user_key.clone());
+		let meta_val = SetMetaValue::new(42, 3);
+		string_db
+			.put(meta_key.encode(), meta_val.encode())
+			.await
+			.unwrap();
+
+		// Build 3 sub-keys with version=42 (matching)
+		let mut filter = NimbisCompactionFilter {
+			string_db: Some(string_db.clone()),
+			data_type: DataType::Set,
+		};
+
+		let build_sub_key = |version: u64, member: &[u8]| -> Bytes {
+			let mut key = BytesMut::new();
+			key.put_u16(user_key.len() as u16);
+			key.extend_from_slice(&user_key);
+			key.put_u64(version);
+			key.put_u32(member.len() as u32);
+			key.extend_from_slice(member);
+			key.freeze()
+		};
+
+		let members: &[&[u8]] = &[b"alice", b"bob", b"carol"];
+		for member in members {
+			let entry = RowEntry {
+				key: build_sub_key(42, *member),
+				value: ValueDeletable::Value(Bytes::new()),
+				seq: 1,
+				create_ts: None,
+				expire_ts: None,
+			};
+			// All should be kept (version matches)
+			assert_eq!(
+				filter.filter(&entry).await.unwrap(),
+				CompactionFilterDecision::Keep,
+				"member {:?} should be kept when version matches",
+				std::str::from_utf8(*member).unwrap()
+			);
+		}
+
+		// Simulate DEL: remove the metadata
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		string_db
+			.delete_with_options(meta_key.encode(), &write_opts)
+			.await
+			.unwrap();
+
+		// Now all sub-keys should be marked for deletion (orphaned)
+		for member in members {
+			let entry = RowEntry {
+				key: build_sub_key(42, *member),
+				value: ValueDeletable::Value(Bytes::new()),
+				seq: 1,
+				create_ts: None,
+				expire_ts: None,
+			};
+			assert_eq!(
+				filter.filter(&entry).await.unwrap(),
+				CompactionFilterDecision::Modify(ValueDeletable::Tombstone),
+				"member {:?} should be reclaimed after metadata deletion",
+				std::str::from_utf8(*member).unwrap()
+			);
+		}
+
+		// Simulate re-creation with new version: put meta with version=100
+		let new_meta_val = SetMetaValue::new(100, 1);
+		string_db
+			.put(meta_key.encode(), new_meta_val.encode())
+			.await
+			.unwrap();
+
+		// Old version=42 data should still be reclaimed
+		for member in members {
+			let entry = RowEntry {
+				key: build_sub_key(42, *member),
+				value: ValueDeletable::Value(Bytes::new()),
+				seq: 1,
+				create_ts: None,
+				expire_ts: None,
+			};
+			assert_eq!(
+				filter.filter(&entry).await.unwrap(),
+				CompactionFilterDecision::Modify(ValueDeletable::Tombstone),
+				"old version member {:?} should be reclaimed after re-creation",
+				std::str::from_utf8(*member).unwrap()
+			);
+		}
+
+		// New version=100 data should be kept
+		let new_entry = RowEntry {
+			key: build_sub_key(100, b"dave"),
+			value: ValueDeletable::Value(Bytes::new()),
+			seq: 2,
+			create_ts: None,
+			expire_ts: None,
+		};
+		assert_eq!(
+			filter.filter(&new_entry).await.unwrap(),
+			CompactionFilterDecision::Keep,
+			"new version member should be kept"
 		);
 	}
 }

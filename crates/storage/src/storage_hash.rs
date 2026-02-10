@@ -14,20 +14,6 @@ use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	// Helper to delete all fields of a hash.
-	// Used when overwriting a Hash with a String, or deleting a Hash.
-	// TODO: This function is temporary; once the compaction filter is implemented,
-	// it will be replaced with a custom filter for elegant deletion.
-	pub(crate) async fn delete_hash_fields(&self, key: Bytes) -> Result<(), StorageError> {
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
-
-		self.delete_keys_by_prefix(&self.hash_db, prefix).await
-	}
-
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();

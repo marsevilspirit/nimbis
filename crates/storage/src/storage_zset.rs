@@ -15,48 +15,6 @@ use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
 impl Storage {
-	// Helper to create key prefix (len(user_key) + user_key)
-	fn create_key_prefix(key: &Bytes) -> Bytes {
-		let mut p = BytesMut::with_capacity(2 + key.len());
-		p.put_u16(key.len() as u16);
-		p.extend_from_slice(key);
-		p.freeze()
-	}
-
-	pub(crate) async fn delete_zset_content(&self, key: Bytes) -> Result<(), StorageError> {
-		// Scan range starts with len(user_key) + user_key
-		let range_start = Self::create_key_prefix(&key);
-		let range = range_start.as_ref()..;
-		let mut stream = self.zset_db.scan(range).await?;
-
-		let mut batch = WriteBatch::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			// Check if key matches len(user_key) + user_key
-			// To avoid allocations, check manually
-			if k.len() < 2 + key.len() {
-				break;
-			}
-			let k_len_prefix = u16::from_be_bytes(k[0..2].try_into()?);
-			if k_len_prefix as usize != key.len() {
-				break;
-			}
-			if k[2..2 + key.len()] != key[..] {
-				break;
-			}
-			// Batch delete for better performance
-			batch.delete(k);
-		}
-
-		// Execute batch deletion atomically
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		self.zset_db.write_with_options(batch, &write_opts).await?;
-		Ok(())
-	}
-
 	pub async fn zadd(
 		&self,
 		key: Bytes,

@@ -12,28 +12,6 @@ use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	// Helper to delete all elements of a list.
-	pub(crate) async fn delete_list_elements(
-		&self,
-		key: Bytes,
-		meta: &ListMetaValue,
-	) -> Result<(), StorageError> {
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		// Elements are stored in the range [head, tail).
-		// head points to the first element, and tail points to one past the last
-		// element. We iterate through this range to delete all individual elements.
-
-		for i in meta.head..meta.tail {
-			let field_key = ListElementKey::new(key.clone(), meta.version, i);
-			self.list_db
-				.delete_with_options(field_key.encode(), &write_opts)
-				.await?;
-		}
-		Ok(())
-	}
-
 	pub async fn lpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
 		self.list_push(key, elements, true).await
 	}

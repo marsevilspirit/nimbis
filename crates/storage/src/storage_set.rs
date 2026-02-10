@@ -13,16 +13,6 @@ use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
 
 impl Storage {
-	pub(crate) async fn delete_set_members(&self, key: Bytes) -> Result<(), StorageError> {
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
-
-		self.delete_keys_by_prefix(&self.set_db, prefix).await
-	}
-
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();

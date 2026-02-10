@@ -432,6 +432,16 @@ impl AnyValue {
 			Self::ZSet(v) => v.encode(),
 		}
 	}
+
+	pub fn version(&self) -> Option<u64> {
+		match self {
+			Self::String(_) => None,
+			Self::Hash(v) => Some(v.version),
+			Self::List(v) => Some(v.version),
+			Self::Set(v) => Some(v.version),
+			Self::ZSet(v) => Some(v.version),
+		}
+	}
 }
 
 impl Expirable for AnyValue {

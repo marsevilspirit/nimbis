@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
-/// Generates monotonically increasing versions based on microsecond timestamps.
+/// Generates monotonically increasing versions based on seconds timestamps.
 /// If the current timestamp is not greater than the last generated version,
 /// it increments the last version by 1 to guarantee monotonicity.
 pub struct VersionGenerator {
@@ -18,15 +18,11 @@ impl VersionGenerator {
 	/// Generates a new version that is guaranteed to be greater than any
 	/// previously generated version from this generator.
 	pub fn next(&self) -> u64 {
-		let now_micros = chrono::Utc::now().timestamp_micros() as u64;
+		let now = chrono::Utc::now().timestamp() as u64;
 
 		loop {
 			let last = self.last_version.load(Ordering::Acquire);
-			let next = if now_micros > last {
-				now_micros
-			} else {
-				last + 1
-			};
+			let next = if now > last { now } else { last + 1 };
 
 			if self
 				.last_version
