@@ -23,10 +23,6 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
-		// Clean up if it's a Hash or List
-		// We don't need to delete the content, just the metadata.
-		// The compaction filter will handle the rest.
-
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
@@ -46,17 +42,15 @@ impl Storage {
 			return Ok(false);
 		}
 
-		// Clean up fields if this is a collection type
-		// We don't need to delete the content, just the metadata.
-		// The compaction filter will handle the rest.
-
 		// Delete from string_db
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
+
 		self.string_db
 			.delete_with_options(key.encode(), &write_opts)
 			.await?;
+
 		Ok(true)
 	}
 
