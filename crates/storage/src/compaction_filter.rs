@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Buf;
 use bytes::Bytes;
+use log::debug;
 use slatedb::CompactionFilter;
 use slatedb::CompactionFilterDecision;
 use slatedb::CompactionFilterError;
@@ -56,10 +57,17 @@ impl CompactionFilter for NimbisCompactionFilter {
 				// String DB: Check TTL in value
 				let any_val = match AnyValue::decode(bytes) {
 					Ok(val) => val,
-					Err(_) => return Ok(CompactionFilterDecision::Keep),
+					Err(e) => {
+						debug!(
+							"[StringFilter] failed to decode value for key {:?}: {:?}",
+							entry.key, e
+						);
+						return Ok(CompactionFilterDecision::Keep);
+					}
 				};
 
 				if any_val.is_expired() {
+					debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 				Ok(CompactionFilterDecision::Keep)
@@ -74,41 +82,76 @@ impl CompactionFilter for NimbisCompactionFilter {
 				// Decode sub-key to getKey and Version
 				let Some((user_key, version)) = Self::decode_sub_key(&entry.key) else {
 					// Invalid key format? Keep safe.
+					debug!(
+						"[{:?}Filter] Invalid key format: {:?}",
+						self.data_type, entry.key
+					);
 					return Ok(CompactionFilterDecision::Keep);
 				};
 
 				// Lookup metadata
-				let meta_key = MetaKey::new(user_key);
+				let meta_key = MetaKey::new(user_key.clone());
 				let meta_encoded = match string_db.get(meta_key.encode()).await {
 					Ok(Some(v)) => v,
 					Ok(None) => {
 						// Metadata missing -> Orphaned sub-key -> Delete
+						debug!(
+							"[{:?}DataFilter] Drop[Meta key not exist] key: {:?}, version: {}",
+							self.data_type, user_key, version
+						);
 						return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 					}
-					Err(_) => return Ok(CompactionFilterDecision::Keep), // Error -> Keep safe
+					Err(e) => {
+						debug!(
+							"[{:?}DataFilter] Reserve[Get meta_key failed: {:?}] key: {:?}",
+							self.data_type, e, user_key
+						);
+						return Ok(CompactionFilterDecision::Keep);
+					}
 				};
 
 				let any_val = match AnyValue::decode(&meta_encoded) {
 					Ok(v) => v,
-					Err(_) => return Ok(CompactionFilterDecision::Keep),
+					Err(e) => {
+						debug!(
+							"[{:?}DataFilter] Reserve[Decode meta failed: {:?}] key: {:?}",
+							self.data_type, e, user_key
+						);
+						return Ok(CompactionFilterDecision::Keep);
+					}
 				};
 
 				// Check expiration
 				if any_val.is_expired() {
+					debug!(
+						"[{:?}DataFilter] Drop[Timeout] key: {:?}, version: {}",
+						self.data_type, user_key, version
+					);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
 				// Check Type
 				if any_val.data_type() != self.data_type {
 					// Type mismatch -> Orphaned sub-key (collision) -> Delete
+					debug!(
+						"[{:?}DataFilter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}, version: {}",
+						self.data_type,
+						self.data_type,
+						any_val.data_type(),
+						user_key,
+						version
+					);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
 				// Check Version
-				if any_val
-					.version()
-					.is_some_and(|meta_version| meta_version != version)
+				if let Some(meta_version) = any_val.version()
+					&& meta_version != version
 				{
+					debug!(
+						"[{:?}DataFilter] Drop[version mismatch: cur_meta_version {}, data_key_version {}] key: {:?}",
+						self.data_type, meta_version, version, user_key
+					);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
