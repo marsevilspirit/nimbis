@@ -20,15 +20,14 @@ Expiration information is stored as part of the value's metadata in the `string_
 
 ## 3. Implementation Mechanism
 
-### Dual-Layer Expiration
-1.  **Native SlateDB TTL**: When `EXPIRE` is called, Nimbis sets a native SlateDB TTL (`PutOptions { ttl }`). This allows SlateDB's compaction process to eventually reclaim space automatically.
-2.  **Application-Level Lazy Expiration**: Handled uniformly by the `get_meta<T>` helper. Every operation on a key first retrieves the metadata and checks the encoded `expire_time` against the current clock.
+### SlateDB Native TTL
+When `EXPIRE` is called, Nimbis sets a native SlateDB TTL (`PutOptions { ttl }`). SlateDB automatically returns `None` for expired keys on `get()` and reclaims space during compaction. There is no application-level lazy expiration check in `get_meta` — SlateDB's TTL is the sole mechanism.
 
-### Hash Type Specifics (Strict Metadata Check)
-Hashes use a "Master Expiration" pattern:
-- The expiration is stored **ONLY** in the `HashMetaValue` (in `string_db`).
-- Individual fields in `hash_db` do NOT store their own expiration.
-- **Strict Check**: Any operation on a hash (`HGET`, `HMGET`, `HGETALL`, `HLEN`) MUST first check the metadata in `string_db`. If the metadata is missing or expired, the hash is treated as non-existent, even if orphaned fields remain in the `hash_db`.
+### Collection Type Metadata
+Collection types (Hash, List, Set, ZSet) use a "Master Expiration" pattern:
+- The expiration is stored **ONLY** in the metadata value (in `string_db`).
+- Individual members/fields/elements in their respective DBs do NOT store their own expiration.
+- When SlateDB returns `None` for the metadata key (expired), the collection is treated as non-existent. Orphaned data records are cleaned up asynchronously by the `NimbisCompactionFilter`.
 
 ### Expirable Trait (Code Organization)
 To avoid code duplication across different value types, the expiration logic is centralized in the `Expirable` trait defined in [`crates/storage/src/expirable.rs`](../crates/storage/src/expirable.rs).
@@ -60,10 +59,10 @@ All data types store meta in `string_db` and implement `Expirable` and `MetaValu
 
 ## 4. Key Logic Points
 
-### Lazy Deletion
-When a read operation detects an expired key:
-1. Returns `None` (or empty) to the client immediately.
-2. Triggers an asynchronous or immediate `Storage::del` to clean up the storage (including hash fields if applicable).
+### Expiration Handling
+When a read operation encounters an expired key:
+1. SlateDB's native TTL returns `None` for the key automatically.
+2. Orphaned data records (collection members under the expired version) are cleaned up asynchronously by the `NimbisCompactionFilter` during compaction.
 
 ### Unit Conversion
 - **User Interface**: `EXPIRE` and `TTL` operate in **seconds**.
@@ -87,12 +86,12 @@ sequenceDiagram
     S->>ST: get(key)
     ST->>ST: get_meta::<AnyValue>(key)
     ST->>DB: get(encoded_key)
-    DB-->>ST: return bytes [type, expire_at, value]
-    alt is_expired(expire_at)
-        ST->>ST: del(key) [Lazy Cleanup]
+    alt key expired (SlateDB TTL)
+        DB-->>ST: return None
         ST-->>S: return None
         S-->>C: return nil
-    else not_expired
+    else key exists
+        DB-->>ST: return bytes [type, expire_at, value]
         ST-->>S: return value
         S-->>C: return value
     end

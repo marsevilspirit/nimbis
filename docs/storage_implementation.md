@@ -20,6 +20,7 @@ pub struct Storage {
     pub(crate) list_db: Arc<Db>,
     pub(crate) set_db: Arc<Db>,
     pub(crate) zset_db: Arc<Db>,
+    pub(crate) version_generator: Arc<VersionGenerator>,
 }
 ```
 
@@ -41,7 +42,7 @@ To handle different data types uniformly, the storage layer uses a few key abstr
   1. Fetching raw bytes from `string_db`.
   2. Performing type-code validation.
   3. Decoding the metadata into type `T`.
-  4. Performing application-level lazy expiration checks (including lazy deletion).
+  Expiration is handled entirely by SlateDB's native TTL mechanism; `get_meta` does not perform application-level expiration checks.
 - **`AnyValue` Enum**: A wrapper enum that implements `MetaValue` and can represent any valid Redis data type stored in Nimbis. This allows core commands like `GET`, `EXPIRE`, and `TTL` to operate without type-specific logic.
 
 ### Prefix-Based Deletion

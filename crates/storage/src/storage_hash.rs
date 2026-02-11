@@ -14,42 +14,22 @@ use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	// Helper to delete all fields of a hash.
-	// Used when overwriting a Hash with a String, or deleting a Hash.
-	// TODO: This function is temporary; once the compaction filter is implemented,
-	// it will be replaced with a custom filter for elegant deletion.
-	pub(crate) async fn delete_hash_fields(&self, key: Bytes) -> Result<(), StorageError> {
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
-
-		self.delete_keys_by_prefix(&self.hash_db, prefix).await
-	}
-
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let field_key = HashFieldKey::new(key.clone(), field);
-
-		// Valid type check (Must be Hash or None)
-		// We read from string_db which holds ALL metadata (StringValue or
-		// HashMetaValue)
 		let meta_encoded_key = meta_key.encode();
-		let encoded_field_key = field_key.encode();
 
-		// Parallel fetch meta and field
-		let (meta_res, field_res) = tokio::join!(
-			self.get_meta::<HashMetaValue>(&key),
-			self.hash_db.get(encoded_field_key.clone())
-		);
-
-		let mut meta_val = match meta_res? {
+		// Get metadata first to obtain version
+		let mut meta_val = match self.get_meta::<HashMetaValue>(&key).await? {
 			Some(val) => val,
-			None => HashMetaValue::new(0),
+			None => HashMetaValue::new(self.version_generator.next(), 0),
 		};
 
-		let existing_field_raw = field_res?;
+		// Now create field key with the version from metadata
+		let field_key = HashFieldKey::new(key.clone(), meta_val.version, field);
+		let encoded_field_key = field_key.encode();
+
+		// Check if field already exists
+		let existing_field_raw = self.hash_db.get(encoded_field_key.clone()).await?;
 
 		// If meta was missing/expired (len 0), treat as new field even if loose field
 		// existed (zombie/deleted)
@@ -90,12 +70,12 @@ impl Storage {
 	}
 
 	pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, StorageError> {
-		// Check if the hash exists and is valid
-		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
+		// Check if the hash exists and is valid, get version
+		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
 			return Ok(None);
-		}
+		};
 
-		let field_key = HashFieldKey::new(key, field);
+		let field_key = HashFieldKey::new(key, meta_val.version, field);
 		let result = self.hash_db.get(field_key.encode()).await?;
 		Ok(result)
 	}
@@ -113,10 +93,11 @@ impl Storage {
 		key: Bytes,
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, StorageError> {
-		// Check if the hash exists and is valid
-		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
+		// Check if the hash exists and is valid, get version
+		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
 			return Ok(vec![None; fields.len()]);
-		}
+		};
+		let version = meta_val.version;
 
 		// Create a future for each field lookup to enable concurrent execution
 		// These futures will be awaited in parallel using try_join_all below
@@ -125,7 +106,7 @@ impl Storage {
 			.map(|field| {
 				// We don't need to call self.hget() which repeats the check, we can access
 				// hash_db directly
-				let field_key = HashFieldKey::new(key.clone(), field.clone());
+				let field_key = HashFieldKey::new(key.clone(), version, field.clone());
 				// We need to clone the db handle for the closure/future if needed, but
 				// self.hash_db is Arc Actually self.hash_db.get is async.
 				// We can just call self.hash_db.get
@@ -149,15 +130,16 @@ impl Storage {
 	}
 
 	pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, StorageError> {
-		// Check if the hash exists and is valid
-		if self.get_meta::<HashMetaValue>(&key).await?.is_none() {
+		// Check if the hash exists and is valid, get version
+		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
 			return Ok(Vec::new());
-		}
+		};
 
-		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
+		// Construct prefix: len(user_key) + user_key + version
+		let mut prefix = BytesMut::with_capacity(2 + key.len() + 8);
 		prefix.put_u16(key.len() as u16);
 		prefix.extend_from_slice(&key);
+		prefix.put_u64(meta_val.version);
 		let prefix = prefix.freeze();
 
 		let range = prefix.clone()..;
@@ -172,7 +154,7 @@ impl Storage {
 				break;
 			}
 
-			// Parse field: prefix + len(u32) + field
+			// Parse field: prefix (key_len+key+version) + field_len(u32) + field
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -207,7 +189,7 @@ impl Storage {
 		};
 
 		for field in fields {
-			let field_key = HashFieldKey::new(key.clone(), field.clone());
+			let field_key = HashFieldKey::new(key.clone(), meta_val.version, field.clone());
 			let encoded_field_key = field_key.encode();
 
 			// check if field exists

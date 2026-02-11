@@ -8,7 +8,6 @@ use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::meta::AnyValue;
-use crate::string::meta::ListMetaValue;
 use crate::string::value::StringValue;
 
 impl Storage {
@@ -21,31 +20,8 @@ impl Storage {
 	}
 
 	pub async fn set(&self, key: Bytes, value: Bytes) -> Result<(), StorageError> {
-		let user_key = key.clone();
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
-
-		let meta = self.string_db.get(key.encode()).await?;
-
-		// Clean up if it's a Hash or List
-		if let Some(meta) = meta {
-			match meta.first().and_then(|&b| DataType::from_u8(b)) {
-				Some(DataType::Hash) => {
-					self.delete_hash_fields(user_key).await?;
-				}
-				Some(DataType::List) => {
-					let meta_val = ListMetaValue::decode(&meta)?;
-					self.delete_list_elements(user_key, &meta_val).await?;
-				}
-				Some(DataType::Set) => {
-					self.delete_set_members(user_key).await?;
-				}
-				Some(DataType::ZSet) => {
-					self.delete_zset_content(user_key).await?;
-				}
-				_ => {}
-			}
-		}
 
 		let write_opts = WriteOptions {
 			await_durable: false,
@@ -58,40 +34,23 @@ impl Storage {
 	}
 
 	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
-		let user_key = key.clone();
 		let key = StringKey::new(key);
 
-		let Some(meta) = self.string_db.get(key.encode()).await? else {
+		// We need to check existence to return correct number of deleted keys (0 or 1).
+		// Even if we don't use the meta value, we need to know if it exists.
+		if self.string_db.get(key.encode()).await?.is_none() {
 			return Ok(false);
-		};
-
-		// Clean up fields if this is a collection type
-		if let Some(dt) = meta.first().and_then(|&b| DataType::from_u8(b)) {
-			match dt {
-				DataType::Hash => {
-					self.delete_hash_fields(user_key).await?;
-				}
-				DataType::List => {
-					let meta_val = ListMetaValue::decode(&meta)?;
-					self.delete_list_elements(user_key, &meta_val).await?;
-				}
-				DataType::Set => {
-					self.delete_set_members(user_key).await?;
-				}
-				DataType::ZSet => {
-					self.delete_zset_content(user_key).await?;
-				}
-				_ => {}
-			}
 		}
 
 		// Delete from string_db
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
+
 		self.string_db
 			.delete_with_options(key.encode(), &write_opts)
 			.await?;
+
 		Ok(true)
 	}
 

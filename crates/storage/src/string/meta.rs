@@ -64,32 +64,39 @@ impl MetaKey {
 
 #[derive(Debug, PartialEq)]
 pub struct HashMetaValue {
+	pub version: u64,
 	pub len: u64,
 	pub expire_time: u64,
 }
 
 impl HashMetaValue {
-	pub fn new(len: u64) -> Self {
+	pub fn new(version: u64, len: u64) -> Self {
 		Self {
+			version,
 			len,
 			expire_time: 0,
 		}
 	}
 
-	pub fn new_with_ttl(len: u64, expire_time: u64) -> Self {
-		Self { len, expire_time }
+	pub fn new_with_ttl(version: u64, len: u64, expire_time: u64) -> Self {
+		Self {
+			version,
+			len,
+			expire_time,
+		}
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut bytes = BytesMut::with_capacity(1 + 8 + 8);
+		let mut bytes = BytesMut::with_capacity(1 + 8 + 8 + 8);
 		bytes.put_u8(DataType::Hash as u8);
+		bytes.put_u64(self.version);
 		bytes.put_u64(self.len);
 		bytes.put_u64(self.expire_time);
 		bytes.freeze()
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
-		if bytes.len() < 17 {
+		if bytes.len() < 25 {
 			return Err(DecoderError::InvalidLength);
 		}
 
@@ -98,9 +105,10 @@ impl HashMetaValue {
 		if type_code != DataType::Hash as u8 {
 			return Err(DecoderError::InvalidType);
 		}
+		let version = buf.get_u64();
 		let len = buf.get_u64();
 		let expire_time = buf.get_u64();
-		Ok(Self::new_with_ttl(len, expire_time))
+		Ok(Self::new_with_ttl(version, len, expire_time))
 	}
 }
 
@@ -134,6 +142,7 @@ impl MetaValue for HashMetaValue {
 
 #[derive(Debug, PartialEq)]
 pub struct ListMetaValue {
+	pub version: u64,
 	pub len: u64,
 	pub head: u64,
 	pub tail: u64,
@@ -141,11 +150,12 @@ pub struct ListMetaValue {
 }
 
 impl ListMetaValue {
-	pub fn new() -> Self {
+	pub fn new(version: u64) -> Self {
 		// Initialize head and tail at the middle of u64 range to allow expansion in
 		// both directions
 		let mid = u64::MAX / 2;
 		Self {
+			version,
 			len: 0,
 			head: mid,
 			tail: mid,
@@ -154,8 +164,9 @@ impl ListMetaValue {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut bytes = BytesMut::with_capacity(1 + 8 + 8 + 8 + 8);
+		let mut bytes = BytesMut::with_capacity(1 + 8 + 8 + 8 + 8 + 8);
 		bytes.put_u8(DataType::List as u8);
+		bytes.put_u64(self.version);
 		bytes.put_u64(self.len);
 		bytes.put_u64(self.head);
 		bytes.put_u64(self.tail);
@@ -164,7 +175,7 @@ impl ListMetaValue {
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
-		if bytes.len() < 33 {
+		if bytes.len() < 41 {
 			return Err(DecoderError::InvalidLength);
 		}
 
@@ -173,22 +184,18 @@ impl ListMetaValue {
 		if type_code != DataType::List as u8 {
 			return Err(DecoderError::InvalidType);
 		}
+		let version = buf.get_u64();
 		let len = buf.get_u64();
 		let head = buf.get_u64();
 		let tail = buf.get_u64();
 		let expire_time = buf.get_u64();
 		Ok(Self {
+			version,
 			len,
 			head,
 			tail,
 			expire_time,
 		})
-	}
-}
-
-impl Default for ListMetaValue {
-	fn default() -> Self {
-		Self::new()
 	}
 }
 
@@ -222,32 +229,39 @@ impl MetaValue for ListMetaValue {
 
 #[derive(Debug, PartialEq)]
 pub struct SetMetaValue {
+	pub version: u64,
 	pub len: u64,
 	pub expire_time: u64,
 }
 
 impl SetMetaValue {
-	pub fn new(len: u64) -> Self {
+	pub fn new(version: u64, len: u64) -> Self {
 		Self {
+			version,
 			len,
 			expire_time: 0,
 		}
 	}
 
-	pub fn new_with_ttl(len: u64, expire_time: u64) -> Self {
-		Self { len, expire_time }
+	pub fn new_with_ttl(version: u64, len: u64, expire_time: u64) -> Self {
+		Self {
+			version,
+			len,
+			expire_time,
+		}
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut bytes = BytesMut::with_capacity(1 + 8 + 8);
+		let mut bytes = BytesMut::with_capacity(1 + 8 + 8 + 8);
 		bytes.put_u8(DataType::Set as u8);
+		bytes.put_u64(self.version);
 		bytes.put_u64(self.len);
 		bytes.put_u64(self.expire_time);
 		bytes.freeze()
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
-		if bytes.len() < 17 {
+		if bytes.len() < 25 {
 			return Err(DecoderError::InvalidLength);
 		}
 
@@ -256,9 +270,10 @@ impl SetMetaValue {
 		if type_code != DataType::Set as u8 {
 			return Err(DecoderError::InvalidType);
 		}
+		let version = buf.get_u64();
 		let len = buf.get_u64();
 		let expire_time = buf.get_u64();
-		Ok(Self::new_with_ttl(len, expire_time))
+		Ok(Self::new_with_ttl(version, len, expire_time))
 	}
 }
 
@@ -292,32 +307,39 @@ impl MetaValue for SetMetaValue {
 
 #[derive(Debug, PartialEq)]
 pub struct ZSetMetaValue {
+	pub version: u64,
 	pub len: u64,
 	pub expire_time: u64,
 }
 
 impl ZSetMetaValue {
-	pub fn new(len: u64) -> Self {
+	pub fn new(version: u64, len: u64) -> Self {
 		Self {
+			version,
 			len,
 			expire_time: 0,
 		}
 	}
 
-	pub fn new_with_ttl(len: u64, expire_time: u64) -> Self {
-		Self { len, expire_time }
+	pub fn new_with_ttl(version: u64, len: u64, expire_time: u64) -> Self {
+		Self {
+			version,
+			len,
+			expire_time,
+		}
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut bytes = BytesMut::with_capacity(1 + 8 + 8);
+		let mut bytes = BytesMut::with_capacity(1 + 8 + 8 + 8);
 		bytes.put_u8(DataType::ZSet as u8);
+		bytes.put_u64(self.version);
 		bytes.put_u64(self.len);
 		bytes.put_u64(self.expire_time);
 		bytes.freeze()
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
-		if bytes.len() < 17 {
+		if bytes.len() < 25 {
 			return Err(DecoderError::InvalidLength);
 		}
 
@@ -326,9 +348,10 @@ impl ZSetMetaValue {
 		if type_code != DataType::ZSet as u8 {
 			return Err(DecoderError::InvalidType);
 		}
+		let version = buf.get_u64();
 		let len = buf.get_u64();
 		let expire_time = buf.get_u64();
-		Ok(Self::new_with_ttl(len, expire_time))
+		Ok(Self::new_with_ttl(version, len, expire_time))
 	}
 }
 
@@ -401,6 +424,16 @@ impl AnyValue {
 			Self::List(v) => v.encode(),
 			Self::Set(v) => v.encode(),
 			Self::ZSet(v) => v.encode(),
+		}
+	}
+
+	pub fn version(&self) -> Option<u64> {
+		match self {
+			Self::String(_) => None,
+			Self::Hash(v) => Some(v.version),
+			Self::List(v) => Some(v.version),
+			Self::Set(v) => Some(v.version),
+			Self::ZSet(v) => Some(v.version),
 		}
 	}
 }
@@ -487,17 +520,18 @@ mod tests {
 
 	#[test]
 	fn test_hash_meta_value_encode() {
-		let val = HashMetaValue::new_with_ttl(10, 123456789);
+		let val = HashMetaValue::new_with_ttl(1, 10, 123456789);
 		let encoded = val.encode();
-		assert_eq!(encoded.len(), 17);
+		assert_eq!(encoded.len(), 25);
 		assert_eq!(encoded[0], b'h');
-		assert_eq!(&encoded[1..9], &10u64.to_be_bytes());
-		assert_eq!(&encoded[9..17], &123456789u64.to_be_bytes());
+		assert_eq!(&encoded[1..9], &1u64.to_be_bytes());
+		assert_eq!(&encoded[9..17], &10u64.to_be_bytes());
+		assert_eq!(&encoded[17..25], &123456789u64.to_be_bytes());
 	}
 
 	#[test]
 	fn test_hash_meta_value_decode() {
-		let val = HashMetaValue::new_with_ttl(12345, 987654321);
+		let val = HashMetaValue::new_with_ttl(1, 12345, 987654321);
 		let encoded = val.encode();
 		let decoded = HashMetaValue::decode(&encoded).unwrap();
 		assert_eq!(decoded, val);
@@ -505,7 +539,8 @@ mod tests {
 
 	#[test]
 	fn test_hash_meta_value_new() {
-		let val = HashMetaValue::new(100);
+		let val = HashMetaValue::new(1, 100);
+		assert_eq!(val.version, 1);
 		assert_eq!(val.len, 100);
 		assert_eq!(val.expire_time, 0);
 
@@ -517,17 +552,18 @@ mod tests {
 
 	#[test]
 	fn test_set_meta_value_encode() {
-		let val = SetMetaValue::new_with_ttl(5, 111222333);
+		let val = SetMetaValue::new_with_ttl(1, 5, 111222333);
 		let encoded = val.encode();
-		assert_eq!(encoded.len(), 17);
+		assert_eq!(encoded.len(), 25);
 		assert_eq!(encoded[0], b'S');
-		assert_eq!(&encoded[1..9], &5u64.to_be_bytes());
-		assert_eq!(&encoded[9..17], &111222333u64.to_be_bytes());
+		assert_eq!(&encoded[1..9], &1u64.to_be_bytes());
+		assert_eq!(&encoded[9..17], &5u64.to_be_bytes());
+		assert_eq!(&encoded[17..25], &111222333u64.to_be_bytes());
 	}
 
 	#[test]
 	fn test_set_meta_value_decode() {
-		let val = SetMetaValue::new_with_ttl(555, 999888);
+		let val = SetMetaValue::new_with_ttl(1, 555, 999888);
 		let encoded = val.encode();
 		let decoded = SetMetaValue::decode(&encoded).unwrap();
 		assert_eq!(decoded, val);
@@ -535,7 +571,8 @@ mod tests {
 
 	#[test]
 	fn test_set_meta_value_new() {
-		let val = SetMetaValue::new(50);
+		let val = SetMetaValue::new(1, 50);
+		assert_eq!(val.version, 1);
 		assert_eq!(val.len, 50);
 		assert_eq!(val.expire_time, 0);
 
@@ -546,7 +583,7 @@ mod tests {
 
 	#[test]
 	fn test_list_meta_value_encode_decode() {
-		let mut val = ListMetaValue::new();
+		let mut val = ListMetaValue::new(1);
 		val.len = 5;
 		val.head = 100;
 		val.tail = 105;
@@ -559,7 +596,8 @@ mod tests {
 
 	#[test]
 	fn test_list_meta_value_new() {
-		let val = ListMetaValue::new();
+		let val = ListMetaValue::new(1);
+		assert_eq!(val.version, 1);
 		assert_eq!(val.len, 0);
 		// Approx checking mid range
 		assert!(val.head > 0);
@@ -568,17 +606,18 @@ mod tests {
 
 	#[test]
 	fn test_zset_meta_value_encode() {
-		let val = ZSetMetaValue::new_with_ttl(5, 111222333);
+		let val = ZSetMetaValue::new_with_ttl(1, 5, 111222333);
 		let encoded = val.encode();
-		assert_eq!(encoded.len(), 17);
+		assert_eq!(encoded.len(), 25);
 		assert_eq!(encoded[0], b'z');
-		assert_eq!(&encoded[1..9], &5u64.to_be_bytes());
-		assert_eq!(&encoded[9..17], &111222333u64.to_be_bytes());
+		assert_eq!(&encoded[1..9], &1u64.to_be_bytes());
+		assert_eq!(&encoded[9..17], &5u64.to_be_bytes());
+		assert_eq!(&encoded[17..25], &111222333u64.to_be_bytes());
 	}
 
 	#[test]
 	fn test_zset_meta_value_decode() {
-		let val = ZSetMetaValue::new_with_ttl(555, 999888);
+		let val = ZSetMetaValue::new_with_ttl(1, 555, 999888);
 		let encoded = val.encode();
 		let decoded = ZSetMetaValue::decode(&encoded).unwrap();
 		assert_eq!(decoded, val);

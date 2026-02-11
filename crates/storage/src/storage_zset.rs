@@ -15,48 +15,6 @@ use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
 impl Storage {
-	// Helper to create key prefix (len(user_key) + user_key)
-	fn create_key_prefix(key: &Bytes) -> Bytes {
-		let mut p = BytesMut::with_capacity(2 + key.len());
-		p.put_u16(key.len() as u16);
-		p.extend_from_slice(key);
-		p.freeze()
-	}
-
-	pub(crate) async fn delete_zset_content(&self, key: Bytes) -> Result<(), StorageError> {
-		// Scan range starts with len(user_key) + user_key
-		let range_start = Self::create_key_prefix(&key);
-		let range = range_start.as_ref()..;
-		let mut stream = self.zset_db.scan(range).await?;
-
-		let mut batch = WriteBatch::new();
-
-		while let Some(kv) = stream.next().await? {
-			let k = kv.key;
-			// Check if key matches len(user_key) + user_key
-			// To avoid allocations, check manually
-			if k.len() < 2 + key.len() {
-				break;
-			}
-			let k_len_prefix = u16::from_be_bytes(k[0..2].try_into()?);
-			if k_len_prefix as usize != key.len() {
-				break;
-			}
-			if k[2..2 + key.len()] != key[..] {
-				break;
-			}
-			// Batch delete for better performance
-			batch.delete(k);
-		}
-
-		// Execute batch deletion atomically
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		self.zset_db.write_with_options(batch, &write_opts).await?;
-		Ok(())
-	}
-
 	pub async fn zadd(
 		&self,
 		key: Bytes,
@@ -65,28 +23,26 @@ impl Storage {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
-		// Prepare member fetch futures
+		// Get metadata first to obtain version
+		let mut meta_val = match self.get_meta::<ZSetMetaValue>(&key).await? {
+			Some(val) => val,
+			None => ZSetMetaValue::new(self.version_generator.next(), 0),
+		};
+
+		// Prepare member fetch futures using version from metadata
 		let mut member_encoded_keys = Vec::with_capacity(elements.len());
 		let mut member_futs = Vec::with_capacity(elements.len());
 		for (_, member) in &elements {
-			let member_key = MemberKey::new(key.clone(), member.clone());
+			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
 			let enc = member_key.encode();
 			member_encoded_keys.push(enc.clone());
 			member_futs.push(self.zset_db.get(enc));
 		}
 
-		// Parallel fetch meta and members
-		let (meta_res, members_res) = tokio::join!(
-			self.get_meta::<ZSetMetaValue>(&key),
-			future::join_all(member_futs)
-		);
+		// Fetch all members in parallel
+		let members_res = future::join_all(member_futs).await;
 
 		let mut old_values: Vec<_> = members_res.into_iter().collect::<Result<_, _>>()?;
-
-		let mut meta_val = match meta_res? {
-			Some(val) => val,
-			None => ZSetMetaValue::new(0),
-		};
 
 		// If meta is new (len 0), treat all as new.
 		// get_meta already handles expiration by deleting content, so if we get
@@ -123,11 +79,13 @@ impl Storage {
 					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
 				if old_score != score {
 					// 1. Delete old ScoreKey
-					let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
+					let old_score_key =
+						ScoreKey::new(key.clone(), meta_val.version, old_score, member.clone());
 					batch.delete(old_score_key.encode());
 
 					// 2. Add new ScoreKey
-					let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
+					let new_score_key =
+						ScoreKey::new(key.clone(), meta_val.version, score, member.clone());
 					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
 
 					// 3. Update MemberKey
@@ -151,7 +109,7 @@ impl Storage {
 				);
 
 				// Add ScoreKey
-				let score_key = ScoreKey::new(key.clone(), score, member);
+				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
 				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
@@ -193,16 +151,15 @@ impl Storage {
 				return Ok(Vec::new());
 			}
 
-			// We need to scan ScoreKeys.
-			// But we don't have efficient seeking by index yet (no rank support in key).
-			// So we have to scan from the beginning or use some heuristic.
-			// For now, scan from start of ScoreKeys for this user_key.
-			// Key format: user_key + b'S' + ...
+			let version = meta.version;
 
+			// We need to scan ScoreKeys.
+			// Key format: len(user_key) + user_key + version + b'S' + score + member
 			let prefix = {
-				let mut p = BytesMut::with_capacity(2 + key.len() + 1);
+				let mut p = BytesMut::with_capacity(2 + key.len() + 1 + 8);
 				p.put_u16(key.len() as u16);
 				p.extend_from_slice(&key);
+				p.put_u64(version);
 				p.put_u8(b'S');
 				p.freeze()
 			};
@@ -213,8 +170,9 @@ impl Storage {
 			let mut result = Vec::new();
 			let mut current_idx = 0;
 			// Cache header length and offset to avoid repeated calculation
-			let header_len = 2 + key.len() + 1 + 8;
-			let score_offset = 2 + key.len() + 1;
+			// prefix = key_len(2) + key + version(8) + b'S'(1), then score(8) + member
+			let header_len = prefix.len() + 8; // prefix + score(8)
+			let score_offset = prefix.len(); // score starts right after prefix
 
 			while let Some(kv) = stream.next().await? {
 				let k = kv.key;
@@ -224,7 +182,7 @@ impl Storage {
 
 				if current_idx >= start && current_idx <= stop {
 					// Extract member and score
-					// Key: len(user_key) + user_key + b'S' + score (8 bytes) + member
+					// Key: len(user_key) + user_key + version(8) + b'S' + score(8) + member
 					if k.len() > header_len {
 						let member = k.slice(header_len..);
 						result.push(member);
@@ -251,11 +209,11 @@ impl Storage {
 	}
 
 	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
-		if self.get_meta::<ZSetMetaValue>(&key).await?.is_none() {
+		let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? else {
 			return Ok(None);
-		}
+		};
 
-		let member_key = MemberKey::new(key, member);
+		let member_key = MemberKey::new(key, meta_val.version, member);
 		if let Some(val) = self.zset_db.get(member_key.encode()).await? {
 			// Val is encoded score (u64 BE)
 			let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
@@ -282,7 +240,7 @@ impl Storage {
 		// Batch pre-fetch all member keys to avoid N individual I/O calls
 		let mut member_encoded_keys = Vec::with_capacity(members.len());
 		for member in &members {
-			let member_key = MemberKey::new(key.clone(), member.clone());
+			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
 			member_encoded_keys.push(member_key.encode());
 		}
 
@@ -308,7 +266,7 @@ impl Storage {
 				// Delete ScoreKey
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
 				let score = ScoreKey::decode_score(encoded_score);
-				let score_key = ScoreKey::new(key.clone(), score, member);
+				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
 				batch.delete(score_key.encode());
 
 				removed_count += 1;

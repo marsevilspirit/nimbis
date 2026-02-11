@@ -12,28 +12,6 @@ use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
-	// Helper to delete all elements of a list.
-	pub(crate) async fn delete_list_elements(
-		&self,
-		key: Bytes,
-		meta: &ListMetaValue,
-	) -> Result<(), StorageError> {
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		// Elements are stored in the range [head, tail).
-		// head points to the first element, and tail points to one past the last
-		// element. We iterate through this range to delete all individual elements.
-
-		for i in meta.head..meta.tail {
-			let field_key = ListElementKey::new(key.clone(), i);
-			self.list_db
-				.delete_with_options(field_key.encode(), &write_opts)
-				.await?;
-		}
-		Ok(())
-	}
-
 	pub async fn lpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
 		self.list_push(key, elements, true).await
 	}
@@ -60,10 +38,10 @@ impl Storage {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
-		let mut meta_val = self
-			.get_meta::<ListMetaValue>(&key)
-			.await?
-			.unwrap_or_default();
+		let mut meta_val = match self.get_meta::<ListMetaValue>(&key).await? {
+			Some(m) => m,
+			None => ListMetaValue::new(self.version_generator.next()),
+		};
 
 		let write_opts = WriteOptions {
 			await_durable: false,
@@ -80,7 +58,7 @@ impl Storage {
 				s
 			};
 
-			let element_key = ListElementKey::new(key.clone(), seq);
+			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 			self.list_db
 				.put_with_options(element_key.encode(), element, &put_opts, &write_opts)
 				.await?;
@@ -147,7 +125,7 @@ impl Storage {
 				meta_val.tail - 1
 			};
 
-			let element_key = ListElementKey::new(key.clone(), seq);
+			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 			// Get element
 			if let Some(val) = self.list_db.get(element_key.encode()).await? {
 				results.push(val);
@@ -251,7 +229,7 @@ impl Storage {
 
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {
-				let element_key = ListElementKey::new(key.clone(), seq);
+				let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 				async move { self.list_db.get(element_key.encode()).await }
 			})
 			.collect();
