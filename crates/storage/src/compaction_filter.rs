@@ -79,7 +79,7 @@ impl CompactionFilter for NimbisCompactionFilter {
 					return Ok(CompactionFilterDecision::Keep);
 				};
 
-				// Decode sub-key to getKey and Version
+				// Decode sub-key to get user_key and version
 				let Some((user_key, version)) = Self::decode_sub_key(&entry.key) else {
 					// Invalid key format? Keep safe.
 					debug!(
