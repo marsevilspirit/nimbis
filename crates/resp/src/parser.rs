@@ -79,7 +79,7 @@ impl RespParser {
 		}
 
 		loop {
-			// 1. Try to parse next item
+			// Try to parse next item
 			match self.parse_step(buf) {
 				Ok(Some(ParsedItem::FramePushed)) => {
 					continue;

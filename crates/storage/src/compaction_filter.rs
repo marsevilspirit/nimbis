@@ -248,7 +248,7 @@ mod tests {
 
 		use crate::string::meta::HashMetaValue;
 
-		// 1. Setup string_db using local temp dir
+		// Setup string_db using local temp dir
 		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::new()));
 		tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 		let object_store = Arc::new(LocalFileSystem::new_with_prefix(&temp_dir).unwrap());
@@ -259,7 +259,7 @@ mod tests {
 			.unwrap();
 		let string_db = Arc::new(string_db);
 
-		// 2. Put Metadata (version 10)
+		// Put Metadata (version 10)
 		let user_key = Bytes::from("myhash");
 		let meta_key = MetaKey::new(user_key.clone());
 		let meta_val = HashMetaValue::new(10, 5);
@@ -268,13 +268,13 @@ mod tests {
 			.await
 			.unwrap();
 
-		// 3. Setup Filter
+		// Setup Filter
 		let mut filter = NimbisCompactionFilter {
 			string_db: Some(string_db.clone()),
 			data_type: DataType::Hash,
 		};
 
-		// 4. Test Valid Version (10)
+		// Test Valid Version (10)
 		// SubKey: len(2) + key + version(8) + field_len(4) + field
 		let mut valid_key = BytesMut::new();
 		valid_key.put_u16(user_key.len() as u16);
@@ -294,7 +294,7 @@ mod tests {
 			CompactionFilterDecision::Keep
 		);
 
-		// 5. Test Invalid Version (9)
+		// Test Invalid Version (9)
 		let mut invalid_key = BytesMut::new();
 		invalid_key.put_u16(user_key.len() as u16);
 		invalid_key.extend_from_slice(&user_key);

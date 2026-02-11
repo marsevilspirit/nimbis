@@ -167,8 +167,8 @@ fn check_specific_version(
 
 	if let Some(version) = version_str {
 		// Check that version is specific:
-		// 1. Starts with a digit (no operators like ^, ~)
-		// 2. Contains at least 2 dots (x.y.z format)
+		// - Starts with a digit (no operators like ^, ~)
+		// - Contains at least 2 dots (x.y.z format)
 		let v = version.trim();
 		let starts_with_digit = v.starts_with(|c: char| c.is_ascii_digit());
 		let dot_count = v.chars().filter(|&c| c == '.').count();

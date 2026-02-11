@@ -21,7 +21,7 @@ e2e-test: build
 
 # Check all crates
 [group: 'check']
-check: check-workspace check-code-fmt
+check: check-workspace check-code-fmt check-numbered-comments
     cargo check --workspace
     cargo fmt -- --check
     cargo clippy --workspace -- -D warnings
@@ -38,6 +38,12 @@ check-workspace:
 [group: 'check']
 check-code-fmt:
     rust-script scripts/check_code_fmt.rs
+
+# Check numbered step comments
+[private]
+[group: 'check']
+check-numbered-comments:
+    rust-script scripts/check_numbered_comments.rs
 
 # Format code
 [group: 'misc']

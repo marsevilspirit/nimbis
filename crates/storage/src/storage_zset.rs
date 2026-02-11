@@ -78,17 +78,17 @@ impl Storage {
 				let old_score =
 					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
 				if old_score != score {
-					// 1. Delete old ScoreKey
+					// Delete old ScoreKey
 					let old_score_key =
 						ScoreKey::new(key.clone(), meta_val.version, old_score, member.clone());
 					batch.delete(old_score_key.encode());
 
-					// 2. Add new ScoreKey
+					// Add new ScoreKey
 					let new_score_key =
 						ScoreKey::new(key.clone(), meta_val.version, score, member.clone());
 					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
 
-					// 3. Update MemberKey
+					// Update MemberKey
 					let encoded_score = ScoreKey::encode_score(score);
 					batch.put_with_options(
 						encoded_member_key.clone(),
@@ -409,26 +409,26 @@ mod tests {
 		let (storage, path) = get_storage().await;
 		let key1 = Bytes::from("user1");
 
-		// 1. Add to user1
+		// Add to user1
 		storage
 			.zadd(key1.clone(), vec![(1.0, Bytes::from("m1"))])
 			.await
 			.unwrap();
 
-		// 2. Simulate FLUSHDB
+		// Simulate FLUSHDB
 		storage.flush_all().await.unwrap();
 
-		// 3. Re-Add to user1
+		// Re-Add to user1
 		storage
 			.zadd(key1.clone(), vec![(1.0, Bytes::from("m1"))])
 			.await
 			.unwrap();
 
-		// 4. ZCard user1
+		// ZCard user1
 		let card = storage.zcard(key1.clone()).await.unwrap();
 		assert_eq!(card, 1, "ZCard user1 should be 1");
 
-		// 5. ZRange user1
+		// ZRange user1
 		let members = storage.zrange(key1.clone(), 0, -1, false).await.unwrap();
 		assert_eq!(members.len(), 1, "ZRange user1 should have 1 member");
 		assert_eq!(members[0], Bytes::from("m1"));

@@ -7,10 +7,10 @@ fn main() {
 
 	// Simulate a TCP stream with fragmented data
 	// We are sending:
-	// 1. A Simple String: "+OK\r\n"
-	// 2. An Integer: ":1000\r\n"
-	// 3. An Array: "*2\r\n$3\r\nSET\r\n$3\r\nkey\r\n"
-	// But split into random chunks.
+	// - A Simple String: "+OK\r\n"
+	// - An Integer: ":1000\r\n"
+	// - An Array: "*2\r\n$3\r\nSET\r\n$3\r\nkey\r\n"
+	// - But split into random chunks.
 	let data_chunks = vec![
 		b"+O".as_slice(),
 		b"K\r\n:1".as_slice(),

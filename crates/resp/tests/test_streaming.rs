@@ -28,7 +28,7 @@ fn test_streaming_parse_success() {
 	let mut parser = RespParser::new();
 	let mut buf = BytesMut::new();
 
-	// 1. Partial write
+	// Partial write
 	buf.extend_from_slice(b"+HEL");
 	let result = parser.parse(&mut buf);
 	assert!(matches!(result, RespParseResult::Incomplete));
@@ -36,7 +36,7 @@ fn test_streaming_parse_success() {
 	// Buffer should still contain "+HEL" because peek_line doesn't consume partial
 	assert_eq!(&buf[..], b"+HEL");
 
-	// 2. Complete the write
+	// Complete the write
 	buf.extend_from_slice(b"LO\r\n");
 	let result = parser.parse(&mut buf);
 	if let RespParseResult::Complete(RespValue::SimpleString(s)) = result {

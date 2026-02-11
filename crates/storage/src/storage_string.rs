@@ -202,10 +202,10 @@ mod tests {
 		let v = Bytes::from("v");
 		let f = Bytes::from("f");
 
-		// 1. SET string
+		// SET string
 		storage.set(k.clone(), v.clone()).await.unwrap();
 
-		// 2. HSET should fail
+		// HSET should fail
 		let err = storage
 			.hset(k.clone(), f.clone(), v.clone())
 			.await
@@ -216,26 +216,26 @@ mod tests {
 			err
 		);
 
-		// 3. HGET should fail
+		// HGET should fail
 		let err = storage.hget(k.clone(), f.clone()).await.unwrap_err();
 		assert!(err.to_string().contains("WRONGTYPE"));
 
-		// 4. Delete String
+		// Delete String
 		let deleted = storage.del(k.clone()).await.unwrap();
 		assert!(deleted);
 
-		// 5. HSET should succeed
+		// HSET should succeed
 		let res = storage.hset(k.clone(), f.clone(), v.clone()).await.unwrap();
 		assert_eq!(res, 1);
 
-		// 6. SET should overwrite Hash (and clean up)
+		// SET should overwrite Hash (and clean up)
 		storage.set(k.clone(), Bytes::from("v2")).await.unwrap();
 
-		// 7. Check String is there
+		// Check String is there
 		let val = storage.get(k.clone()).await.unwrap();
 		assert_eq!(val, Some(Bytes::from("v2")));
 
-		// 8. Check Hash is gone (HGET -> WRONGTYPE, wait, if we deleted hash fields,
+		// Check Hash is gone (HGET -> WRONGTYPE, wait, if we deleted hash fields,
 		//    HGET logic checks meta first)
 		// Since meta is now String, HGET returns WRONGTYPE. Correct.
 		let err = storage.hget(k.clone(), f.clone()).await.unwrap_err();
