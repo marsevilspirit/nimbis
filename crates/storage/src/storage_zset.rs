@@ -170,7 +170,7 @@ impl Storage {
 			let mut result = Vec::new();
 			let mut current_idx = 0;
 			// Cache header length and offset to avoid repeated calculation
-			// prefix = key_len(2) + key + 'S'(1) + version(8), then score(8) + member
+			// prefix = key_len(2) + key + version(8) + b'S'(1), then score(8) + member
 			let header_len = prefix.len() + 8; // prefix + score(8)
 			let score_offset = prefix.len(); // score starts right after prefix
 
