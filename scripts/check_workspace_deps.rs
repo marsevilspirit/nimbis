@@ -62,7 +62,7 @@ fn main() {
 		// Check [dependencies], [dev-dependencies], [build-dependencies]
 		let sections = ["dependencies", "dev-dependencies", "build-dependencies"];
 		for section in sections {
-			if let Some(item) = 忽视_none(doc.get(section)) {
+			if let Some(item) = doc.get(section) {
 				if let Some(table) = item.as_table() {
 					check_dependencies(&path, section, table, &mut issues);
 				} else if let Some(table) = item.as_inline_table() {
@@ -89,10 +89,6 @@ fn main() {
 	}
 
 	println!("✅ All Cargo.toml files are properly formatted and sorted");
-}
-
-fn 忽视_none<T>(opt: Option<T>) -> Option<T> {
-	opt
 }
 
 fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Vec<String>) {
