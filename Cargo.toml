@@ -27,7 +27,7 @@ arc-swap = "1.8.0"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"
-clap = { version = "4.5.54", features = ["derive"] }
+clap = { version = "4.5.57", features = ["derive"] }
 futures = "0.3.31"
 log = "0.4.29"
 memchr = "2.7.6"
