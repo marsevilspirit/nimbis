@@ -199,12 +199,6 @@ impl ListMetaValue {
 	}
 }
 
-impl Default for ListMetaValue {
-	fn default() -> Self {
-		Self::new(0)
-	}
-}
-
 impl Expirable for ListMetaValue {
 	fn expire_time(&self) -> u64 {
 		self.expire_time
