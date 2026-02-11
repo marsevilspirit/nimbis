@@ -155,12 +155,6 @@ impl Storage {
 		}
 
 		let meta_val = T::decode(&meta_bytes)?;
-		if meta_val.is_expired() {
-			#[cfg(not(test))]
-			self.del(key.clone()).await?;
-			return Ok(None);
-		}
-
 		Ok(Some(meta_val))
 	}
 }
