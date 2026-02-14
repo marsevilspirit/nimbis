@@ -34,13 +34,18 @@ memchr = "2.8.0"
 num_cpus = "1.17.0"
 object_store = "0.13.1"
 quote = "1.0.44"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.141"
+serde_yaml = "0.9.34"
 slatedb = { git = "https://github.com/slatedb/slatedb.git", rev = "b1e9e7a63b2bd174b3b43b79681640ce9c4baec4", features = [
     "foyer",
     "compaction_filters",
 ] }
 syn = { version = "2.0.114", features = ["full"] }
+tempfile = "3.17.1"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
+toml = "1.0.1"
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = [
