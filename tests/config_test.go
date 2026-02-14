@@ -26,11 +26,16 @@ var _ = Describe("CONFIG Commands", func() {
 	})
 
 	Describe("CONFIG GET", func() {
-		It("should get the server address", func() {
-			result, err := rdb.ConfigGet(ctx, "addr").Result()
+		It("should get the host and port", func() {
+			result, err := rdb.ConfigGet(ctx, "host").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("addr", "127.0.0.1:6379"))
+			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
+
+			result, err = rdb.ConfigGet(ctx, "port").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(HaveLen(1))
+			Expect(result).To(HaveKeyWithValue("port", "6379"))
 		})
 
 		It("should get the data path", func() {
@@ -49,8 +54,9 @@ var _ = Describe("CONFIG Commands", func() {
 		It("should get all fields with * wildcard", func() {
 			result, err := rdb.ConfigGet(ctx, "*").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(HaveLen(6)) // addr, data_path, save, appendonly, log_level, worker_threads
-			Expect(result).To(HaveKeyWithValue("addr", "127.0.0.1:6379"))
+			Expect(result).To(HaveLen(7)) // host, port, data_path, save, appendonly, log_level, worker_threads
+			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
+			Expect(result).To(HaveKeyWithValue("port", "6379"))
 			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
@@ -59,10 +65,10 @@ var _ = Describe("CONFIG Commands", func() {
 		})
 
 		It("should match fields with prefix wildcard", func() {
-			result, err := rdb.ConfigGet(ctx, "addr*").Result()
+			result, err := rdb.ConfigGet(ctx, "ho*").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("addr", "127.0.0.1:6379"))
+			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 		})
 
 		It("should get the save config", func() {
@@ -94,15 +100,15 @@ var _ = Describe("CONFIG Commands", func() {
 	})
 
 	Describe("CONFIG SET", func() {
-		It("should fail to set immutable field 'addr'", func() {
-			err := rdb.ConfigSet(ctx, "addr", "localhost:6380").Err()
+		It("should fail to set immutable field 'host'", func() {
+			err := rdb.ConfigSet(ctx, "host", "localhost").Err()
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("Field 'addr' is immutable"))
+			Expect(err.Error()).To(ContainSubstring("Field 'host' is immutable"))
 
 			// Verify the value hasn't changed
-			result, err := rdb.ConfigGet(ctx, "addr").Result()
+			result, err := rdb.ConfigGet(ctx, "host").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result["addr"]).To(Equal("127.0.0.1:6379"))
+			Expect(result["host"]).To(Equal("127.0.0.1"))
 		})
 
 		It("should fail to set immutable field 'data_path'", func() {
