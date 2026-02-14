@@ -15,9 +15,7 @@
 //!
 //! // Access configuration
 //! let config = SERVER_CONF.load();
-//! println!("Server address: {}", config.addr);
-//! ```
-
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -25,11 +23,18 @@ use std::sync::OnceLock;
 use arc_swap::ArcSwap;
 pub use clap::Parser;
 pub use macros::OnlineConfig;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Command-line arguments for the server
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
+	/// Configuration file path (TOML, JSON, or YAML).
+	/// Defaults to conf/config.toml if it exists.
+	#[arg(short, long)]
+	pub config: Option<String>,
+
 	/// Port to listen on
 	#[arg(short, long, default_value_t = 6379)]
 	pub port: u16,
@@ -47,10 +52,13 @@ pub struct Cli {
 	pub worker_threads: Option<usize>,
 }
 
-#[derive(Debug, Clone, OnlineConfig)]
+#[derive(Debug, Clone, OnlineConfig, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ServerConfig {
 	#[online_config(immutable)]
-	pub addr: String,
+	pub host: String,
+	#[online_config(immutable)]
+	pub port: u16,
 	#[online_config(immutable)]
 	pub data_path: String,
 	// Support redis-benchmark
@@ -73,7 +81,8 @@ impl ServerConfig {
 impl Default for ServerConfig {
 	fn default() -> Self {
 		Self {
-			addr: "127.0.0.1:6379".to_string(),
+			host: "127.0.0.1".to_string(),
+			port: 6379,
 			data_path: "./nimbis_data".to_string(),
 			save: "".to_string(),
 			appendonly: "no".to_string(),
@@ -133,16 +142,53 @@ macro_rules! server_config {
 
 /// Setup configuration from CLI arguments
 pub fn setup(args: Cli) {
-	let addr = format!("{}:{}", args.host, args.port);
-
-	let config = ServerConfig {
-		addr,
-		log_level: args.log_level.clone(),
-		worker_threads: args.worker_threads.unwrap_or(num_cpus::get()),
-		..ServerConfig::default()
+	let mut config = if let Some(config_path) = &args.config {
+		load_from_file(config_path).expect("Failed to load configuration from file")
+	} else {
+		let default_config = "conf/config.toml";
+		if Path::new(default_config).exists() {
+			load_from_file(default_config)
+				.expect("Failed to load default configuration from conf/config.toml")
+		} else {
+			ServerConfig::default()
+		}
 	};
 
+	// Override with CLI arguments if provided
+	if args.host != "127.0.0.1" {
+		config.host = args.host.clone();
+	}
+
+	if args.port != 6379 {
+		config.port = args.port;
+	}
+
+	if args.log_level != "info" {
+		config.log_level = args.log_level.clone();
+	}
+
+	if let Some(worker_threads) = args.worker_threads {
+		config.worker_threads = worker_threads;
+	}
+
 	SERVER_CONF.init(config);
+}
+
+fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, String> {
+	let path = path.as_ref();
+	let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+
+	let extension = path
+		.extension()
+		.and_then(|ext| ext.to_str())
+		.ok_or_else(|| "File has no extension".to_string())?;
+
+	match extension.to_lowercase().as_str() {
+		"toml" => toml::from_str(&content).map_err(|e| e.to_string()),
+		"json" => serde_json::from_str(&content).map_err(|e| e.to_string()),
+		"yaml" | "yml" => serde_yaml::from_str(&content).map_err(|e| e.to_string()),
+		_ => Err(format!("Unsupported configuration format: {}", extension)),
+	}
 }
 
 #[cfg(test)]
@@ -159,10 +205,79 @@ mod tests {
 		SERVER_CONF.init(config);
 
 		// Now verify access via load()
-		let addr = &server_config!(addr);
-		assert_eq!(addr, "127.0.0.1:6379");
+		let host = &server_config!(host);
+		assert_eq!(host, "127.0.0.1");
+
+		let port = server_config!(port);
+		assert_eq!(port, 6379);
 
 		let threads = server_config!(worker_threads);
 		assert_eq!(threads, num_cpus::get());
+	}
+
+	#[test]
+	fn test_parse_toml() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+host = "127.0.0.1"
+port = 1234
+data_path = "./data"
+save = "900 1"
+appendonly = "yes"
+log_level = "debug"
+worker_threads = 4
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let config = load_from_file(&file_path).unwrap();
+		assert_eq!(config.host, "127.0.0.1");
+		assert_eq!(config.port, 1234);
+		assert_eq!(config.log_level, "debug");
+		assert_eq!(config.worker_threads, 4);
+	}
+
+	#[test]
+	fn test_parse_json() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.json");
+		let content = r#"
+{
+  "host": "127.0.0.1",
+  "port": 1234,
+  "data_path": "./data",
+  "save": "900 1",
+  "appendonly": "yes",
+  "log_level": "debug",
+  "worker_threads": 4
+}
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let config = load_from_file(&file_path).unwrap();
+		assert_eq!(config.host, "127.0.0.1");
+		assert_eq!(config.port, 1234);
+		assert_eq!(config.log_level, "debug");
+	}
+
+	#[test]
+	fn test_parse_yaml() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.yaml");
+		let content = r#"
+host: "127.0.0.1"
+port: 1234
+data_path: "./data"
+save: "900 1"
+appendonly: "yes"
+log_level: "debug"
+worker_threads: 4
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let config = load_from_file(&file_path).unwrap();
+		assert_eq!(config.host, "127.0.0.1");
+		assert_eq!(config.port, 1234);
+		assert_eq!(config.log_level, "debug");
 	}
 }

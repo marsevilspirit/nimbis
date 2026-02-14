@@ -67,8 +67,8 @@ impl Server {
 	}
 
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let addr: &String = &server_config!(addr);
-		let listener = TcpListener::bind(addr).await?;
+		let addr = format!("{}:{}", &server_config!(host), server_config!(port));
+		let listener = TcpListener::bind(&addr).await?;
 		info!("Nimbis server listening on {}", addr);
 
 		let workers_len = self.workers.len();
