@@ -125,11 +125,11 @@ The current integration tests cover the following functional areas of the Nimbis
 
 ### 4.4 Configuration (`config_test.go`)
 - **CONFIG GET**:
-  - Exact match (e.g., `addr`, `data_path`).
+  - Exact match (e.g., `host`, `port`, `data_path`).
   - Wildcard support (`*`, `prefix*`, `*suffix`).
   - Handling of non-existent fields.
 - **CONFIG SET**:
-  - Verification of immutable fields protection (`addr`, `data_path` cannot be changed at runtime).
+  - Verification of immutable fields protection (`host`, `port`, `data_path` cannot be changed at runtime).
   - Error reporting for unknown fields.
 
 ### 4.5 Type Conflict Handling (`conflict_key_test.go`)
