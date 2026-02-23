@@ -62,16 +62,16 @@ pub struct Cli {
 	pub config: Option<String>,
 
 	/// Port to listen on
-	#[arg(short, long, default_value_t = 6379)]
-	pub port: u16,
+	#[arg(short, long)]
+	pub port: Option<u16>,
 
 	/// Host to bind to
-	#[arg(long, default_value = "127.0.0.1")]
-	pub host: String,
+	#[arg(long)]
+	pub host: Option<String>,
 
 	/// Log level (trace, debug, info, warn, error)
-	#[arg(short, long, default_value = "info")]
-	pub log_level: String,
+	#[arg(short, long)]
+	pub log_level: Option<String>,
 
 	/// Number of worker threads (default: number of CPU cores)
 	#[arg(long)]
@@ -174,20 +174,21 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		None => ServerConfig::default(),
 	};
 
-	// Override with CLI arguments if they differ from default
-	if args.host != "127.0.0.1" {
-		config.host = args.host;
+	// Override with CLI arguments if explicitly provided
+	if let Some(host) = args.host {
+		config.host = host;
 	}
-	if args.port != 6379 {
-		config.port = args.port;
+	if let Some(port) = args.port {
+		config.port = port;
 	}
-	if args.log_level != "info" {
-		config.log_level = args.log_level;
+	if let Some(log_level) = args.log_level {
+		config.log_level = log_level;
 	}
 	if let Some(t) = args.worker_threads {
 		config.worker_threads = t;
 	}
 
+	telemetry::logger::init(&config.log_level);
 	SERVER_CONF.init(config);
 	Ok(())
 }
