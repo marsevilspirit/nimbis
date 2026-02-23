@@ -27,5 +27,4 @@ tokio = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
-num_cpus = { workspace = true }
 tempfile = { workspace = true }
