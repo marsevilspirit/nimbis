@@ -25,6 +25,32 @@ pub use clap::Parser;
 pub use macros::OnlineConfig;
 use serde::Deserialize;
 use serde::Serialize;
+use thiserror::Error;
+
+/// Configuration-related errors
+#[derive(Error, Debug)]
+pub enum ConfigError {
+	#[error("Failed to read configuration file '{path}': {source}")]
+	Io {
+		source: std::io::Error,
+		path: String,
+	},
+
+	#[error("Failed to parse TOML configuration: {0}")]
+	TomlParse(#[from] toml::de::Error),
+
+	#[error("Failed to parse JSON configuration: {0}")]
+	JsonParse(#[from] serde_json::Error),
+
+	#[error("Failed to parse YAML configuration: {0}")]
+	YamlParse(#[from] serde_yaml::Error),
+
+	#[error("Unsupported configuration format: {0}")]
+	UnsupportedFormat(String),
+
+	#[error("Configuration file has no extension")]
+	NoExtension,
+}
 
 /// Command-line arguments for the server
 #[derive(Parser, Debug)]
@@ -141,14 +167,13 @@ macro_rules! server_config {
 }
 
 /// Setup configuration from CLI arguments
-pub fn setup(args: Cli) {
+pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	let mut config = if let Some(config_path) = &args.config {
-		load_from_file(config_path).expect("Failed to load configuration from file")
+		load_from_file(config_path)?
 	} else {
 		let default_config = "conf/config.toml";
 		if Path::new(default_config).exists() {
-			load_from_file(default_config)
-				.expect("Failed to load default configuration from conf/config.toml")
+			load_from_file(default_config)?
 		} else {
 			ServerConfig::default()
 		}
@@ -172,22 +197,26 @@ pub fn setup(args: Cli) {
 	}
 
 	SERVER_CONF.init(config);
+	Ok(())
 }
 
-fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, String> {
-	let path = path.as_ref();
-	let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> {
+	let path_ref = path.as_ref();
+	let content = std::fs::read_to_string(path_ref).map_err(|source| ConfigError::Io {
+		path: path_ref.display().to_string(),
+		source,
+	})?;
 
-	let extension = path
+	let extension = path_ref
 		.extension()
 		.and_then(|ext| ext.to_str())
-		.ok_or_else(|| "File has no extension".to_string())?;
+		.ok_or(ConfigError::NoExtension)?;
 
 	match extension.to_lowercase().as_str() {
-		"toml" => toml::from_str(&content).map_err(|e| e.to_string()),
-		"json" => serde_json::from_str(&content).map_err(|e| e.to_string()),
-		"yaml" | "yml" => serde_yaml::from_str(&content).map_err(|e| e.to_string()),
-		_ => Err(format!("Unsupported configuration format: {}", extension)),
+		"toml" => Ok(toml::from_str(&content)?),
+		"json" => Ok(serde_json::from_str(&content)?),
+		"yaml" | "yml" => Ok(serde_yaml::from_str(&content)?),
+		_ => Err(ConfigError::UnsupportedFormat(extension.to_string())),
 	}
 }
 
