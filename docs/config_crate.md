@@ -26,8 +26,8 @@ use config::OnlineConfig;
 
 #[derive(Default, OnlineConfig)]
 pub struct MyConfig {
-    // Mutable by default, can be modified via set_field("addr", "new_addr")
-    pub addr: String,
+    // Mutable by default, can be modified via set_field("host", "new_host")
+    pub host: String,
 
     // Explicitly declared as mutable
     #[online_config(mutable)]
@@ -67,10 +67,10 @@ Example:
 let mut conf = MyConfig::default();
 
 // Successful updates
-assert!(conf.set_field("addr", "127.0.0.1").is_ok());
+assert!(conf.set_field("host", "127.0.0.1").is_ok());
 
 // Retrieval
-assert_eq!(conf.get_field("addr").unwrap(), "127.0.0.1");
+assert_eq!(conf.get_field("host").unwrap(), "127.0.0.1");
 
 // Updating an immutable field will fail
 let err = conf.set_field("id", "100");
@@ -102,11 +102,11 @@ Example:
 ```rust
 // List all
 let fields = MyConfig::list_fields();
-assert!(fields.contains(&"addr"));
+assert!(fields.contains(&"host"));
 
 // Wildcard matching
 let matches = MyConfig::match_fields("*port"); // Suffix match
-let matches = MyConfig::match_fields("addr*"); // Prefix match
+let matches = MyConfig::match_fields("host*"); // Prefix match
 let matches = MyConfig::match_fields("*");     // Match all
 ```
 
@@ -171,8 +171,11 @@ The `ServerConfig` in `crates/config/src/lib.rs` demonstrates the callback featu
 #[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
     #[online_config(immutable)]
-    pub addr: String,
-    
+    pub host: String,
+
+    #[online_config(immutable)]
+    pub port: u16,
+
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
 }

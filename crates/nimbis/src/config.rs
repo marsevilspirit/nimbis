@@ -15,6 +15,9 @@
 //!
 //! // Access configuration
 //! let config = SERVER_CONF.load();
+//! println!("Server address: {}:{}", config.host, config.port);
+//! ```
+
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -158,7 +161,7 @@ pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 ///
 /// Usage:
 /// - For Copy types (numbers): `let n = server_config!(worker_threads);`
-/// - For Borrowed types (Strings): `let s = &server_config!(addr);`
+/// - For Borrowed types (Strings): `let s = &server_config!(host);`
 #[macro_export]
 macro_rules! server_config {
 	($field:ident) => {
