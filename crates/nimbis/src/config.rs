@@ -107,12 +107,12 @@ impl ServerConfig {
 impl Default for ServerConfig {
 	fn default() -> Self {
 		Self {
-			host: "127.0.0.1".to_string(),
+			host: "127.0.0.1".into(),
 			port: 6379,
-			data_path: "./nimbis_data".to_string(),
-			save: "".to_string(),
-			appendonly: "no".to_string(),
-			log_level: "info".to_string(),
+			data_path: "./nimbis_data".into(),
+			save: "".into(),
+			appendonly: "no".into(),
+			log_level: "info".into(),
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -120,12 +120,6 @@ impl Default for ServerConfig {
 
 pub struct GlobalConfig {
 	inner: OnceLock<ArcSwap<ServerConfig>>,
-}
-
-impl Default for GlobalConfig {
-	fn default() -> Self {
-		Self::new()
-	}
 }
 
 impl GlobalConfig {
@@ -152,6 +146,12 @@ impl GlobalConfig {
 	}
 }
 
+impl Default for GlobalConfig {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 
 /// Helper macro to access server configuration fields
@@ -166,34 +166,26 @@ macro_rules! server_config {
 	};
 }
 
-/// Setup configuration from CLI arguments
 pub fn setup(args: Cli) -> Result<(), ConfigError> {
-	let mut config = if let Some(config_path) = &args.config {
-		load_from_file(config_path)?
-	} else {
-		let default_config = "conf/config.toml";
-		if Path::new(default_config).exists() {
-			load_from_file(default_config)?
-		} else {
-			ServerConfig::default()
-		}
+	let default_config = "conf/config.toml";
+	let mut config = match args.config.as_deref() {
+		Some(p) => load_from_file(p)?,
+		None if Path::new(default_config).exists() => load_from_file(default_config)?,
+		None => ServerConfig::default(),
 	};
 
-	// Override with CLI arguments if provided
+	// Override with CLI arguments if they differ from default
 	if args.host != "127.0.0.1" {
-		config.host = args.host.clone();
+		config.host = args.host;
 	}
-
 	if args.port != 6379 {
 		config.port = args.port;
 	}
-
 	if args.log_level != "info" {
-		config.log_level = args.log_level.clone();
+		config.log_level = args.log_level;
 	}
-
-	if let Some(worker_threads) = args.worker_threads {
-		config.worker_threads = worker_threads;
+	if let Some(t) = args.worker_threads {
+		config.worker_threads = t;
 	}
 
 	SERVER_CONF.init(config);
