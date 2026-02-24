@@ -15,7 +15,7 @@ test:
 
 # Run e2e tests
 [group: 'test']
-e2e-test: build
+e2e-test: (build "--release")
     rm -rf nimbis_data
     cd tests && go test -timeout 15m --ginkgo.v
 
