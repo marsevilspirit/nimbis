@@ -160,3 +160,12 @@ let current = SERVER_CONF.load();
 ```
 
 This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.
+
+## 5. Build-time Configuration
+
+In addition to runtime configuration, Nimbis uses a `build.rs` script in the `nimbis` crate to capture environment information at compile time. These values are embedded into the binary and cannot be changed without recompilation:
+
+- **Git Info**: `NIMBIS_GIT_HASH`, `NIMBIS_GIT_BRANCH`, `NIMBIS_GIT_DIRTY`
+- **Build Info**: `NIMBIS_BUILD_DATE`, `NIMBIS_RUSTC_VERSION`, `NIMBIS_TARGET`
+
+These are used primarily by the `logo` module to display detailed version information on startup.
