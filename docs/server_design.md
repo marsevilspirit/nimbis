@@ -17,12 +17,18 @@ The server follows a multi-worker "Acceptor-Worker" pattern:
 - **Isolation**: Each shard has its own SlateDB instance and data directory (`shard-{id}`).
 - **Zero Locks**: No cross-shard locks or shared storage handles are used for primary data operations, maximizing vertical scalability.
 
-### 1.3 Command Dispatch
+### 1.3 Build Info and Startup Banner
+The server includes a comprehensive build information system that executes at compile time via `build.rs`:
+- **Git Metadata**: Includes short commit hash, current branch, and a "dirty" flag if there are uncommitted changes.
+- **Environment Information**: Captures the build date, Rust compiler version, and target platform (arch/OS).
+- **Startup Banner**: Upon startup, the server displays an ASCII logo and these build details to ensure observability of the binary's origin.
+
+### 1.4 Command Dispatch
 - **Command Table**: Commands are registered in a `CmdTable` which maps command names to their implementations.
 - **Dynamic Lookup**: Incoming commands are looked up at runtime and executed via a common `Cmd` trait.
 - **Thread Safety**: The `CmdTable` is also wrapped in `Arc` for safe concurrent access.
 
-### 1.4 Protocol
+### 1.5 Protocol
 Nimbis speaks the **RESP (REdis Serialization Protocol)**.
 - It parses incoming byte streams into RESP types (Strings, Arrays, Integers).
 - It executes commands and returns RESP-encoded responses.
@@ -45,14 +51,22 @@ pub struct Server {
 
 ### 2.2 Lifecycle
 
-#### Step 1: Configuration Initialization
-Before creating the server, the main application initializes the configuration:
+#### Step 0: Build-time environment setup
+The `crates/nimbis/build.rs` script runs during compilation to generate environment variables (`NIMBIS_GIT_HASH`, `NIMBIS_BUILD_DATE`, etc.) that are later embedded into the binary using the `env!` macro.
+
+#### Step 1: Configuration Initialization and Logo
+Before creating the server, the main application initializes the configuration and displays the startup banner:
 ```rust
 use nimbis::config::{Cli, Parser};
+use nimbis::logo;
 
 let args = Cli::parse();
-telemetry::logger::init(&args.log_level); // Initialize logging/tracing with log level
-nimbis::config::setup(args); // Initialize global config from CLI args
+if let Err(e) = nimbis::config::setup(args) {
+    log::error!("Failed to load configuration: {}", e);
+    std::process::exit(1);
+}
+
+logo::show_logo(); // Displays ASCII logo and detailed build information
 ```
 
 The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access.

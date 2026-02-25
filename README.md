@@ -17,6 +17,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 - **Configuration Commands**: `CONFIG GET`, `CONFIG SET`
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates via `CONFIG SET`.
+- **Observability**: Detailed build and environment information (git hash, branch, rustc version) displayed on startup.
 
 ## Design Philosophy
 

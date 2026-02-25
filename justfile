@@ -5,8 +5,8 @@ default:
 
 # Build all crates
 [group: 'misc']
-build profile='release':
-    cargo build {{ if profile == 'release' { "--release" } else { "" } }}
+build *args:
+    cargo build {{args}}
 
 # Run unit tests
 [group: 'test']
@@ -15,7 +15,7 @@ test:
 
 # Run e2e tests
 [group: 'test']
-e2e-test: build
+e2e-test: (build "--release")
     rm -rf nimbis_data
     cd tests && go test -timeout 15m --ginkgo.v
 
@@ -59,5 +59,5 @@ clean:
 
 # Run nimbis-server
 [group: 'misc']
-run:
-    cargo run -p nimbis
+run *args:
+    cargo run -p nimbis {{args}}

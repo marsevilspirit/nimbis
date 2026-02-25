@@ -54,6 +54,8 @@ The main executable, integrating all crates, implementing the command system and
 
 **Key Components**:
 - **Configuration Management** (`src/config.rs`): Global `SERVER_CONF`, `server_config!` macro, and dynamic update logic.
+- **Build-time Setup** (`build.rs`): Captures git and environment metadata for versioning.
+- **Startup Display** (`src/logo.rs`): Displays banner and build information.
 - `Server` struct
 - TCP connection handling
 - **Command System** (`src/cmd/`): Meta, Trait, and concrete command implementations (GET, SET, HSET, etc.)
@@ -99,12 +101,16 @@ just e2e-test
 ## Building
 
 ```bash
-# Build all crates
+# Build all crates (debug)
 just build
+
+# Build all crates (release)
+just build release
 ```
 
 ## Running the Server
 
 ```bash
+# Run server (release)
 just run
 ```
