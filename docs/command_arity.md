@@ -26,6 +26,8 @@ Nimbis follows standard Redis command arity rules. The `arity` field in command 
 | **EXISTS**    | `-2`  | Negative (Min)   | At least 2 arguments | `EXISTS <key1>` (2 args) <br> `EXISTS <k1> <k2> ...` (>2 args)    |
 | **EXPIRE**    | `3`   | Positive (Exact) | Exactly 3 arguments  | `EXPIRE <key> <seconds>` (3 args)                                 |
 | **TTL**       | `2`   | Positive (Exact) | Exactly 2 arguments  | `TTL <key>` (2 args)                                              |
+| **INCR**      | `2`   | Positive (Exact) | Exactly 2 arguments  | `INCR <key>` (1 cmd + 1 arg)                                  |
+| **DECR**      | `2`   | Positive (Exact) | Exactly 2 arguments  | `DECR <key>` (1 cmd + 1 arg)                                  |
 | **MGET**      | `-2`  | Negative (Min)   | At least 2 arguments | `MGET <key1>` (2 args) <br> `MGET <k1> <k2> ...` (>2 args)        |
 | **LPUSH**     | `-3`  | Negative (Min)   | At least 3 arguments | `LPUSH <key> <el>` (3 args) <br> `LPUSH <k> <e1> <e2>` (4 args)   |
 | **LPOP**      | `-2`  | Negative (Min)   | At least 2 arguments | `LPOP <key>` (2 args) <br> `LPOP <key> <count>` (3 args)          |

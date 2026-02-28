@@ -70,6 +70,8 @@ impl Storage {
     pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, ...>;
     pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, ...>;
     pub async fn exists(&self, key: Bytes) -> Result<bool, ...>;
+    pub async fn incr(&self, key: Bytes) -> Result<i64, ...>;
+    pub async fn decr(&self, key: Bytes) -> Result<i64, ...>;
 }
 ```
 
