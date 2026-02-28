@@ -265,4 +265,77 @@ mod tests {
 
 		let _ = std::fs::remove_dir_all(path);
 	}
+
+	#[rstest]
+	#[case("counter", None, 1, 2, 1, 0, -1)]
+	#[case("negative_start", Some("-5"), -4, -3, -4, -5, -6)]
+	#[case(
+		"large_start",
+		Some("999999999999999"),
+		1000000000000000,
+		1000000000000001,
+		1000000000000000,
+		999999999999999,
+		999999999999998
+	)]
+	#[case("zero_start", Some("0"), 1, 2, 1, 0, -1)]
+	#[tokio::test]
+	async fn test_storage_string_incr_decr(
+		#[case] key: &str,
+		#[case] initial_val: Option<&str>,
+		#[case] inc1: i64,
+		#[case] inc2: i64,
+		#[case] dec1: i64,
+		#[case] dec2: i64,
+		#[case] dec3: i64,
+	) {
+		let (storage, path) = get_storage().await;
+		let key_bytes = Bytes::from(key.to_string());
+
+		if let Some(val) = initial_val {
+			storage
+				.set(key_bytes.clone(), Bytes::from(val.to_string()))
+				.await
+				.unwrap();
+		}
+
+		assert_eq!(storage.incr(key_bytes.clone()).await.unwrap(), inc1);
+		assert_eq!(storage.incr(key_bytes.clone()).await.unwrap(), inc2);
+		assert_eq!(storage.decr(key_bytes.clone()).await.unwrap(), dec1);
+		assert_eq!(storage.decr(key_bytes.clone()).await.unwrap(), dec2);
+		assert_eq!(storage.decr(key_bytes.clone()).await.unwrap(), dec3);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[rstest]
+	#[case("string_key", "not_int")]
+	#[case("float_key", "1.5")]
+	#[case("large_key", "999999999999999999999999999")]
+	#[tokio::test]
+	async fn test_storage_string_incr_decr_errors(#[case] key: &str, #[case] val: &str) {
+		let (storage, path) = get_storage().await;
+
+		let key_bytes = Bytes::from(key.to_string());
+		storage
+			.set(key_bytes.clone(), Bytes::from(val.to_string()))
+			.await
+			.unwrap();
+
+		let err_incr = storage.incr(key_bytes.clone()).await.unwrap_err();
+		assert!(
+			err_incr
+				.to_string()
+				.contains("ERR value is not an integer or out of range")
+		);
+
+		let err_decr = storage.decr(key_bytes.clone()).await.unwrap_err();
+		assert!(
+			err_decr
+				.to_string()
+				.contains("ERR value is not an integer or out of range")
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
 }
