@@ -9,7 +9,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `FLUSHDB`, `INCR`, `DECR`
+- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `FLUSHDB`, `INCR`, `DECR`, `APPEND`
 - **Hash Commands**: `HSET`, `HGET`, `HGETALL`, `HMGET`, `HLEN`, `HDEL`
 - **List Commands**: `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`
 - **Set Commands**: `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`, `SCARD`
