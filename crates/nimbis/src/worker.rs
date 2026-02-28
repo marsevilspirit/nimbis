@@ -4,7 +4,6 @@ use std::thread;
 
 use bytes::Bytes;
 use log::debug;
-use log::error;
 use log::warn;
 use resp::RespValue;
 use storage::Storage;
@@ -72,7 +71,7 @@ impl Worker {
 								tokio::spawn(async move {
 									let mut session = ClientSession::new(socket, peers);
 									if let Err(e) = session.run().await {
-										error!("Client session error: {}", e);
+										debug!("Client session error: {}", e);
 									}
 								});
 							}
