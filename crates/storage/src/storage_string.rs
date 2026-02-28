@@ -121,7 +121,11 @@ impl Storage {
 			None => 0,
 		};
 
-		int_val += 1;
+		int_val = int_val
+			.checked_add(1)
+			.ok_or_else(|| StorageError::DataInconsistency {
+				message: "ERR increment or decrement would overflow".to_string(),
+			})?;
 
 		self.set(key, Bytes::from(int_val.to_string())).await?;
 
@@ -143,7 +147,11 @@ impl Storage {
 			None => 0,
 		};
 
-		int_val -= 1;
+		int_val = int_val
+			.checked_sub(1)
+			.ok_or_else(|| StorageError::DataInconsistency {
+				message: "ERR increment or decrement would overflow".to_string(),
+			})?;
 
 		self.set(key, Bytes::from(int_val.to_string())).await?;
 
@@ -334,6 +342,50 @@ mod tests {
 			err_decr
 				.to_string()
 				.contains("ERR value is not an integer or out of range")
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_incr_overflow() {
+		let (storage, path) = get_storage().await;
+
+		let key = Bytes::from("max_key");
+		storage
+			.set(key.clone(), Bytes::from(i64::MAX.to_string()))
+			.await
+			.unwrap();
+
+		// INCR on i64::MAX should fail instead of panicking or wrapping around
+		let res = storage.incr(key).await;
+		assert!(res.is_err());
+		assert!(
+			res.unwrap_err()
+				.to_string()
+				.contains("ERR increment or decrement would overflow")
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_decr_underflow() {
+		let (storage, path) = get_storage().await;
+
+		let key = Bytes::from("min_key");
+		storage
+			.set(key.clone(), Bytes::from(i64::MIN.to_string()))
+			.await
+			.unwrap();
+
+		// DECR on i64::MIN should fail instead of panicking or wrapping around
+		let res = storage.decr(key).await;
+		assert!(res.is_err());
+		assert!(
+			res.unwrap_err()
+				.to_string()
+				.contains("ERR increment or decrement would overflow")
 		);
 
 		let _ = std::fs::remove_dir_all(path);
