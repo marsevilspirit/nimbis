@@ -134,6 +134,7 @@ The following table lists the currently implemented Redis commands and their sta
 | **Generic** | `DECR`       | `2`   | Decrements the integer value of a key by one.      |
 | **String**  | `SET`        | `3`   | Set the string value of a key.                      |
 | **String**  | `GET`        | `2`   | Get the value of a key.                             |
+| **String**  | `APPEND`     | `3`   | Appends a value to a key.                           |
 | **Hash**    | `HSET`       | `-4`  | Sets field(s) in the hash.                          |
 | **Hash**    | `HGET`       | `3`   | Returns the value of a field in the hash.           |
 | **Hash**    | `HLEN`       | `2`   | Returns the number of fields in the hash.           |
@@ -185,6 +186,7 @@ crates/nimbis/src/cmd/
 ├── cmd_set.rs           # SET command
 ├── cmd_incr.rs          # INCR command
 ├── cmd_decr.rs          # DECR command
+├── cmd_append.rs        # APPEND command
 ├── cmd_ping.rs          # PING command
 ├── cmd_hset.rs          # HSET command
 ├── cmd_hdel.rs          # HDEL command

@@ -72,6 +72,7 @@ impl Storage {
     pub async fn exists(&self, key: Bytes) -> Result<bool, ...>;
     pub async fn incr(&self, key: Bytes) -> Result<i64, ...>;
     pub async fn decr(&self, key: Bytes) -> Result<i64, ...>;
+    pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, ...>;
 }
 ```
 

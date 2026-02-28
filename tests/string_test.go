@@ -3,6 +3,8 @@ package tests
 import (
 	"context"
 
+	"sync"
+
 	"github.com/marsevilspirit/nimbis/tests/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -82,5 +84,44 @@ var _ = Describe("Get/Set Commands", func() {
 		err = rdb.Decr(ctx, key).Err()
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("ERR value is not an integer or out of range"))
+	})
+
+	It("should APPEND to a value", func() {
+		key := "append_key"
+
+		// APPEND to non-existing key
+		len, err := rdb.Append(ctx, key, "Hello").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len).To(Equal(int64(5)))
+
+		// APPEND to existing key
+		len, err = rdb.Append(ctx, key, " World").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len).To(Equal(int64(11)))
+
+		// Verify the final string
+		val, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal("Hello World"))
+	})
+
+	It("should handle concurrent APPENDs without data loss", func() {
+		key := "concurrent_append_key"
+		var wg sync.WaitGroup
+		concurrency := 100
+
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := rdb.Append(ctx, key, "a").Err()
+				Expect(err).NotTo(HaveOccurred())
+			}()
+		}
+		wg.Wait()
+
+		val, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(val)).To(Equal(concurrency))
 	})
 })

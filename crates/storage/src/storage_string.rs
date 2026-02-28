@@ -157,6 +157,25 @@ impl Storage {
 
 		Ok(int_val)
 	}
+
+	pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, StorageError> {
+		let current_val = self.get(key.clone()).await?;
+
+		let new_val = match current_val {
+			Some(bytes) => {
+				let mut combined = Vec::with_capacity(bytes.len() + append_val.len());
+				combined.extend_from_slice(&bytes);
+				combined.extend_from_slice(&append_val);
+				combined
+			}
+			None => append_val.to_vec(),
+		};
+
+		let len = new_val.len();
+		self.set(key, Bytes::from(new_val)).await?;
+
+		Ok(len)
+	}
 }
 
 #[cfg(test)]
@@ -387,6 +406,40 @@ mod tests {
 				.to_string()
 				.contains("ERR increment or decrement would overflow")
 		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[rstest]
+	#[case("append_key", None, "Hello", "Hello", 5)]
+	#[case("append_key", Some("Hello"), " World", "Hello World", 11)]
+	#[case("append_key", Some(""), "Append", "Append", 6)]
+	#[tokio::test]
+	async fn test_storage_string_append(
+		#[case] key: &str,
+		#[case] initial_val: Option<&str>,
+		#[case] append_val: &str,
+		#[case] expected_val: &str,
+		#[case] expected_len: usize,
+	) {
+		let (storage, path) = get_storage().await;
+		let key_bytes = Bytes::from(key.to_string());
+
+		if let Some(val) = initial_val {
+			storage
+				.set(key_bytes.clone(), Bytes::from(val.to_string()))
+				.await
+				.unwrap();
+		}
+
+		let len = storage
+			.append(key_bytes.clone(), Bytes::from(append_val.to_string()))
+			.await
+			.unwrap();
+		assert_eq!(len, expected_len);
+
+		let result = storage.get(key_bytes.clone()).await.unwrap();
+		assert_eq!(result, Some(Bytes::from(expected_val.to_string())));
 
 		let _ = std::fs::remove_dir_all(path);
 	}

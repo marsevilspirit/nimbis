@@ -26,7 +26,7 @@ The goal of this phase is to make Nimbis usable for basic caching scenarios.
   - [x] `DEL`
   - [x] `EXISTS`
   - [x] `INCR` / `DECR`
-  - [ ] `APPEND`
+  - [x] `APPEND`
 - **Key Expiration (TTL)**:
   - [x] `EXPIRE`
   - [x] `TTL`

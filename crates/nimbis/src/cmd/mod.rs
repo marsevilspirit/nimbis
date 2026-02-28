@@ -93,6 +93,7 @@ impl TryFrom<RespValue> for ParsedCmd {
 
 pub mod utils;
 
+mod cmd_append;
 mod cmd_decr;
 mod cmd_del;
 mod cmd_exists;
@@ -128,6 +129,7 @@ mod cmd_zscore;
 mod group_cmd_config;
 mod table;
 
+pub use cmd_append::AppendCmd;
 pub use cmd_decr::DecrCmd;
 pub use cmd_del::DelCmd;
 pub use cmd_exists::ExistsCmd;
