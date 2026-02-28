@@ -130,6 +130,8 @@ The following table lists the currently implemented Redis commands and their sta
 | **Generic** | `EXISTS`     | `-2`  | Check if one or more keys exist.                    |
 | **Generic** | `EXPIRE`     | `3`   | Set a timeout on key.                               |
 | **Generic** | `TTL`        | `2`   | Get the time to live for a key in seconds.          |
+| **Generic** | `INCR`       | `2`   | Increments the integer value of a key by one.      |
+| **Generic** | `DECR`       | `2`   | Decrements the integer value of a key by one.      |
 | **String**  | `SET`        | `3`   | Set the string value of a key.                      |
 | **String**  | `GET`        | `2`   | Get the value of a key.                             |
 | **Hash**    | `HSET`       | `-4`  | Sets field(s) in the hash.                          |
@@ -181,6 +183,8 @@ The command system in `crates/nimbis/src/cmd/` has the following structure:
 crates/nimbis/src/cmd/
 ├── cmd_get.rs           # GET command
 ├── cmd_set.rs           # SET command
+├── cmd_incr.rs          # INCR command
+├── cmd_decr.rs          # DECR command
 ├── cmd_ping.rs          # PING command
 ├── cmd_hset.rs          # HSET command
 ├── cmd_hdel.rs          # HDEL command

@@ -40,4 +40,47 @@ var _ = Describe("Get/Set Commands", func() {
 		err := rdb.Get(ctx, key).Err()
 		Expect(err).To(Equal(redis.Nil))
 	})
+
+	It("should INCR and DECR a value", func() {
+		key := "counter_key"
+
+		// INCR from non-existent key
+		val, err := rdb.Incr(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal(int64(1)))
+
+		// INCR again
+		val, err = rdb.Incr(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal(int64(2)))
+
+		// DECR
+		val, err = rdb.Decr(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal(int64(1)))
+
+		// DECR again
+		val, err = rdb.Decr(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal(int64(0)))
+
+		// DECR below zero
+		val, err = rdb.Decr(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal(int64(-1)))
+	})
+
+	It("should return error for INCR/DECR on non-integer value", func() {
+		key := "string_key"
+		err := rdb.Set(ctx, key, "not_an_integer", 0).Err()
+		Expect(err).NotTo(HaveOccurred())
+
+		err = rdb.Incr(ctx, key).Err()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("ERR value is not an integer or out of range"))
+
+		err = rdb.Decr(ctx, key).Err()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("ERR value is not an integer or out of range"))
+	})
 })

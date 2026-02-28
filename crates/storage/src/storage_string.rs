@@ -121,7 +121,37 @@ impl Storage {
 			None => 0,
 		};
 
-		int_val += 1;
+		int_val = int_val
+			.checked_add(1)
+			.ok_or_else(|| StorageError::DataInconsistency {
+				message: "ERR increment or decrement would overflow".to_string(),
+			})?;
+
+		self.set(key, Bytes::from(int_val.to_string())).await?;
+
+		Ok(int_val)
+	}
+
+	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
+		let current_val = self.get(key.clone()).await?;
+
+		let mut int_val: i64 = match current_val {
+			Some(bytes) => {
+				// Try to parse string as integer
+				let s = std::str::from_utf8(&bytes)?;
+				s.parse::<i64>()
+					.map_err(|_| StorageError::DataInconsistency {
+						message: "ERR value is not an integer or out of range".to_string(),
+					})?
+			}
+			None => 0,
+		};
+
+		int_val = int_val
+			.checked_sub(1)
+			.ok_or_else(|| StorageError::DataInconsistency {
+				message: "ERR increment or decrement would overflow".to_string(),
+			})?;
 
 		self.set(key, Bytes::from(int_val.to_string())).await?;
 
@@ -240,6 +270,123 @@ mod tests {
 		// Since meta is now String, HGET returns WRONGTYPE. Correct.
 		let err = storage.hget(k.clone(), f.clone()).await.unwrap_err();
 		assert!(err.to_string().contains("WRONGTYPE"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[rstest]
+	#[case("counter", None, 1, 2, 1, 0, -1)]
+	#[case("negative_start", Some("-5"), -4, -3, -4, -5, -6)]
+	#[case(
+		"large_start",
+		Some("999999999999999"),
+		1000000000000000,
+		1000000000000001,
+		1000000000000000,
+		999999999999999,
+		999999999999998
+	)]
+	#[case("zero_start", Some("0"), 1, 2, 1, 0, -1)]
+	#[tokio::test]
+	async fn test_storage_string_incr_decr(
+		#[case] key: &str,
+		#[case] initial_val: Option<&str>,
+		#[case] inc1: i64,
+		#[case] inc2: i64,
+		#[case] dec1: i64,
+		#[case] dec2: i64,
+		#[case] dec3: i64,
+	) {
+		let (storage, path) = get_storage().await;
+		let key_bytes = Bytes::from(key.to_string());
+
+		if let Some(val) = initial_val {
+			storage
+				.set(key_bytes.clone(), Bytes::from(val.to_string()))
+				.await
+				.unwrap();
+		}
+
+		assert_eq!(storage.incr(key_bytes.clone()).await.unwrap(), inc1);
+		assert_eq!(storage.incr(key_bytes.clone()).await.unwrap(), inc2);
+		assert_eq!(storage.decr(key_bytes.clone()).await.unwrap(), dec1);
+		assert_eq!(storage.decr(key_bytes.clone()).await.unwrap(), dec2);
+		assert_eq!(storage.decr(key_bytes.clone()).await.unwrap(), dec3);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[rstest]
+	#[case("string_key", "not_int")]
+	#[case("float_key", "1.5")]
+	#[case("large_key", "999999999999999999999999999")]
+	#[tokio::test]
+	async fn test_storage_string_incr_decr_errors(#[case] key: &str, #[case] val: &str) {
+		let (storage, path) = get_storage().await;
+
+		let key_bytes = Bytes::from(key.to_string());
+		storage
+			.set(key_bytes.clone(), Bytes::from(val.to_string()))
+			.await
+			.unwrap();
+
+		let err_incr = storage.incr(key_bytes.clone()).await.unwrap_err();
+		assert!(
+			err_incr
+				.to_string()
+				.contains("ERR value is not an integer or out of range")
+		);
+
+		let err_decr = storage.decr(key_bytes.clone()).await.unwrap_err();
+		assert!(
+			err_decr
+				.to_string()
+				.contains("ERR value is not an integer or out of range")
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_incr_overflow() {
+		let (storage, path) = get_storage().await;
+
+		let key = Bytes::from("max_key");
+		storage
+			.set(key.clone(), Bytes::from(i64::MAX.to_string()))
+			.await
+			.unwrap();
+
+		// INCR on i64::MAX should fail instead of panicking or wrapping around
+		let res = storage.incr(key).await;
+		assert!(res.is_err());
+		assert!(
+			res.unwrap_err()
+				.to_string()
+				.contains("ERR increment or decrement would overflow")
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_decr_underflow() {
+		let (storage, path) = get_storage().await;
+
+		let key = Bytes::from("min_key");
+		storage
+			.set(key.clone(), Bytes::from(i64::MIN.to_string()))
+			.await
+			.unwrap();
+
+		// DECR on i64::MIN should fail instead of panicking or wrapping around
+		let res = storage.decr(key).await;
+		assert!(res.is_err());
+		assert!(
+			res.unwrap_err()
+				.to_string()
+				.contains("ERR increment or decrement would overflow")
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
