@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::Cmd;
 use super::ConfigGroupCmd;
+use super::DecrCmd;
 use super::DelCmd;
 use super::ExistsCmd;
 use super::ExpireCmd;
@@ -56,6 +57,7 @@ impl CmdTable {
 		inner.insert("DEL", Arc::new(DelCmd::default()));
 		inner.insert("EXISTS", Arc::new(ExistsCmd::default()));
 		inner.insert("INCR", Arc::new(IncrCmd::default()));
+		inner.insert("DECR", Arc::new(DecrCmd::default()));
 		// hash type cmd
 		inner.insert("HSET", Arc::new(HSetCmd::default()));
 		inner.insert("HDEL", Arc::new(HDelCmd::default()));

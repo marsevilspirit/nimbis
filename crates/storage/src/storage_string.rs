@@ -127,6 +127,28 @@ impl Storage {
 
 		Ok(int_val)
 	}
+
+	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
+		let current_val = self.get(key.clone()).await?;
+
+		let mut int_val: i64 = match current_val {
+			Some(bytes) => {
+				// Try to parse string as integer
+				let s = std::str::from_utf8(&bytes)?;
+				s.parse::<i64>()
+					.map_err(|_| StorageError::DataInconsistency {
+						message: "ERR value is not an integer or out of range".to_string(),
+					})?
+			}
+			None => 0,
+		};
+
+		int_val -= 1;
+
+		self.set(key, Bytes::from(int_val.to_string())).await?;
+
+		Ok(int_val)
+	}
 }
 
 #[cfg(test)]
