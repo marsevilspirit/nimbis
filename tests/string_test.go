@@ -83,4 +83,23 @@ var _ = Describe("Get/Set Commands", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("ERR value is not an integer or out of range"))
 	})
+
+	It("should APPEND to a value", func() {
+		key := "append_key"
+
+		// APPEND to non-existing key
+		len, err := rdb.Append(ctx, key, "Hello").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len).To(Equal(int64(5)))
+
+		// APPEND to existing key
+		len, err = rdb.Append(ctx, key, " World").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len).To(Equal(int64(11)))
+
+		// Verify the final string
+		val, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal("Hello World"))
+	})
 })

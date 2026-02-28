@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::AppendCmd;
 use super::Cmd;
 use super::ConfigGroupCmd;
 use super::DecrCmd;
@@ -58,6 +59,7 @@ impl CmdTable {
 		inner.insert("EXISTS", Arc::new(ExistsCmd::default()));
 		inner.insert("INCR", Arc::new(IncrCmd::default()));
 		inner.insert("DECR", Arc::new(DecrCmd::default()));
+		inner.insert("APPEND", Arc::new(AppendCmd::default()));
 		// hash type cmd
 		inner.insert("HSET", Arc::new(HSetCmd::default()));
 		inner.insert("HDEL", Arc::new(HDelCmd::default()));
