@@ -9,14 +9,9 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Core Commands**: `PING`, `GET`, `SET`, `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `FLUSHDB`, `INCR`, `DECR`, `APPEND`
-- **Hash Commands**: `HSET`, `HGET`, `HGETALL`, `HMGET`, `HLEN`, `HDEL`
-- **List Commands**: `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE`
-- **Set Commands**: `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`, `SCARD`
-- **Sorted Set Commands**: `ZADD`, `ZRANGE`, `ZSCORE`, `ZREM`, `ZCARD`
-- **Configuration Commands**: `CONFIG GET`, `CONFIG SET`
+- **Redis-Compatible Commands**: Comprehensive support for string, hash, list, set, and zset types. See [Command Arity](docs/command_arity.md) for the complete list of supported commands.
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
-- **Configuration**: Dynamic configuration updates via `CONFIG SET`.
+- **Configuration**: Dynamic configuration updates.
 - **Observability**: Detailed build and environment information (git hash, branch, rustc version) displayed on startup.
 
 ## Design Philosophy
@@ -59,17 +54,17 @@ cargo install just
 $ just
 Available recipes:
     [check]
-    check                   # Check all crates
+    check       # Check all crates
 
     [clean]
-    clean                   # Clean build artifacts
+    clean       # Clean build artifacts
 
     [misc]
-    build profile='release' # Build all crates
-    fmt                     # Format code
-    run                     # Run nimbis-server
+    build *args # Build all crates
+    fmt         # Format code
+    run *args   # Run nimbis-server
 
     [test]
-    e2e-test                # Run e2e tests
-    test                    # Run unit tests
+    e2e-test    # Run e2e tests
+    test        # Run unit tests
 ```
