@@ -36,7 +36,7 @@ Persistent storage layer using SlateDB.
 - Type-specific encoding logic (StringKey, HashFieldKey, etc.)
 - SlateDB integration
 
-**Documentation**: See [Storage Implementation](storage_implementation.md) and [SlateDB Redis Design](slatedb_redis_design.md)
+**Documentation**: See [Storage Design](storage_design.md)
 
 ### `telemetry`
 Logging and observability infrastructure.
@@ -61,7 +61,7 @@ The main executable, integrating all crates, implementing the command system and
 - **Command System** (`src/cmd/`): Meta, Trait, and concrete command implementations (GET, SET, HSET, etc.)
 - Request processing
 
-**Documentation**: See [Server Design](server_design.md), [Config Design](config.md), and [Command System Implementation](cmd_implementation.md)
+**Documentation**: See [Server Design](server_design.md), [Config Design](config.md), and [Commands](commands.md)
 
 ## Dependency Graph
 
@@ -86,7 +86,7 @@ To add a new command to Nimbis:
 3. Export it in `crates/nimbis/src/cmd/mod.rs`
 4. Register it in `crates/nimbis/src/cmd/table.rs`
 
-See [Command System Implementation](cmd_implementation.md) for detailed instructions.
+See [Commands](commands.md) for detailed instructions on implementing new commands.
 
 ## Running Tests
 

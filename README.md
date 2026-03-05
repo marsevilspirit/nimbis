@@ -9,7 +9,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Redis-Compatible Commands**: Comprehensive support for string, hash, list, set, and zset types. See [Command Arity](docs/command_arity.md) for the complete list of supported commands.
+- **Redis-Compatible Commands**: Comprehensive support for string, hash, list, set, and sorted set data types. See [Commands](docs/commands.md) for the complete list of supported commands and implementation guide.
 - **Persistence**: Data is persisted to SlateDB (object storage compatible).
 - **Configuration**: Dynamic configuration updates.
 - **Observability**: Detailed build and environment information (git hash, branch, rustc version) displayed on startup.
@@ -22,10 +22,11 @@ Nimbis is built on the principle of **never trading off** unless there's a suita
 
 Nimbis is organized as a Cargo workspace with multiple focused crates:
 
-- `crates/nimbis` - Main server executable, command implementations, and configuration management
+- `crates/macros` - Procedural macros for derive implementations (e.g., `OnlineConfig`)
 - `crates/resp` - RESP protocol parser and encoder
 - `crates/storage` - Persistent storage layer using SlateDB
 - `crates/telemetry` - Logging and observability
+- `crates/nimbis` - Main server executable, command implementations, and configuration management
 
 For detailed information about the crate organization, see [Crates Organization](docs/crates_organization.md).
 
