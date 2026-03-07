@@ -238,38 +238,27 @@ impl Storage {
 			None => return Ok(0),
 		};
 
-		let mut removed_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-
-		// Batch pre-fetch all member keys to avoid N individual I/O calls
+		// Fetch all member keys in parallel
 		let mut member_encoded_keys = Vec::with_capacity(members.len());
-		for member in &members {
+		let fetch_futures = members.iter().map(|member| {
 			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
-			member_encoded_keys.push(member_key.encode());
-		}
+			let encoded_key = member_key.encode();
+			member_encoded_keys.push(encoded_key.clone());
+			self.zset_db.get(encoded_key)
+		});
 
-		let mut batch_fetches = Vec::new();
-		for encoded_key in &member_encoded_keys {
-			batch_fetches.push(self.zset_db.get(encoded_key.clone()));
-		}
-
-		let mut old_values = Vec::new();
-		for fetch in batch_fetches {
-			old_values.push(fetch.await?);
-		}
+		let old_values: Result<Vec<_>, _> =
+			future::join_all(fetch_futures).await.into_iter().collect();
+		let old_values = old_values?;
 
 		// Use WriteBatch to ensure atomicity of all delete operations
 		let mut batch = WriteBatch::new();
-		let mut has_writes = false;
+		let mut removed_count = 0;
 
 		for (idx, member) in members.into_iter().enumerate() {
-			let encoded_member_key = &member_encoded_keys[idx];
 			if let Some(val) = &old_values[idx] {
-				has_writes = true;
 				// Delete MemberKey
-				batch.delete(encoded_member_key.clone());
+				batch.delete(&member_encoded_keys[idx]);
 
 				// Delete ScoreKey
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
@@ -281,29 +270,33 @@ impl Storage {
 			}
 		}
 
-		if has_writes {
-			// Execute all delete operations atomically
-			self.zset_db.write_with_options(batch, &write_opts).await?;
+		if removed_count == 0 {
+			return Ok(0);
 		}
 
-		if removed_count > 0 {
-			meta_val.len -= removed_count;
-			if meta_val.len == 0 {
-				self.string_db
-					.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
-			} else {
-				let ttl = meta_val
-					.remaining_ttl()
-					.map(|d| d.as_millis() as u64)
-					.map(slatedb::config::Ttl::ExpireAfter)
-					.unwrap_or(slatedb::config::Ttl::NoExpiry);
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
 
-				let put_opts = PutOptions { ttl };
-				self.string_db
-					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-					.await?;
-			}
+		// Execute all delete operations atomically
+		self.zset_db.write_with_options(batch, &write_opts).await?;
+
+		meta_val.len -= removed_count;
+		if meta_val.len == 0 {
+			self.string_db
+				.delete_with_options(meta_encoded_key, &write_opts)
+				.await?;
+		} else {
+			let ttl = meta_val
+				.remaining_ttl()
+				.map(|d| d.as_millis() as u64)
+				.map(slatedb::config::Ttl::ExpireAfter)
+				.unwrap_or(slatedb::config::Ttl::NoExpiry);
+
+			let put_opts = PutOptions { ttl };
+			self.string_db
+				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
+				.await?;
 		}
 
 		Ok(removed_count)
