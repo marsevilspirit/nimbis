@@ -24,7 +24,7 @@ e2e-test: (build "--release")
 check: check-workspace check-code-fmt check-numbered-comments
     cargo check --workspace
     cargo fmt -- --check
-    cargo clippy --workspace -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
     rustfmt --check scripts/*.rs
 
 # Check workspace dependencies

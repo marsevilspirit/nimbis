@@ -366,7 +366,7 @@ mod tests {
 		let members: &[&[u8]] = &[b"alice", b"bob", b"carol"];
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(42, *member),
+				key: build_sub_key(42, member),
 				value: ValueDeletable::Value(Bytes::new()),
 				seq: 1,
 				create_ts: None,
@@ -377,7 +377,7 @@ mod tests {
 				filter.filter(&entry).await.unwrap(),
 				CompactionFilterDecision::Keep,
 				"member {:?} should be kept when version matches",
-				std::str::from_utf8(*member).unwrap()
+				std::str::from_utf8(member).unwrap()
 			);
 		}
 
@@ -393,7 +393,7 @@ mod tests {
 		// Now all sub-keys should be marked for deletion (orphaned)
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(42, *member),
+				key: build_sub_key(42, member),
 				value: ValueDeletable::Value(Bytes::new()),
 				seq: 1,
 				create_ts: None,
@@ -403,7 +403,7 @@ mod tests {
 				filter.filter(&entry).await.unwrap(),
 				CompactionFilterDecision::Modify(ValueDeletable::Tombstone),
 				"member {:?} should be reclaimed after metadata deletion",
-				std::str::from_utf8(*member).unwrap()
+				std::str::from_utf8(member).unwrap()
 			);
 		}
 
@@ -417,7 +417,7 @@ mod tests {
 		// Old version=42 data should still be reclaimed
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(42, *member),
+				key: build_sub_key(42, member),
 				value: ValueDeletable::Value(Bytes::new()),
 				seq: 1,
 				create_ts: None,
@@ -427,7 +427,7 @@ mod tests {
 				filter.filter(&entry).await.unwrap(),
 				CompactionFilterDecision::Modify(ValueDeletable::Tombstone),
 				"old version member {:?} should be reclaimed after re-creation",
-				std::str::from_utf8(*member).unwrap()
+				std::str::from_utf8(member).unwrap()
 			);
 		}
 

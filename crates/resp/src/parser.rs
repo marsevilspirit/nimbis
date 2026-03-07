@@ -719,7 +719,7 @@ mod tests {
 	fn test_parse_inline_command_too_long() {
 		// 64KB + 1 byte
 		let mut big_cmd = Vec::new();
-		big_cmd.extend(std::iter::repeat(b'a').take(65537));
+		big_cmd.extend(std::iter::repeat_n(b'a', 65537));
 		big_cmd.extend_from_slice(b"\r\n");
 		let mut buf = BytesMut::from(&big_cmd[..]);
 

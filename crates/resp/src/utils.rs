@@ -164,7 +164,7 @@ mod tests {
 	}
 
 	#[rstest]
-	#[case(b"3.14", 3.14)]
+	#[case(b"3.141592653589793", std::f64::consts::PI)]
 	#[case(b"-2.5", -2.5)]
 	#[case(b"inf", f64::INFINITY)]
 	#[case(b"-inf", f64::NEG_INFINITY)]

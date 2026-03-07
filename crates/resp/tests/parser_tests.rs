@@ -126,9 +126,9 @@ fn test_resp3_types() {
 	assert_eq!(value.as_bool(), Some(false));
 
 	// Double
-	let mut buf = BytesMut::from(&b",3.14159\r\n"[..]);
+	let mut buf = BytesMut::from(&b",3.141592653589793\r\n"[..]);
 	let value = resp::parse(&mut buf).unwrap();
-	assert_eq!(value.as_double(), Some(3.14159));
+	assert_eq!(value.as_double(), Some(std::f64::consts::PI));
 
 	// Null
 	let mut buf = BytesMut::from(&b"_\r\n"[..]);

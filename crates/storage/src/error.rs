@@ -179,7 +179,7 @@ mod tests {
 
 	#[test]
 	fn test_error_codes_unique() {
-		let codes = vec![
+		let codes = [
 			DecoderError::Empty.code(),
 			DecoderError::InvalidType.code(),
 			DecoderError::InvalidLength.code(),
@@ -246,7 +246,7 @@ mod tests {
 
 	#[test]
 	fn test_storage_error_codes_unique() {
-		let codes = vec!["E1000", "E1001", "E1002", "E1003", "E1004"];
+		let codes = ["E1000", "E1001", "E1002", "E1003", "E1004"];
 		let unique_codes: std::collections::HashSet<_> = codes.iter().collect();
 		assert_eq!(
 			codes.len(),
