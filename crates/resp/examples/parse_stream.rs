@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_macros)]
+
 use bytes::BytesMut;
 use resp::RespParseResult;
 use resp::RespParser;
@@ -11,7 +13,7 @@ fn main() {
 	// - An Integer: ":1000\r\n"
 	// - An Array: "*2\r\n$3\r\nSET\r\n$3\r\nkey\r\n"
 	// - But split into random chunks.
-	let data_chunks = vec![
+	let data_chunks = [
 		b"+O".as_slice(),
 		b"K\r\n:1".as_slice(),
 		b"00".as_slice(),

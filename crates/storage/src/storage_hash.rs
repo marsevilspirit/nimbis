@@ -337,7 +337,10 @@ mod tests {
 			.unwrap();
 
 		// HDEL one field
-		let count = storage.hdel(key.clone(), &[f1.clone()]).await.unwrap();
+		let count = storage
+			.hdel(key.clone(), std::slice::from_ref(&f1))
+			.await
+			.unwrap();
 		assert_eq!(count, 1);
 
 		// Verify f1 gone, f2 remains
@@ -356,7 +359,10 @@ mod tests {
 		assert_eq!(count, 0);
 
 		// HDEL remaining field (should delete hash meta)
-		let count = storage.hdel(key.clone(), &[f2.clone()]).await.unwrap();
+		let count = storage
+			.hdel(key.clone(), std::slice::from_ref(&f2))
+			.await
+			.unwrap();
 		assert_eq!(count, 1);
 
 		// Verify empty
