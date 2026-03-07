@@ -63,16 +63,20 @@ impl Storage {
 			let store = object_store.clone();
 			let cache = cache.clone();
 			async move {
-				Db::builder(slatedb::object_store::path::Path::from(name), store)
-					.with_memory_cache(cache)
+				let path = slatedb::object_store::path::Path::from(name);
+				let compactor = slatedb::CompactorBuilder::new(path.clone(), store.clone())
 					.with_compaction_filter_supplier(Arc::new(
 						crate::compaction_filter::NimbisCompactionFilterSupplier {
 							string_db,
 							data_type,
 						},
-					))
+					));
+				let db: Result<Db, slatedb::Error> = Db::builder(path, store)
+					.with_db_cache(cache)
+					.with_compactor_builder(compactor)
 					.build()
-					.await
+					.await;
+				db.map_err(StorageError::from)
 			}
 		};
 

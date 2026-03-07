@@ -68,6 +68,7 @@ impl Storage {
 
 		// Use WriteBatch to ensure atomicity of all zset operations
 		let mut batch = WriteBatch::new();
+		let mut has_writes = false;
 
 		for (idx, (score, member)) in elements.into_iter().enumerate() {
 			let encoded_member_key = &member_encoded_keys[idx];
@@ -78,6 +79,7 @@ impl Storage {
 				let old_score =
 					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
 				if old_score != score {
+					has_writes = true;
 					// Delete old ScoreKey
 					let old_score_key =
 						ScoreKey::new(key.clone(), meta_val.version, old_score, member.clone());
@@ -97,6 +99,7 @@ impl Storage {
 					);
 				}
 			} else {
+				has_writes = true;
 				// New member
 				added_count += 1;
 
@@ -113,7 +116,10 @@ impl Storage {
 				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
-		self.zset_db.write_with_options(batch, &write_opts).await?;
+
+		if has_writes {
+			self.zset_db.write_with_options(batch, &write_opts).await?;
+		}
 
 		if added_count > 0 {
 			meta_val.len += added_count;
@@ -256,10 +262,12 @@ impl Storage {
 
 		// Use WriteBatch to ensure atomicity of all delete operations
 		let mut batch = WriteBatch::new();
+		let mut has_writes = false;
 
 		for (idx, member) in members.into_iter().enumerate() {
 			let encoded_member_key = &member_encoded_keys[idx];
 			if let Some(val) = &old_values[idx] {
+				has_writes = true;
 				// Delete MemberKey
 				batch.delete(encoded_member_key.clone());
 
@@ -273,8 +281,10 @@ impl Storage {
 			}
 		}
 
-		// Execute all delete operations atomically
-		self.zset_db.write_with_options(batch, &write_opts).await?;
+		if has_writes {
+			// Execute all delete operations atomically
+			self.zset_db.write_with_options(batch, &write_opts).await?;
+		}
 
 		if removed_count > 0 {
 			meta_val.len -= removed_count;
