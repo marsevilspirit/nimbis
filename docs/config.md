@@ -47,6 +47,9 @@ pub struct MyConfig {
     // Immutable startup-only output mode
     #[online_config(immutable)]
     pub log_output: String,
+
+    #[online_config(immutable)]
+    pub log_rotation: String,
 }
 
 impl MyConfig {
@@ -150,6 +153,9 @@ pub struct ServerConfig {
     pub log_output: String,
 
     #[online_config(immutable)]
+    pub log_rotation: String,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -176,6 +182,15 @@ Nimbis also exposes an immutable `log_output` field for selecting the startup lo
 - `file`: write logs to `{data_path}/nimbis.log`.
 
 Because log sink selection changes bootstrap behavior, `log_output` is immutable and must be set in the configuration file before startup. Runtime commands such as `CONFIG SET log_output file` will be rejected.
+
+When `log_output = "file"`, the immutable `log_rotation` field controls time-based rotation:
+
+- `minutely`: rotate once per minute.
+- `hourly`: rotate once per hour.
+- `daily`: rotate once per day. This is the default to avoid unbounded log growth.
+- `never`: disable rotation and keep writing to a single file.
+
+Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the same reason: rotation is part of bootstrap-only logger setup.
 
 ## 5. Build-time Configuration
 

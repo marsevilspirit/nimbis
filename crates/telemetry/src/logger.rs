@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling::Rotation;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::fmt;
@@ -71,12 +72,43 @@ pub struct Terminal;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct File {
 	path: PathBuf,
+	rotation: LogRotation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogOutput {
 	Terminal(Terminal),
 	File(File),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LogRotation {
+	Minutely,
+	Hourly,
+	#[default]
+	Daily,
+	Never,
+}
+
+impl LogRotation {
+	pub fn from_mode(mode: &str) -> Result<Self, TelemetryError> {
+		match mode.trim().to_ascii_lowercase().as_str() {
+			"minutely" => Ok(Self::Minutely),
+			"hourly" => Ok(Self::Hourly),
+			"daily" => Ok(Self::Daily),
+			"never" => Ok(Self::Never),
+			_ => Err(TelemetryError::InvalidLogRotation(mode.to_string())),
+		}
+	}
+
+	fn as_rotation(self) -> Rotation {
+		match self {
+			Self::Minutely => Rotation::MINUTELY,
+			Self::Hourly => Rotation::HOURLY,
+			Self::Daily => Rotation::DAILY,
+			Self::Never => Rotation::NEVER,
+		}
+	}
 }
 
 impl Terminal {
@@ -90,8 +122,11 @@ impl Terminal {
 }
 
 impl File {
-	pub fn new(path: impl Into<PathBuf>) -> Self {
-		Self { path: path.into() }
+	pub fn new(path: impl Into<PathBuf>, rotation: LogRotation) -> Self {
+		Self {
+			path: path.into(),
+			rotation,
+		}
 	}
 
 	fn init(
@@ -104,13 +139,23 @@ impl File {
 				self.path.display()
 			))
 		})?;
-		let file_name = self.path.file_name().ok_or_else(|| {
+		let file_stem = self.path.file_stem().ok_or_else(|| {
 			TelemetryError::InitFailed(format!(
-				"log file path has no file name: {}",
+				"log file path has no file stem: {}",
 				self.path.display()
 			))
 		})?;
-		let file_appender = tracing_appender::rolling::never(parent, file_name);
+		let mut builder = tracing_appender::rolling::Builder::new()
+			.rotation(self.rotation.as_rotation())
+			.filename_prefix(file_stem.to_string_lossy().into_owned());
+
+		if let Some(extension) = self.path.extension() {
+			builder = builder.filename_suffix(extension.to_string_lossy().into_owned());
+		}
+
+		let file_appender = builder
+			.build(parent)
+			.map_err(|e| TelemetryError::InitFailed(e.to_string()))?;
 		let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
 		init_subscriber(filter_layer, non_blocking)?;
@@ -122,10 +167,11 @@ impl LogOutput {
 	pub fn from_mode(
 		mode: &str,
 		log_file_path: impl Into<PathBuf>,
+		rotation: LogRotation,
 	) -> Result<Self, TelemetryError> {
 		match mode.trim().to_ascii_lowercase().as_str() {
 			"terminal" => Ok(Self::Terminal(Terminal)),
-			"file" => Ok(Self::File(File::new(log_file_path))),
+			"file" => Ok(Self::File(File::new(log_file_path, rotation))),
 			_ => Err(TelemetryError::InvalidLogOutput(mode.to_string())),
 		}
 	}
@@ -183,7 +229,11 @@ where
 ///
 /// ```no_run
 /// // let args = Cli::parse();
-/// let output = telemetry::logger::LogOutput::from_mode("terminal", "./nimbis_data/nimbis.log")?;
+/// let output = telemetry::logger::LogOutput::from_mode(
+///     "terminal",
+///     "./nimbis_data/nimbis.log",
+///     telemetry::logger::LogRotation::Daily,
+/// )?;
 /// telemetry::logger::init("info", output)?;
 /// log::info!("Server starting");
 /// # Ok::<(), telemetry::TelemetryError>(())
@@ -251,7 +301,8 @@ mod tests {
 	#[case("terminal")]
 	#[case("TERMINAL")]
 	fn test_terminal_log_output(#[case] value: &str) {
-		let output = LogOutput::from_mode(value, "./nimbis_data/nimbis.log").unwrap();
+		let output =
+			LogOutput::from_mode(value, "./nimbis_data/nimbis.log", LogRotation::Daily).unwrap();
 		assert!(matches!(output, LogOutput::Terminal(Terminal)));
 		assert!(!output.is_file());
 	}
@@ -260,7 +311,8 @@ mod tests {
 	#[case("file")]
 	#[case("FiLe")]
 	fn test_file_log_output(#[case] value: &str) {
-		let output = LogOutput::from_mode(value, "./nimbis_data/nimbis.log").unwrap();
+		let output =
+			LogOutput::from_mode(value, "./nimbis_data/nimbis.log", LogRotation::Daily).unwrap();
 		assert!(matches!(output, LogOutput::File(File { .. })));
 		assert!(output.is_file());
 	}
@@ -270,8 +322,27 @@ mod tests {
 	#[case("console")]
 	#[case("")]
 	fn test_invalid_log_outputs(#[case] value: &str) {
-		let result = LogOutput::from_mode(value, "./nimbis_data/nimbis.log");
+		let result = LogOutput::from_mode(value, "./nimbis_data/nimbis.log", LogRotation::Daily);
 		assert!(matches!(result, Err(TelemetryError::InvalidLogOutput(_))));
+	}
+
+	#[rstest]
+	#[case("minutely", LogRotation::Minutely)]
+	#[case("hourly", LogRotation::Hourly)]
+	#[case("daily", LogRotation::Daily)]
+	#[case("never", LogRotation::Never)]
+	#[case("DAILY", LogRotation::Daily)]
+	fn test_valid_log_rotations(#[case] value: &str, #[case] expected: LogRotation) {
+		assert_eq!(LogRotation::from_mode(value).unwrap(), expected);
+	}
+
+	#[rstest]
+	#[case("size")]
+	#[case("weekly")]
+	#[case("")]
+	fn test_invalid_log_rotations(#[case] value: &str) {
+		let result = LogRotation::from_mode(value);
+		assert!(matches!(result, Err(TelemetryError::InvalidLogRotation(_))));
 	}
 
 	/// Test that valid log levels pass validation but return NotInitialized

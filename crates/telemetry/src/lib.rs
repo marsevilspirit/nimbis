@@ -8,6 +8,10 @@ pub enum TelemetryError {
 	#[error("Invalid log output: {0}. Valid values: terminal, file")]
 	InvalidLogOutput(String),
 
+	/// Invalid log rotation provided
+	#[error("Invalid log rotation: {0}. Valid values: minutely, hourly, daily, never")]
+	InvalidLogRotation(String),
+
 	/// The logger has not been initialized yet
 	#[error("Logger not initialized")]
 	NotInitialized,

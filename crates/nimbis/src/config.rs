@@ -110,6 +110,8 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub log_output: String,
 	#[online_config(immutable)]
+	pub log_rotation: String,
+	#[online_config(immutable)]
 	pub worker_threads: usize,
 }
 
@@ -129,6 +131,7 @@ impl Default for ServerConfig {
 			appendonly: "no".into(),
 			log_level: "info".into(),
 			log_output: "terminal".into(),
+			log_rotation: "daily".into(),
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -224,7 +227,8 @@ fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
 
 fn resolve_log_output(config: &ServerConfig) -> Result<telemetry::logger::LogOutput, ConfigError> {
 	let log_file_path = resolve_log_file_path(config);
-	telemetry::logger::LogOutput::from_mode(&config.log_output, log_file_path)
+	let rotation = telemetry::logger::LogRotation::from_mode(&config.log_rotation)?;
+	telemetry::logger::LogOutput::from_mode(&config.log_output, log_file_path, rotation)
 		.map_err(ConfigError::from)
 }
 
@@ -284,6 +288,7 @@ save = "900 1"
 appendonly = "yes"
 log_level = "debug"
 log_output = "file"
+log_rotation = "hourly"
 worker_threads = 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -293,6 +298,7 @@ worker_threads = 4
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
+		assert_eq!(config.log_rotation, "hourly");
 		assert_eq!(config.worker_threads, 4);
 	}
 
@@ -309,6 +315,7 @@ worker_threads = 4
   "appendonly": "yes",
   "log_level": "debug",
 	"log_output": "file",
+	"log_rotation": "hourly",
   "worker_threads": 4
 }
 "#;
@@ -319,6 +326,7 @@ worker_threads = 4
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
+		assert_eq!(config.log_rotation, "hourly");
 	}
 
 	#[test]
@@ -333,6 +341,7 @@ save: "900 1"
 appendonly: "yes"
 log_level: "debug"
 log_output: "file"
+log_rotation: "hourly"
 worker_threads: 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -342,11 +351,17 @@ worker_threads: 4
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
+		assert_eq!(config.log_rotation, "hourly");
 	}
 
 	#[test]
 	fn test_default_log_output() {
 		assert_eq!(ServerConfig::default().log_output, "terminal");
+	}
+
+	#[test]
+	fn test_default_log_rotation() {
+		assert_eq!(ServerConfig::default().log_rotation, "daily");
 	}
 
 	#[test]
@@ -372,6 +387,7 @@ worker_threads: 4
 	fn test_resolve_file_log_output() {
 		let config = ServerConfig {
 			log_output: "file".into(),
+			log_rotation: "hourly".into(),
 			data_path: "./custom_data".into(),
 			..ServerConfig::default()
 		};

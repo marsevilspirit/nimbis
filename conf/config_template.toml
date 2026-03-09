@@ -11,6 +11,10 @@ log_level = "info"
 # When set to "file", logs are written to {data_path}/nimbis.log
 log_output = "terminal"
 
+# File log rotation: "minutely", "hourly", "daily", or "never"
+# Only used when log_output = "file". Defaulting to "daily" avoids unbounded log growth.
+log_rotation = "daily"
+
 # Number of worker threads (default: number of CPU cores)
 # worker_threads = 8
 
