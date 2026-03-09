@@ -247,7 +247,7 @@ pub fn init(level: &str, output: LogOutput) -> Result<(), TelemetryError> {
 
 	LOGGER_STATE
 		.set(LoggerState::new(reload_handle, file_guard))
-		.unwrap_or_else(|_| panic!("Logger should only be initialized once"));
+		.map_err(|_| TelemetryError::AlreadyInitialized)?;
 	Ok(())
 }
 

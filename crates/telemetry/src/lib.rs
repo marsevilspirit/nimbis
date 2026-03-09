@@ -16,6 +16,10 @@ pub enum TelemetryError {
 	#[error("Logger not initialized")]
 	NotInitialized,
 
+	/// The logger was initialized more than once
+	#[error("Logger already initialized")]
+	AlreadyInitialized,
+
 	/// Invalid log level provided
 	#[error("Invalid log level: {0}. Valid levels: trace, debug, info, warn, error")]
 	InvalidLogLevel(String),
