@@ -195,7 +195,9 @@ pub fn init(level: &str, output: LogOutput) -> Result<(), TelemetryError> {
 	let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
 	let file_guard = output.init(filter_layer)?;
 
-	let _ = LOGGER_STATE.set(LoggerState::new(reload_handle, file_guard));
+	LOGGER_STATE
+		.set(LoggerState::new(reload_handle, file_guard))
+		.unwrap_or_else(|_| panic!("Logger should only be initialized once"));
 	Ok(())
 }
 
