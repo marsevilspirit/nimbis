@@ -122,6 +122,14 @@ impl Terminal {
 }
 
 impl File {
+	/// Create a file logger target from a path template.
+	///
+	/// The parent directory is used as the log directory. The file stem becomes
+	/// the rolling appender prefix, and the extension becomes the suffix when one
+	/// is present. With time-based rotation (`minutely`, `hourly`, `daily`), the
+	/// appender writes files under that directory using that prefix/suffix pair
+	/// and adds its rotation timestamp to the on-disk file name. With `never`, it
+	/// keeps writing to the single provided path.
 	pub fn new(path: impl Into<PathBuf>, rotation: LogRotation) -> Self {
 		Self {
 			path: path.into(),
@@ -223,7 +231,10 @@ where
 /// # Arguments
 ///
 /// * `level` - The log level filter string (e.g., "info", "debug", "warn")
-/// * `output` - The output sink to use
+/// * `output` - The output sink to use. When configured for file output with a
+///   path like `./nimbis_data/nimbis.log`, time-based rotation writes files in
+///   `./nimbis_data/` using `nimbis` as the base name and `log` as the suffix;
+///   only `LogRotation::Never` keeps writing to the single `nimbis.log` path.
 ///
 /// # Example
 ///
