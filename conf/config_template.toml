@@ -7,6 +7,18 @@ port = 6379
 # Log level (trace, debug, info, warn, error)
 log_level = "info"
 
+# Log output mode: "terminal" or "file"
+# When set to "file", logs are written under {data_path}/ using nimbis.log as
+# the path template. With log_rotation = "never", logs stay in
+# {data_path}/nimbis.log; other rotation modes create time-rotated files in the
+# same directory according to log_rotation.
+log_output = "terminal"
+
+# File log rotation: "minutely", "hourly", "daily", or "never"
+# Only used when log_output = "file". Defaulting to "daily" avoids unbounded
+# log growth while keeping files under {data_path}/ with the same base name.
+log_rotation = "daily"
+
 # Number of worker threads (default: number of CPU cores)
 # worker_threads = 8
 

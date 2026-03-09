@@ -43,6 +43,13 @@ pub struct MyConfig {
     // Field with callback - triggers on_log_level_change when updated
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
+
+    // Immutable startup-only output mode
+    #[online_config(immutable)]
+    pub log_output: String,
+
+    #[online_config(immutable)]
+    pub log_rotation: String,
 }
 
 impl MyConfig {
@@ -143,6 +150,12 @@ pub struct ServerConfig {
     pub log_level: String,
 
     #[online_config(immutable)]
+    pub log_output: String,
+
+    #[online_config(immutable)]
+    pub log_rotation: String,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -160,6 +173,26 @@ let current = SERVER_CONF.load();
 ```
 
 This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.
+
+### 4.2 Startup-only Log Output
+
+Nimbis also exposes an immutable `log_output` field for selecting the startup log sink:
+
+- `terminal`: keep writing logs to stderr via the tracing formatter.
+- `file`: write logs under `{data_path}/` using `nimbis` as the base file name and `.log` as the suffix.
+
+Because log sink selection changes bootstrap behavior, `log_output` is immutable and must be set in the configuration file before startup. Runtime commands such as `CONFIG SET log_output file` will be rejected.
+
+When `log_output = "file"`, the immutable `log_rotation` field controls time-based rotation:
+
+- `minutely`: rotate once per minute.
+- `hourly`: rotate once per hour.
+- `daily`: rotate once per day. This is the default to avoid unbounded log growth.
+- `never`: disable rotation and keep writing to the single file `{data_path}/nimbis.log`.
+
+For the rotating modes, Nimbis passes `{data_path}/nimbis.log` to the tracing rolling appender as a path template. In practice, that means logs are created in `{data_path}/` with `nimbis` as the filename prefix and `log` as the suffix, while the appender adds its own time-based component to the on-disk file name according to the selected rotation policy.
+
+Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the same reason: rotation is part of bootstrap-only logger setup.
 
 ## 5. Build-time Configuration
 
