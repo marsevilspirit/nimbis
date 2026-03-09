@@ -227,9 +227,21 @@ fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
 
 fn resolve_log_output(config: &ServerConfig) -> Result<telemetry::logger::LogOutput, ConfigError> {
 	let log_file_path = resolve_log_file_path(config);
-	let rotation = telemetry::logger::LogRotation::from_mode(&config.log_rotation)?;
-	telemetry::logger::LogOutput::from_mode(&config.log_output, log_file_path, rotation)
-		.map_err(ConfigError::from)
+
+	match config.log_output.trim().to_ascii_lowercase().as_str() {
+		"terminal" => Ok(telemetry::logger::LogOutput::Terminal(
+			telemetry::logger::Terminal,
+		)),
+		"file" => {
+			let rotation = telemetry::logger::LogRotation::from_mode(&config.log_rotation)?;
+			Ok(telemetry::logger::LogOutput::File(
+				telemetry::logger::File::new(log_file_path, rotation),
+			))
+		}
+		_ => Err(ConfigError::from(
+			telemetry::TelemetryError::InvalidLogOutput(config.log_output.clone()),
+		)),
+	}
 }
 
 fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> {
@@ -395,5 +407,17 @@ worker_threads: 4
 		let output = resolve_log_output(&config).unwrap();
 		assert!(matches!(output, telemetry::logger::LogOutput::File(_)));
 		assert!(output.is_file());
+	}
+
+	#[test]
+	fn test_resolve_terminal_log_output_ignores_invalid_rotation() {
+		let config = ServerConfig {
+			log_output: "terminal".into(),
+			log_rotation: "invalid".into(),
+			..ServerConfig::default()
+		};
+
+		let output = resolve_log_output(&config).unwrap();
+		assert!(matches!(output, telemetry::logger::LogOutput::Terminal(_)));
 	}
 }
