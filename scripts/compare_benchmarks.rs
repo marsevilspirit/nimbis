@@ -5,7 +5,7 @@
 //! ```
 //!
 //! This script compares benchmark results between two branches (typically Main
-//! and PR) and optionally against Redis. It generates a Markdown table
+//! and PR) and optionally against one or more baselines. It generates a Markdown table
 //! summarizing the requests per second (RPS) and the percentage difference.
 //!
 //! Usage:
@@ -14,14 +14,17 @@
 //!         --pr <pr_bench_file> \
 //!         --main-pipeline <main_pipeline_file> \
 //!         --pr-pipeline <pr_pipeline_file> \
-//!         [--redis <redis_bench_file>] \
-//!         [--redis-pipeline <redis_pipeline_file>]
+//!         [--baseline <name=bench_file>]... \
+//!         [--baseline-pipeline <name=bench_file>]...
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 
 use clap::Parser;
 use regex::Regex;
+
+type BenchmarkMap = HashMap<String, f64>;
+type NamedBenchmarkMap = (String, BenchmarkMap);
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -34,9 +37,9 @@ struct Args {
 	#[arg(long)]
 	pr: String,
 
-	/// Redis benchmark output file
-	#[arg(long)]
-	redis: Option<String>,
+	/// Baseline benchmark output file in the form <name=path>
+	#[arg(long = "baseline", value_name = "NAME=PATH")]
+	baselines: Vec<String>,
 
 	/// Main branch pipeline benchmark output file
 	#[arg(long)]
@@ -46,34 +49,28 @@ struct Args {
 	#[arg(long)]
 	pr_pipeline: String,
 
-	/// Redis pipeline benchmark output file
-	#[arg(long)]
-	redis_pipeline: Option<String>,
+	/// Baseline pipeline benchmark output file in the form <name=path>
+	#[arg(long = "baseline-pipeline", value_name = "NAME=PATH")]
+	baseline_pipelines: Vec<String>,
 }
 
 fn main() {
 	let args = Args::parse();
 
-	let (main_map, pr_map, redis_map) =
-		read_and_parse_benchmarks(&args.main, &args.pr, args.redis.as_ref(), "");
+	let (main_map, pr_map, baselines) =
+		read_and_parse_benchmarks(&args.main, &args.pr, &args.baselines, "");
 
 	// Print default mode table
-	print_comparison_table(
-		"### Benchmark Comparison 🚀",
-		&main_map,
-		&pr_map,
-		redis_map.as_ref(),
-	);
+	print_comparison_table("### Benchmark Comparison 🚀", &main_map, &pr_map, &baselines);
 
 	println!();
 	println!("---");
 	println!();
 
-	// Print pipeline mode table
-	let (main_pipeline_map, pr_pipeline_map, redis_pipeline_map) = read_and_parse_benchmarks(
+	let (main_pipeline_map, pr_pipeline_map, baseline_pipelines) = read_and_parse_benchmarks(
 		&args.main_pipeline,
 		&args.pr_pipeline,
-		args.redis_pipeline.as_ref(),
+		&args.baseline_pipelines,
 		"pipeline",
 	);
 
@@ -81,7 +78,7 @@ fn main() {
 		"### Pipeline Benchmark Comparison (-P 50) ⚡",
 		&main_pipeline_map,
 		&pr_pipeline_map,
-		redis_pipeline_map.as_ref(),
+		&baseline_pipelines,
 	);
 
 	println!();
@@ -91,51 +88,58 @@ fn main() {
 fn read_and_parse_benchmarks(
 	main_file: &str,
 	pr_file: &str,
-	redis_file: Option<&String>,
+	baseline_files: &[String],
 	benchmark_type: &str,
-) -> (
-	HashMap<String, f64>,
-	HashMap<String, f64>,
-	Option<HashMap<String, f64>>,
-) {
+	) -> (BenchmarkMap, BenchmarkMap, Vec<NamedBenchmarkMap>) {
 	let main_content = fs::read_to_string(main_file)
 		.unwrap_or_else(|_| panic!("Failed to read main {} benchmark file", benchmark_type));
 	let pr_content = fs::read_to_string(pr_file)
 		.unwrap_or_else(|_| panic!("Failed to read pr {} benchmark file", benchmark_type));
-	let redis_content = redis_file.map(|f| {
-		fs::read_to_string(f)
-			.unwrap_or_else(|_| panic!("Failed to read redis {} benchmark file", benchmark_type))
-	});
 
 	let main_map = parse_benchmark(&main_content);
 	let pr_map = parse_benchmark(&pr_content);
-	let redis_map = redis_content.as_ref().map(|c| parse_benchmark(c));
+	let baselines = baseline_files
+		.iter()
+		.map(|entry| parse_named_path(entry, benchmark_type))
+		.map(|(name, path)| {
+			let content = fs::read_to_string(&path).unwrap_or_else(|_| {
+				panic!(
+					"Failed to read {} {} benchmark file",
+					name, benchmark_type
+				)
+			});
+			(name, parse_benchmark(&content))
+		})
+		.collect();
 
-	(main_map, pr_map, redis_map)
+	(main_map, pr_map, baselines)
 }
 
 fn print_comparison_table(
 	title: &str,
-	main_map: &HashMap<String, f64>,
-	pr_map: &HashMap<String, f64>,
-	redis_map: Option<&HashMap<String, f64>>,
+	main_map: &BenchmarkMap,
+	pr_map: &BenchmarkMap,
+	baselines: &[NamedBenchmarkMap],
 ) {
 	println!("{}", title);
 	println!();
 
-	if redis_map.is_some() {
-		println!("| Command | PR RPS | Main RPS | Redis RPS | vs Main | vs Redis |");
-		println!("|---|---|---|---|---|---|");
-	} else {
-		println!("| Command | PR RPS | Main RPS | vs Main |");
-		println!("|---|---|---|---|");
+	let mut headers = vec!["Command".to_string(), "PR RPS".to_string(), "Main RPS".to_string()];
+	for (name, _) in baselines {
+		headers.push(format!("{} RPS", name));
 	}
+	headers.push("vs Main".to_string());
+	for (name, _) in baselines {
+		headers.push(format!("vs {}", name));
+	}
+	println!("| {} |", headers.join(" | "));
+	println!("|{}|", vec!["---"; headers.len()].join("|"));
 
 	// Collect all commands
-	let mut commands: std::collections::BTreeSet<_> = main_map.keys().collect();
+	let mut commands: BTreeSet<_> = main_map.keys().collect();
 	commands.extend(pr_map.keys());
-	if let Some(r_map) = redis_map {
-		commands.extend(r_map.keys());
+	for (_, baseline_map) in baselines {
+		commands.extend(baseline_map.keys());
 	}
 
 	for cmd in commands {
@@ -164,40 +168,54 @@ fn print_comparison_table(
 			"-".to_string()
 		};
 
-		if let Some(r_map) = redis_map {
-			let redis_rps = r_map.get(cmd).copied().unwrap_or(0.0);
+		let mut row = vec![cmd.to_string(), format!("{:.2}", pr_rps), format!("{:.2}", main_rps)];
+		for (_, baseline_map) in baselines {
+			let baseline_rps = baseline_map.get(cmd).copied().unwrap_or(0.0);
+			row.push(format!("{:.2}", baseline_rps));
+		}
+		row.push(vs_main_cell);
 
-			// Calculate vs Redis diff
-			let redis_diff_percent = if redis_rps > 0.0 {
-				((pr_rps - redis_rps) / redis_rps) * 100.0
+		for (_, baseline_map) in baselines {
+			let baseline_rps = baseline_map.get(cmd).copied().unwrap_or(0.0);
+			let baseline_diff_percent = if baseline_rps > 0.0 {
+				((pr_rps - baseline_rps) / baseline_rps) * 100.0
 			} else if pr_rps > 0.0 {
 				100.0
 			} else {
 				0.0
 			};
 
-			let redis_icon = if redis_diff_percent > 0.0 {
-				"🏆 "
-			} else {
-				""
-			};
-			let vs_redis_cell = if redis_rps > 0.0 {
-				format!("{}{:+.2}%", redis_icon, redis_diff_percent)
+			let baseline_icon = if baseline_diff_percent > 0.0 { "🏆 " } else { "" };
+			let baseline_cell = if baseline_rps > 0.0 {
+				format!("{}{:+.2}%", baseline_icon, baseline_diff_percent)
 			} else {
 				"-".to_string()
 			};
-
-			println!(
-				"| {} | {:.2} | {:.2} | {:.2} | {} | {} |",
-				cmd, pr_rps, main_rps, redis_rps, vs_main_cell, vs_redis_cell
-			);
-		} else {
-			println!(
-				"| {} | {:.2} | {:.2} | {} |",
-				cmd, pr_rps, main_rps, vs_main_cell
-			);
+			row.push(baseline_cell);
 		}
+
+		println!("| {} |", row.join(" | "));
 	}
+}
+
+fn parse_named_path(value: &str, benchmark_type: &str) -> (String, String) {
+	let (name, path) = value.split_once('=').unwrap_or_else(|| {
+		panic!(
+			"Invalid {} baseline argument '{}', expected NAME=PATH",
+			benchmark_type, value
+		)
+	});
+
+	let trimmed_name = name.trim();
+	let trimmed_path = path.trim();
+	if trimmed_name.is_empty() || trimmed_path.is_empty() {
+		panic!(
+			"Invalid {} baseline argument '{}', expected non-empty NAME and PATH",
+			benchmark_type, value
+		);
+	}
+
+	(trimmed_name.to_string(), trimmed_path.to_string())
 }
 
 fn parse_benchmark(content: &str) -> HashMap<String, f64> {

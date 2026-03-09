@@ -1,8 +1,12 @@
 name: Benchmark
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Optional pull request number to comment benchmark results on
+        required: false
+        type: string
 
 jobs:
   benchmark:
@@ -17,6 +21,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y redis-tools redis-server
           cargo install rust-script
+
+      - name: Resolve latest baseline releases
+        run: |
+          PIKIWIDB_VERSION=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            https://api.github.com/repos/OpenAtomFoundation/pikiwidb/releases/latest | python3 -c "import json, sys; print(json.load(sys.stdin)['tag_name'])")
+          KVROCKS_RELEASE=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            https://api.github.com/repos/apache/kvrocks/releases/latest | python3 -c "import json, sys; print(json.load(sys.stdin)['tag_name'])")
+          KVROCKS_VERSION=${KVROCKS_RELEASE#v}
+
+          echo "PIKIWIDB_VERSION=$PIKIWIDB_VERSION" >> "$GITHUB_ENV"
+          echo "KVROCKS_RELEASE=$KVROCKS_RELEASE" >> "$GITHUB_ENV"
+          echo "KVROCKS_VERSION=$KVROCKS_VERSION" >> "$GITHUB_ENV"
 
       - name: Run Redis Benchmark
         run: |
@@ -46,6 +66,54 @@ jobs:
           redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_redis_pipeline.txt || true
           
           sudo systemctl stop redis-server
+
+      - name: Run PikiwiDB Benchmark
+        run: |
+          trap 'docker rm -f pikiwidb-benchmark >/dev/null 2>&1 || true' EXIT
+          docker run -d --rm --name pikiwidb-benchmark -p 6379:9221 pikadb/pika:${PIKIWIDB_VERSION}
+          sleep 10
+
+          echo "Warmup on PikiwiDB ${PIKIWIDB_VERSION}..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on PikiwiDB ${PIKIWIDB_VERSION}..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > benchmark_pikiwidb.txt || true
+
+      - name: Run PikiwiDB Benchmark with Pipeline
+        run: |
+          trap 'docker rm -f pikiwidb-benchmark >/dev/null 2>&1 || true' EXIT
+          docker run -d --rm --name pikiwidb-benchmark -p 6379:9221 pikadb/pika:${PIKIWIDB_VERSION}
+          sleep 10
+
+          echo "Warmup on PikiwiDB ${PIKIWIDB_VERSION} (Pipeline)..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on PikiwiDB ${PIKIWIDB_VERSION} (Pipeline)..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_pikiwidb_pipeline.txt || true
+
+      - name: Run Kvrocks Benchmark
+        run: |
+          trap 'docker rm -f kvrocks-benchmark >/dev/null 2>&1 || true' EXIT
+          docker run -d --rm --name kvrocks-benchmark -p 6379:6666 apache/kvrocks:${KVROCKS_VERSION} --bind 0.0.0.0
+          sleep 10
+
+          echo "Warmup on Kvrocks ${KVROCKS_RELEASE}..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on Kvrocks ${KVROCKS_RELEASE}..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > benchmark_kvrocks.txt || true
+
+      - name: Run Kvrocks Benchmark with Pipeline
+        run: |
+          trap 'docker rm -f kvrocks-benchmark >/dev/null 2>&1 || true' EXIT
+          docker run -d --rm --name kvrocks-benchmark -p 6379:6666 apache/kvrocks:${KVROCKS_VERSION} --bind 0.0.0.0
+          sleep 10
+
+          echo "Warmup on Kvrocks ${KVROCKS_RELEASE} (Pipeline)..."
+          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
+
+          echo "Running Benchmark on Kvrocks ${KVROCKS_RELEASE} (Pipeline)..."
+          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_kvrocks_pipeline.txt || true
 
       - name: Checkout Main
         uses: actions/checkout@v6
@@ -143,15 +211,20 @@ jobs:
           rust-script scripts/compare_benchmarks.rs \
             --main ../benchmark_main.txt \
             --pr ../benchmark_pr.txt \
-            --redis ../benchmark_redis.txt \
+            --baseline "Redis=../benchmark_redis.txt" \
+            --baseline "PikiwiDB ${PIKIWIDB_VERSION}=../benchmark_pikiwidb.txt" \
+            --baseline "Kvrocks ${KVROCKS_RELEASE}=../benchmark_kvrocks.txt" \
             --main-pipeline ../benchmark_main_pipeline.txt \
             --pr-pipeline ../benchmark_pr_pipeline.txt \
-            --redis-pipeline ../benchmark_redis_pipeline.txt \
+            --baseline-pipeline "Redis=../benchmark_redis_pipeline.txt" \
+            --baseline-pipeline "PikiwiDB ${PIKIWIDB_VERSION}=../benchmark_pikiwidb_pipeline.txt" \
+            --baseline-pipeline "Kvrocks ${KVROCKS_RELEASE}=../benchmark_kvrocks_pipeline.txt" \
             > ../benchmark_report.md
           
           cat ../benchmark_report.md
 
       - name: Comment on PR
+        if: ${{ inputs.pr_number != '' }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -159,7 +232,7 @@ jobs:
             const report = fs.readFileSync('benchmark_report.md', 'utf8');
             
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: Number('${{ inputs.pr_number }}'),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: report
