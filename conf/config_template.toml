@@ -7,6 +7,10 @@ port = 6379
 # Log level (trace, debug, info, warn, error)
 log_level = "info"
 
+# Log output mode: "terminal" or "file"
+# When set to "file", logs are written to {data_path}/nimbis.log
+log_output = "terminal"
+
 # Number of worker threads (default: number of CPU cores)
 # worker_threads = 8
 

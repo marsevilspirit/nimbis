@@ -1,8 +1,11 @@
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::fmt;
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload;
@@ -23,7 +26,146 @@ impl FormatTime for CustomTimeFormat {
 
 type ReloadHandle = reload::Handle<EnvFilter, Registry>;
 
-static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
+struct LoggerGuard {
+	_worker_guard: Option<WorkerGuard>,
+}
+
+impl LoggerGuard {
+	fn terminal() -> Self {
+		Self {
+			_worker_guard: None,
+		}
+	}
+
+	fn file(guard: WorkerGuard) -> Self {
+		Self {
+			_worker_guard: Some(guard),
+		}
+	}
+}
+
+struct LoggerState {
+	reload_handle: ReloadHandle,
+	// Keep the background writer alive for file logging.
+	_guard: LoggerGuard,
+}
+
+impl LoggerState {
+	fn new(reload_handle: ReloadHandle, guard: LoggerGuard) -> Self {
+		Self {
+			reload_handle,
+			_guard: guard,
+		}
+	}
+
+	fn reload_handle(&self) -> &ReloadHandle {
+		&self.reload_handle
+	}
+}
+
+static LOGGER_STATE: OnceLock<LoggerState> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Terminal;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct File {
+	path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogOutput {
+	Terminal(Terminal),
+	File(File),
+}
+
+impl Terminal {
+	fn init(
+		self,
+		filter_layer: reload::Layer<EnvFilter, Registry>,
+	) -> Result<LoggerGuard, TelemetryError> {
+		init_subscriber(filter_layer, std::io::stderr)?;
+		Ok(LoggerGuard::terminal())
+	}
+}
+
+impl File {
+	pub fn new(path: impl Into<PathBuf>) -> Self {
+		Self { path: path.into() }
+	}
+
+	fn init(
+		self,
+		filter_layer: reload::Layer<EnvFilter, Registry>,
+	) -> Result<LoggerGuard, TelemetryError> {
+		let parent = self.path.parent().ok_or_else(|| {
+			TelemetryError::InitFailed(format!(
+				"log file path has no parent directory: {}",
+				self.path.display()
+			))
+		})?;
+		let file_name = self.path.file_name().ok_or_else(|| {
+			TelemetryError::InitFailed(format!(
+				"log file path has no file name: {}",
+				self.path.display()
+			))
+		})?;
+		let file_appender = tracing_appender::rolling::never(parent, file_name);
+		let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+		init_subscriber(filter_layer, non_blocking)?;
+		Ok(LoggerGuard::file(guard))
+	}
+}
+
+impl LogOutput {
+	pub fn from_mode(
+		mode: &str,
+		log_file_path: impl Into<PathBuf>,
+	) -> Result<Self, TelemetryError> {
+		match mode.trim().to_ascii_lowercase().as_str() {
+			"terminal" => Ok(Self::Terminal(Terminal)),
+			"file" => Ok(Self::File(File::new(log_file_path))),
+			_ => Err(TelemetryError::InvalidLogOutput(mode.to_string())),
+		}
+	}
+
+	pub fn is_file(&self) -> bool {
+		matches!(self, Self::File(_))
+	}
+
+	fn init(
+		self,
+		filter_layer: reload::Layer<EnvFilter, Registry>,
+	) -> Result<LoggerGuard, TelemetryError> {
+		match self {
+			Self::Terminal(output) => output.init(filter_layer),
+			Self::File(output) => output.init(filter_layer),
+		}
+	}
+}
+
+fn init_subscriber<W>(
+	filter_layer: reload::Layer<EnvFilter, Registry>,
+	writer: W,
+) -> Result<(), TelemetryError>
+where
+	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+{
+	tracing_subscriber::registry()
+		.with(filter_layer)
+		.with(
+			fmt::layer()
+				.with_timer(CustomTimeFormat)
+				.with_target(false)
+				.with_thread_ids(true)
+				.with_line_number(false)
+				.with_file(false)
+				.with_writer(writer),
+		)
+		.try_init()
+		.map_err(|e| TelemetryError::InitFailed(e.to_string()))
+}
 
 /// Initialize the logger with the provided log level
 ///
@@ -35,33 +177,26 @@ static RELOAD_HANDLE: OnceLock<ReloadHandle> = OnceLock::new();
 /// # Arguments
 ///
 /// * `level` - The log level filter string (e.g., "info", "debug", "warn")
+/// * `output` - The output sink to use
 ///
 /// # Example
 ///
 /// ```no_run
 /// // let args = Cli::parse();
-/// telemetry::logger::init("info");
+/// let output = telemetry::logger::LogOutput::from_mode("terminal", "./nimbis_data/nimbis.log")?;
+/// telemetry::logger::init("info", output)?;
 /// log::info!("Server starting");
+/// # Ok::<(), telemetry::TelemetryError>(())
 /// ```
-pub fn init(level: &str) {
+pub fn init(level: &str, output: LogOutput) -> Result<(), TelemetryError> {
 	// Initialize with provided level
 	let env_filter = EnvFilter::new(level);
 
 	let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
-	let _ = RELOAD_HANDLE.set(reload_handle);
+	let file_guard = output.init(filter_layer)?;
 
-	// Initialize the subscriber with formatting layer
-	tracing_subscriber::registry()
-		.with(filter_layer)
-		.with(
-			fmt::layer()
-				.with_timer(CustomTimeFormat)
-				.with_target(false)
-				.with_thread_ids(true)
-				.with_line_number(false)
-				.with_file(false),
-		)
-		.init();
+	let _ = LOGGER_STATE.set(LoggerState::new(reload_handle, file_guard));
+	Ok(())
 }
 
 /// Reload the log level dynamically
@@ -94,12 +229,12 @@ pub fn reload_log_level(level: &str) -> Result<(), TelemetryError> {
 		return Err(TelemetryError::InvalidLogLevel(level.to_string()));
 	}
 
-	// Get the reload handle
-	let handle = RELOAD_HANDLE.get().ok_or(TelemetryError::NotInitialized)?;
+	let state = LOGGER_STATE.get().ok_or(TelemetryError::NotInitialized)?;
 
 	// Create new filter and reload
 	let new_filter = EnvFilter::new(&level_lower);
-	handle
+	state
+		.reload_handle()
 		.reload(new_filter)
 		.map_err(|e| TelemetryError::ReloadFailed(e.to_string()))
 }
@@ -109,6 +244,33 @@ mod tests {
 	use rstest::rstest;
 
 	use super::*;
+
+	#[rstest]
+	#[case("terminal")]
+	#[case("TERMINAL")]
+	fn test_terminal_log_output(#[case] value: &str) {
+		let output = LogOutput::from_mode(value, "./nimbis_data/nimbis.log").unwrap();
+		assert!(matches!(output, LogOutput::Terminal(Terminal)));
+		assert!(!output.is_file());
+	}
+
+	#[rstest]
+	#[case("file")]
+	#[case("FiLe")]
+	fn test_file_log_output(#[case] value: &str) {
+		let output = LogOutput::from_mode(value, "./nimbis_data/nimbis.log").unwrap();
+		assert!(matches!(output, LogOutput::File(File { .. })));
+		assert!(output.is_file());
+	}
+
+	#[rstest]
+	#[case("stdout")]
+	#[case("console")]
+	#[case("")]
+	fn test_invalid_log_outputs(#[case] value: &str) {
+		let result = LogOutput::from_mode(value, "./nimbis_data/nimbis.log");
+		assert!(matches!(result, Err(TelemetryError::InvalidLogOutput(_))));
+	}
 
 	/// Test that valid log levels pass validation but return NotInitialized
 	/// error

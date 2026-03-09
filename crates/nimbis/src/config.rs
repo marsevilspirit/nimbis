@@ -19,6 +19,7 @@
 //! ```
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -53,6 +54,15 @@ pub enum ConfigError {
 
 	#[error("Configuration file has no extension")]
 	NoExtension,
+
+	#[error("Failed to initialize data directory '{path}': {source}")]
+	DataPathInit {
+		source: std::io::Error,
+		path: String,
+	},
+
+	#[error(transparent)]
+	Telemetry(#[from] telemetry::TelemetryError),
 }
 
 /// Command-line arguments for the server
@@ -98,6 +108,8 @@ pub struct ServerConfig {
 	#[online_config(callback = "on_log_level_change")]
 	pub log_level: String,
 	#[online_config(immutable)]
+	pub log_output: String,
+	#[online_config(immutable)]
 	pub worker_threads: usize,
 }
 
@@ -116,6 +128,7 @@ impl Default for ServerConfig {
 			save: "".into(),
 			appendonly: "no".into(),
 			log_level: "info".into(),
+			log_output: "terminal".into(),
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -191,9 +204,28 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		config.worker_threads = t;
 	}
 
-	telemetry::logger::init(&config.log_level);
+	let log_output = resolve_log_output(&config)?;
+
+	if log_output.is_file() {
+		std::fs::create_dir_all(&config.data_path).map_err(|source| ConfigError::DataPathInit {
+			path: config.data_path.clone(),
+			source,
+		})?;
+	}
+
+	telemetry::logger::init(&config.log_level, log_output)?;
 	SERVER_CONF.init(config);
 	Ok(())
+}
+
+fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
+	Path::new(&config.data_path).join("nimbis.log")
+}
+
+fn resolve_log_output(config: &ServerConfig) -> Result<telemetry::logger::LogOutput, ConfigError> {
+	let log_file_path = resolve_log_file_path(config);
+	telemetry::logger::LogOutput::from_mode(&config.log_output, log_file_path)
+		.map_err(ConfigError::from)
 }
 
 fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> {
@@ -251,6 +283,7 @@ data_path = "./data"
 save = "900 1"
 appendonly = "yes"
 log_level = "debug"
+log_output = "file"
 worker_threads = 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -259,6 +292,7 @@ worker_threads = 4
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.log_level, "debug");
+		assert_eq!(config.log_output, "file");
 		assert_eq!(config.worker_threads, 4);
 	}
 
@@ -274,6 +308,7 @@ worker_threads = 4
   "save": "900 1",
   "appendonly": "yes",
   "log_level": "debug",
+	"log_output": "file",
   "worker_threads": 4
 }
 "#;
@@ -283,6 +318,7 @@ worker_threads = 4
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.log_level, "debug");
+		assert_eq!(config.log_output, "file");
 	}
 
 	#[test]
@@ -296,6 +332,7 @@ data_path: "./data"
 save: "900 1"
 appendonly: "yes"
 log_level: "debug"
+log_output: "file"
 worker_threads: 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -304,5 +341,43 @@ worker_threads: 4
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.log_level, "debug");
+		assert_eq!(config.log_output, "file");
+	}
+
+	#[test]
+	fn test_default_log_output() {
+		assert_eq!(ServerConfig::default().log_output, "terminal");
+	}
+
+	#[test]
+	fn test_resolve_log_file_path() {
+		let config = ServerConfig {
+			data_path: "./nimbis_data".into(),
+			..ServerConfig::default()
+		};
+
+		assert_eq!(
+			resolve_log_file_path(&config),
+			Path::new("./nimbis_data").join("nimbis.log")
+		);
+	}
+
+	#[test]
+	fn test_resolve_terminal_log_output() {
+		let output = resolve_log_output(&ServerConfig::default()).unwrap();
+		assert!(matches!(output, telemetry::logger::LogOutput::Terminal(_)));
+	}
+
+	#[test]
+	fn test_resolve_file_log_output() {
+		let config = ServerConfig {
+			log_output: "file".into(),
+			data_path: "./custom_data".into(),
+			..ServerConfig::default()
+		};
+
+		let output = resolve_log_output(&config).unwrap();
+		assert!(matches!(output, telemetry::logger::LogOutput::File(_)));
+		assert!(output.is_file());
 	}
 }

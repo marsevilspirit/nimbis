@@ -43,6 +43,10 @@ pub struct MyConfig {
     // Field with callback - triggers on_log_level_change when updated
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
+
+    // Immutable startup-only output mode
+    #[online_config(immutable)]
+    pub log_output: String,
 }
 
 impl MyConfig {
@@ -143,6 +147,9 @@ pub struct ServerConfig {
     pub log_level: String,
 
     #[online_config(immutable)]
+    pub log_output: String,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -160,6 +167,15 @@ let current = SERVER_CONF.load();
 ```
 
 This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.
+
+### 4.2 Startup-only Log Output
+
+Nimbis also exposes an immutable `log_output` field for selecting the startup log sink:
+
+- `terminal`: keep writing logs to stderr/stdout via the tracing formatter.
+- `file`: write logs to `{data_path}/nimbis.log`.
+
+Because log sink selection changes bootstrap behavior, `log_output` is immutable and must be set in the configuration file before startup. Runtime commands such as `CONFIG SET log_output file` will be rejected.
 
 ## 5. Build-time Configuration
 
