@@ -8,10 +8,10 @@ port = 6379
 log_level = "info"
 
 # Log output mode: "terminal" or "file"
-# When set to "file", logs are written under {data_path}/ using the base name
-# "nimbis" and extension ".log". With log_rotation = "never", the file stays
-# at {data_path}/nimbis.log. Other rotation modes create time-rotated files in
-# the same directory with tracing_appender-managed names.
+# When set to "file", logs are written under {data_path}/ using nimbis.log as
+# the path template. With log_rotation = "never", logs stay in
+# {data_path}/nimbis.log; other rotation modes create time-rotated files in the
+# same directory according to log_rotation.
 log_output = "terminal"
 
 # File log rotation: "minutely", "hourly", "daily", or "never"
