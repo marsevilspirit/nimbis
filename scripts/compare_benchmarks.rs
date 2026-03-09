@@ -5,8 +5,9 @@
 //! ```
 //!
 //! This script compares benchmark results between two branches (typically Main
-//! and PR) and optionally against one or more baselines. It generates a Markdown table
-//! summarizing the requests per second (RPS) and the percentage difference.
+//! and PR) and optionally against one or more baselines. It generates a
+//! Markdown table summarizing the requests per second (RPS) and the percentage
+//! difference.
 //!
 //! Usage:
 //!     rust-script scripts/compare_benchmarks.rs \
@@ -17,7 +18,8 @@
 //!         [--baseline <name=bench_file>]... \
 //!         [--baseline-pipeline <name=bench_file>]...
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::fs;
 
 use clap::Parser;
@@ -61,7 +63,12 @@ fn main() {
 		read_and_parse_benchmarks(&args.main, &args.pr, &args.baselines, "");
 
 	// Print default mode table
-	print_comparison_table("### Benchmark Comparison 🚀", &main_map, &pr_map, &baselines);
+	print_comparison_table(
+		"### Benchmark Comparison 🚀",
+		&main_map,
+		&pr_map,
+		&baselines,
+	);
 
 	println!();
 	println!("---");
@@ -90,7 +97,7 @@ fn read_and_parse_benchmarks(
 	pr_file: &str,
 	baseline_files: &[String],
 	benchmark_type: &str,
-	) -> (BenchmarkMap, BenchmarkMap, Vec<NamedBenchmarkMap>) {
+) -> (BenchmarkMap, BenchmarkMap, Vec<NamedBenchmarkMap>) {
 	let main_content = fs::read_to_string(main_file)
 		.unwrap_or_else(|_| panic!("Failed to read main {} benchmark file", benchmark_type));
 	let pr_content = fs::read_to_string(pr_file)
@@ -103,10 +110,7 @@ fn read_and_parse_benchmarks(
 		.map(|entry| parse_named_path(entry, benchmark_type))
 		.map(|(name, path)| {
 			let content = fs::read_to_string(&path).unwrap_or_else(|_| {
-				panic!(
-					"Failed to read {} {} benchmark file",
-					name, benchmark_type
-				)
+				panic!("Failed to read {} {} benchmark file", name, benchmark_type)
 			});
 			(name, parse_benchmark(&content))
 		})
@@ -124,7 +128,11 @@ fn print_comparison_table(
 	println!("{}", title);
 	println!();
 
-	let mut headers = vec!["Command".to_string(), "PR RPS".to_string(), "Main RPS".to_string()];
+	let mut headers = vec![
+		"Command".to_string(),
+		"PR RPS".to_string(),
+		"Main RPS".to_string(),
+	];
 	for (name, _) in baselines {
 		headers.push(format!("{} RPS", name));
 	}
@@ -168,7 +176,11 @@ fn print_comparison_table(
 			"-".to_string()
 		};
 
-		let mut row = vec![cmd.to_string(), format!("{:.2}", pr_rps), format!("{:.2}", main_rps)];
+		let mut row = vec![
+			cmd.to_string(),
+			format!("{:.2}", pr_rps),
+			format!("{:.2}", main_rps),
+		];
 		for (_, baseline_map) in baselines {
 			let baseline_rps = baseline_map.get(cmd).copied().unwrap_or(0.0);
 			row.push(format!("{:.2}", baseline_rps));
@@ -185,7 +197,11 @@ fn print_comparison_table(
 				0.0
 			};
 
-			let baseline_icon = if baseline_diff_percent > 0.0 { "🏆 " } else { "" };
+			let baseline_icon = if baseline_diff_percent > 0.0 {
+				"🏆 "
+			} else {
+				""
+			};
 			let baseline_cell = if baseline_rps > 0.0 {
 				format!("{}{:+.2}%", baseline_icon, baseline_diff_percent)
 			} else {
