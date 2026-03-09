@@ -178,7 +178,7 @@ This allows the server to dynamically change its log level at runtime via the `C
 
 Nimbis also exposes an immutable `log_output` field for selecting the startup log sink:
 
-- `terminal`: keep writing logs to stderr/stdout via the tracing formatter.
+- `terminal`: keep writing logs to stderr via the tracing formatter.
 - `file`: write logs to `{data_path}/nimbis.log`.
 
 Because log sink selection changes bootstrap behavior, `log_output` is immutable and must be set in the configuration file before startup. Runtime commands such as `CONFIG SET log_output file` will be rejected.
