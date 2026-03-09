@@ -250,6 +250,10 @@ where
 /// # Ok::<(), telemetry::TelemetryError>(())
 /// ```
 pub fn init(level: &str, output: LogOutput) -> Result<(), TelemetryError> {
+	if LOGGER_STATE.get().is_some() {
+		return Err(TelemetryError::AlreadyInitialized);
+	}
+
 	// Initialize with provided level
 	let env_filter = EnvFilter::new(level);
 
