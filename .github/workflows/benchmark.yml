@@ -12,6 +12,7 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     permissions:
+      issues: write
       pull-requests: write
       contents: read
 
