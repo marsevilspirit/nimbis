@@ -15,8 +15,8 @@
 //!         --pr <pr_bench_file> \
 //!         --main-pipeline <main_pipeline_file> \
 //!         --pr-pipeline <pr_pipeline_file> \
-//!         [--baseline <name=bench_file>]... \
-//!         [--baseline-pipeline <name=bench_file>]...
+//!         [--baseline <NAME=PATH>]... \
+//!         [--baseline-pipeline <NAME=PATH>]...
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
