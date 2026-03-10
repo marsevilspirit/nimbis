@@ -231,9 +231,17 @@ jobs:
           script: |
             const fs = require('fs');
             const report = fs.readFileSync('benchmark_report.md', 'utf8');
+            const rawPrNumber = '${{ inputs.pr_number }}'.trim();
+            const prNumber = Number.parseInt(rawPrNumber, 10);
+
+            if (!rawPrNumber || Number.isNaN(prNumber) || `${prNumber}` !== rawPrNumber) {
+              throw new Error(
+                `Invalid pr_number input: "${rawPrNumber}". Expected a non-empty integer pull request number.`
+              );
+            }
             
             github.rest.issues.createComment({
-              issue_number: Number('${{ inputs.pr_number }}'),
+              issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: report
