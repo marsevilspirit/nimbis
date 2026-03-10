@@ -134,11 +134,11 @@ fn print_comparison_table(
 		"Main RPS".to_string(),
 	];
 	for (name, _) in baselines {
-		headers.push(format!("{} RPS", name));
+		headers.push(format!("{} RPS", sanitize_markdown_table_text(name)));
 	}
 	headers.push("vs Main".to_string());
 	for (name, _) in baselines {
-		headers.push(format!("vs {}", name));
+		headers.push(format!("vs {}", sanitize_markdown_table_text(name)));
 	}
 	println!("| {} |", headers.join(" | "));
 	println!("|{}|", vec!["---"; headers.len()].join("|"));
@@ -212,6 +212,16 @@ fn print_comparison_table(
 
 		println!("| {} |", row.join(" | "));
 	}
+}
+
+fn sanitize_markdown_table_text(value: &str) -> String {
+	value
+		.lines()
+		.map(str::trim)
+		.filter(|part| !part.is_empty())
+		.collect::<Vec<_>>()
+		.join(" ")
+		.replace('|', "\\|")
 }
 
 fn parse_named_path(value: &str, benchmark_type: &str) -> (String, String) {
