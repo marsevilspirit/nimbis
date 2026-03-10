@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 
 use crate::client::ClientSession;
 use crate::cmd::CmdTable;
+use crate::dispatcher::HashRing;
 
 pub struct CmdRequest {
 	pub(crate) cmd_name: String,
@@ -32,11 +33,12 @@ pub struct Worker {
 }
 
 impl Worker {
-	pub fn new(
+	pub(crate) fn new(
 		id: usize,
 		tx: mpsc::UnboundedSender<WorkerMessage>,
 		mut rx: mpsc::UnboundedReceiver<WorkerMessage>,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		hash_ring: Arc<HashRing>,
 		storage: Arc<Storage>,
 		cmd_table: Arc<CmdTable>,
 	) -> Self {
@@ -68,8 +70,9 @@ impl Worker {
 						match msg {
 							WorkerMessage::NewConnection(socket) => {
 								let peers = peers.clone();
+								let hash_ring = hash_ring.clone();
 								tokio::spawn(async move {
-									let mut session = ClientSession::new(socket, peers);
+									let mut session = ClientSession::new(socket, peers, hash_ring);
 									if let Err(e) = session.run().await {
 										debug!("Client session error: {}", e);
 									}

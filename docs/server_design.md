@@ -210,24 +210,24 @@ To ensure **key-based affinity** - commands targeting the same key must be proce
 - **Atomic operations** on the same key are serialized
 - **Multi-key operations** see a consistent view across commands
 
-#### 3.5.2 Routing Algorithm: FNV-1a
+#### 3.5.2 Routing Algorithm: FNV-1a + Virtual-Node Hash Ring
 
-Nimbis uses the **FNV-1a** hashing algorithm for its speed and good distribution properties on short keys:
+Nimbis uses the **FNV-1a** hashing algorithm for its speed and good distribution properties on short keys. Each worker is represented by multiple **virtual nodes** on a sorted hash ring so command ownership is distributed more evenly:
 
 ```rust
-let mut hasher: u64 = 0xcbf29ce484222325;
-for byte in &key {
-    hasher ^= *byte as u64;
-    hasher = hasher.wrapping_mul(0x100000001b3);
-}
-let target_worker_idx = (hasher as usize) % peers.len();
+let key_hash = hash_key(key);
+let idx = ring
+    .binary_search_by_key(&key_hash, |node| node.hash)
+    .unwrap_or_else(|idx| idx);
+let target_worker_idx = ring[idx % ring.len()].worker_idx;
 ```
 
 **Steps:**
-1. Extract the first argument (typically the key)
-2. Compute 64-bit FNV-1a hash
-3. Modulo by worker count to get target worker index
-4. Route via `CmdBatchDescriptor` to target worker
+1. Build the hash ring at startup, placing multiple virtual nodes for every worker.
+2. Extract the first argument (typically the key).
+3. Compute the key's 64-bit FNV-1a hash.
+4. Binary-search the ring for the first virtual node whose hash is greater than or equal to the key hash.
+5. Wrap around to the beginning of the ring when needed and route the command to that worker.
 
 #### 3.5.3 Channel Communication
 
@@ -245,6 +245,7 @@ let response = resp_rx.await?;
 - **Serial Execution**: All commands for a key go through the same worker's channel
 - **Non-blocking**: Async channels don't block the sender
 - **Response Channel**: `oneshot` channel ensures response delivery
+- **Better Balance**: Virtual nodes reduce skew caused by sparse worker placement on the hash ring
 
 ### 3.6 Client Handling (`handle_client`)
 

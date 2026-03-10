@@ -9,6 +9,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 use crate::cmd::CmdTable;
+use crate::dispatcher::HashRing;
 use crate::server_config;
 use crate::worker::Worker;
 use crate::worker::WorkerMessage;
@@ -42,6 +43,7 @@ impl Server {
 
 		// Wrap senders in Arc to avoid deep cloning for each worker
 		let senders = Arc::new(senders);
+		let hash_ring = Arc::new(HashRing::new(senders.keys().copied()));
 
 		// Second pass: create workers and sharded storage
 		for (i, rx) in receivers.into_iter().enumerate() {
@@ -58,6 +60,7 @@ impl Server {
 				my_tx,
 				rx,
 				senders.clone(),
+				hash_ring.clone(),
 				storage, // This is now unique per worker
 				cmd_table.clone(),
 			));

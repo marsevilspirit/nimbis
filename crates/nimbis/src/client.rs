@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::cmd::ParsedCmd;
 use crate::dispatcher::CommandDispatcher;
+use crate::dispatcher::HashRing;
 use crate::worker::WorkerMessage;
 
 pub struct ClientSession {
@@ -23,13 +24,14 @@ pub struct ClientSession {
 }
 
 impl ClientSession {
-	pub fn new(
+	pub(crate) fn new(
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		hash_ring: Arc<HashRing>,
 	) -> Self {
 		Self {
 			socket,
-			dispatcher: CommandDispatcher::new(peers),
+			dispatcher: CommandDispatcher::new(peers, hash_ring),
 			parser: RespParser::new(),
 		}
 	}
