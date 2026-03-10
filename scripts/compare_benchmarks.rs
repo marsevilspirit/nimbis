@@ -107,8 +107,8 @@ fn read_and_parse_benchmarks(
 	let pr_map = parse_benchmark(&pr_content);
 	let baselines = baseline_files
 		.iter()
-		.map(|entry| parse_named_path(entry, benchmark_type))
-		.map(|(name, path)| {
+		.map(|entry| {
+			let (name, path) = parse_named_path(entry, benchmark_type);
 			let content = fs::read_to_string(&path).unwrap_or_else(|_| {
 				panic!("Failed to read {} {} benchmark file", name, benchmark_type)
 			});
