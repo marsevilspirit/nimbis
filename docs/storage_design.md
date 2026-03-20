@@ -396,14 +396,6 @@ nimbis_store/
     ├── list/         # List elements storage
     ├── set/          # Set members storage
     └── zset/         # Sorted Set members and score indices
-
-nimbis_store/
-└── shard-1/          # Worker 1's isolated storage (and so on...)
-    ├── string/
-    ├── hash/
-    ├── list/
-    ├── set/
-    └── zset/
 ```
 
 Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.). The sharded architecture ensures:

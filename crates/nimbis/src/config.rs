@@ -378,14 +378,11 @@ worker_threads: 4
 
 	#[test]
 	fn test_resolve_log_file_path() {
-		let config = ServerConfig {
-			data_path: "./nimbis_store".into(),
-			..ServerConfig::default()
-		};
+		let config = ServerConfig::default();
 
 		assert_eq!(
 			resolve_log_file_path(&config),
-			Path::new("./nimbis_store").join("nimbis.log")
+			Path::new(&config.data_path).join("nimbis.log")
 		);
 	}
 
