@@ -74,12 +74,12 @@ func StartServer() error {
 		return fmt.Errorf("failed to find project root: %w", err)
 	}
 
-	// Clean up nimbis_data
-	dataPath := filepath.Join(projectRoot, "nimbis_data")
+	// Clean up nimbis_store
+	dataPath := filepath.Join(projectRoot, "nimbis_store")
 	_ = os.RemoveAll(dataPath)
 
 	serverCmd = exec.Command(binPath)
-	serverCmd.Dir = projectRoot // Run from project root to find nimbis_data
+	serverCmd.Dir = projectRoot // Run from project root to find nimbis_store
 	// Redirect stdout/stderr for debugging
 	serverCmd.Stdout = os.Stdout
 	serverCmd.Stderr = os.Stderr

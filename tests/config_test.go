@@ -42,7 +42,7 @@ var _ = Describe("CONFIG Commands", func() {
 			result, err := rdb.ConfigGet(ctx, "data_path").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
+			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
 		})
 
 		It("should get the log output", func() {
@@ -71,7 +71,7 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveLen(9)) // host, port, data_path, save, appendonly, log_level, log_output, log_rotation, worker_threads
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
-			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
+			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))
@@ -105,7 +105,7 @@ var _ = Describe("CONFIG Commands", func() {
 			result, err := rdb.ConfigGet(ctx, "*path").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_data"))
+			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
 		})
 
 		It("should return empty array for non-matching wildcard", func() {
@@ -135,7 +135,7 @@ var _ = Describe("CONFIG Commands", func() {
 			// Verify the value hasn't changed
 			result, err := rdb.ConfigGet(ctx, "data_path").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result["data_path"]).To(Equal("./nimbis_data"))
+			Expect(result["data_path"]).To(Equal("./nimbis_store"))
 		})
 
 		It("should fail to set immutable field 'log_output'", func() {

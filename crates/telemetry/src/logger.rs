@@ -232,8 +232,8 @@ where
 ///
 /// * `level` - The log level filter string (e.g., "info", "debug", "warn")
 /// * `output` - The output sink to use. When configured for file output with a
-///   path like `./nimbis_data/nimbis.log`, time-based rotation writes files in
-///   `./nimbis_data/` using `nimbis` as the base name and `log` as the suffix;
+///   path like `./nimbis_store/nimbis.log`, time-based rotation writes files in
+///   `./nimbis_store/` using `nimbis` as the base name and `log` as the suffix;
 ///   only `LogRotation::Never` keeps writing to the single `nimbis.log` path.
 ///
 /// # Example
@@ -242,7 +242,7 @@ where
 /// // let args = Cli::parse();
 /// let output = telemetry::logger::LogOutput::from_mode(
 ///     "terminal",
-///     "./nimbis_data/nimbis.log",
+///     "./nimbis_store/nimbis.log",
 ///     telemetry::logger::LogRotation::Daily,
 /// )?;
 /// telemetry::logger::init("info", output)?;
@@ -317,7 +317,7 @@ mod tests {
 	#[case("TERMINAL")]
 	fn test_terminal_log_output(#[case] value: &str) {
 		let output =
-			LogOutput::from_mode(value, "./nimbis_data/nimbis.log", LogRotation::Daily).unwrap();
+			LogOutput::from_mode(value, "./nimbis_store/nimbis.log", LogRotation::Daily).unwrap();
 		assert!(matches!(output, LogOutput::Terminal(Terminal)));
 		assert!(!output.is_file());
 	}
@@ -327,7 +327,7 @@ mod tests {
 	#[case("FiLe")]
 	fn test_file_log_output(#[case] value: &str) {
 		let output =
-			LogOutput::from_mode(value, "./nimbis_data/nimbis.log", LogRotation::Daily).unwrap();
+			LogOutput::from_mode(value, "./nimbis_store/nimbis.log", LogRotation::Daily).unwrap();
 		assert!(matches!(output, LogOutput::File(File { .. })));
 		assert!(output.is_file());
 	}
@@ -337,7 +337,7 @@ mod tests {
 	#[case("console")]
 	#[case("")]
 	fn test_invalid_log_outputs(#[case] value: &str) {
-		let result = LogOutput::from_mode(value, "./nimbis_data/nimbis.log", LogRotation::Daily);
+		let result = LogOutput::from_mode(value, "./nimbis_store/nimbis.log", LogRotation::Daily);
 		assert!(matches!(result, Err(TelemetryError::InvalidLogOutput(_))));
 	}
 

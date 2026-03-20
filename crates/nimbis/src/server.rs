@@ -48,7 +48,7 @@ impl Server {
 			let my_tx = senders.get(&i).unwrap().clone();
 
 			// SHARDED STORAGE: Create a unique Storage instance for this worker
-			// Data will be in .../nimbis_data/shard-{i}/...
+			// Data will be in .../nimbis_store/shard-{i}/...
 			let storage = Arc::new(Storage::open(data_path, Some(i)).await?);
 
 			// workers need the full map of senders to route commands to the appropriate

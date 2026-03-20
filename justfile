@@ -16,7 +16,7 @@ test:
 # Run e2e tests
 [group: 'test']
 e2e-test: (build "--release")
-    rm -rf nimbis_data
+    rm -rf nimbis_store
     cd tests && go test -timeout 15m --ginkgo.v
 
 # Check all crates
@@ -55,7 +55,7 @@ fmt:
 [group: 'clean']
 clean:
     cargo clean
-    rm -rf nimbis_data
+    rm -rf nimbis_store
 
 # Run nimbis-server
 [group: 'misc']

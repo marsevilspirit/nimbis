@@ -126,7 +126,7 @@ impl Default for ServerConfig {
 		Self {
 			host: "127.0.0.1".into(),
 			port: 6379,
-			data_path: "./nimbis_data".into(),
+			data_path: "./nimbis_store".into(),
 			save: "".into(),
 			appendonly: "no".into(),
 			log_level: "info".into(),
@@ -378,14 +378,11 @@ worker_threads: 4
 
 	#[test]
 	fn test_resolve_log_file_path() {
-		let config = ServerConfig {
-			data_path: "./nimbis_data".into(),
-			..ServerConfig::default()
-		};
+		let config = ServerConfig::default();
 
 		assert_eq!(
 			resolve_log_file_path(&config),
-			Path::new("./nimbis_data").join("nimbis.log")
+			Path::new(&config.data_path).join("nimbis.log")
 		);
 	}
 

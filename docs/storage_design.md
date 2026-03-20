@@ -376,7 +376,7 @@ The server initializes the storage in `Storage::open`:
 
 ```rust
 // Initialize persistent storage at local path
-let storage = Storage::open("./nimbis_data").await?;
+let storage = Storage::open("./nimbis_store").await?;
 ```
 
 This method:
@@ -386,24 +386,16 @@ This method:
 
 ### Directory Structure
 
-When you call `Storage::open("./nimbis_data", Some(shard_id))`, it creates the following structure per worker:
+When you call `Storage::open("./nimbis_store", Some(shard_id))`, it creates the following structure per worker:
 
 ```
-nimbis_data/
+nimbis_store/
 └── shard-0/          # Worker 0's isolated storage
     ├── string/       # String key-value and metadata storage
     ├── hash/         # Hash fields storage
     ├── list/         # List elements storage
     ├── set/          # Set members storage
     └── zset/         # Sorted Set members and score indices
-
-nimbis_data/
-└── shard-1/          # Worker 1's isolated storage (and so on...)
-    ├── string/
-    ├── hash/
-    ├── list/
-    ├── set/
-    └── zset/
 ```
 
 Each directory contains SlateDB's internal files (manifests, WAL, SST files, etc.). The sharded architecture ensures:

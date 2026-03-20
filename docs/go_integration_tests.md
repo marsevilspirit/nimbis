@@ -28,7 +28,7 @@ The test program attempts to find the `nimbis` executable in the following way:
 
 ### Server Startup Process
 1.  `util.StartServer()` starts a subprocess (`os/exec`) to run `nimbis`.
-2.  Sets the working directory to the project root to ensure the server can correctly load configuration files or data directories (e.g., `nimbis_data`).
+2.  Sets the working directory to the project root to ensure the server can correctly load configuration files or data directories (e.g., `nimbis_store`).
 3.  Redirects the server's `Stdout` and `Stderr` to the test process's standard output for easy debugging.
 4.  **Health Check**: After startup, the test program loops to try sending `PING` commands to `localhost:6379`. Only after receiving a `PONG` response does it consider the server successfully started and begins executing tests; otherwise, it reports an error after a timeout.
 
