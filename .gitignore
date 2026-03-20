@@ -4,4 +4,4 @@ CLAUDE.md
 config.toml
 
 /target
-/nimbis_data
+/nimbis_store
