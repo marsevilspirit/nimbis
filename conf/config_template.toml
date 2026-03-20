@@ -23,7 +23,7 @@ log_rotation = "daily"
 # worker_threads = 8
 
 # Path to store data
-data_path = "./nimbis_data"
+data_path = "./nimbis_store"
 
 # Placeholder for Redis compatibility (immutable)
 save = ""
