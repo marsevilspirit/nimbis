@@ -25,19 +25,17 @@ pub struct NimbisCompactionFilter {
 }
 
 impl NimbisCompactionFilter {
-	fn decode_sub_key(key: &[u8]) -> Option<(Bytes, u64)> {
+	fn decode_sub_key(key: &[u8]) -> Option<Bytes> {
 		if key.len() < 2 {
 			return None;
 		}
 		let mut buf = key;
 		let key_len = buf.get_u16() as usize;
-		if buf.len() < key_len + 8 {
+		if buf.len() < key_len {
 			return None;
 		}
 		let user_key = Bytes::copy_from_slice(&buf[..key_len]);
-		buf.advance(key_len);
-		let version = buf.get_u64();
-		Some((user_key, version))
+		Some(user_key)
 	}
 }
 
@@ -84,8 +82,8 @@ impl CompactionFilter for NimbisCompactionFilter {
 					return Ok(CompactionFilterDecision::Keep);
 				};
 
-				// Decode sub-key to get user_key and version
-				let Some((user_key, version)) = Self::decode_sub_key(&entry.key) else {
+				// Decode sub-key to get user_key
+				let Some(user_key) = Self::decode_sub_key(&entry.key) else {
 					// Invalid key format? Keep safe.
 					debug!(
 						"[{:?}Filter] Invalid key format: {:?}",
@@ -101,8 +99,8 @@ impl CompactionFilter for NimbisCompactionFilter {
 					Ok(None) => {
 						// Metadata missing -> Orphaned sub-key -> Delete
 						debug!(
-							"[{:?}DataFilter] Drop[Meta key not exist] key: {:?}, version: {}",
-							self.data_type, user_key, version
+							"[{:?}DataFilter] Drop[Meta key not exist] key: {:?}",
+							self.data_type, user_key
 						);
 						return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 					}
@@ -129,8 +127,8 @@ impl CompactionFilter for NimbisCompactionFilter {
 				// Check expiration
 				if any_val.is_expired() {
 					debug!(
-						"[{:?}DataFilter] Drop[Timeout] key: {:?}, version: {}",
-						self.data_type, user_key, version
+						"[{:?}DataFilter] Drop[Timeout] key: {:?}",
+						self.data_type, user_key
 					);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
@@ -139,23 +137,22 @@ impl CompactionFilter for NimbisCompactionFilter {
 				if any_val.data_type() != self.data_type {
 					// Type mismatch -> Orphaned sub-key (collision) -> Delete
 					debug!(
-						"[{:?}DataFilter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}, version: {}",
+						"[{:?}DataFilter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
 						self.data_type,
 						self.data_type,
 						any_val.data_type(),
-						user_key,
-						version
+						user_key
 					);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
 				// Check Version
 				if let Some(meta_version) = any_val.version()
-					&& meta_version != version
+					&& entry.seq < meta_version
 				{
 					debug!(
-						"[{:?}DataFilter] Drop[version mismatch: cur_meta_version {}, data_key_version {}] key: {:?}",
-						self.data_type, meta_version, version, user_key
+						"[{:?}DataFilter] Drop[old seq: meta_version {}, data_seq {}] key: {:?}",
+						self.data_type, meta_version, entry.seq, user_key
 					);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
@@ -276,18 +273,17 @@ mod tests {
 			data_type: DataType::Hash,
 		};
 
-		// Test Valid Version (10)
-		// SubKey: len(2) + key + version(8) + field_len(4) + field
+		// Test Valid seq (10)
+		// SubKey: len(2) + key + field_len(4) + field
 		let mut valid_key = BytesMut::new();
 		valid_key.put_u16(user_key.len() as u16);
 		valid_key.extend_from_slice(&user_key);
-		valid_key.put_u64(10); // Matches
 		valid_key.put_u32(5); // field len
 		valid_key.put_slice(b"field");
 		let valid_entry = RowEntry {
 			key: valid_key.freeze(),
 			value: ValueDeletable::Value(Bytes::from("val")),
-			seq: 1,
+			seq: 10,
 			create_ts: None,
 			expire_ts: None,
 		};
@@ -296,17 +292,16 @@ mod tests {
 			CompactionFilterDecision::Keep
 		);
 
-		// Test Invalid Version (9)
+		// Test Invalid seq (9)
 		let mut invalid_key = BytesMut::new();
 		invalid_key.put_u16(user_key.len() as u16);
 		invalid_key.extend_from_slice(&user_key);
-		invalid_key.put_u64(9); // Mismatch!
 		invalid_key.put_u32(5);
 		invalid_key.put_slice(b"field");
 		let invalid_entry = RowEntry {
 			key: invalid_key.freeze(),
 			value: ValueDeletable::Value(Bytes::from("val")),
-			seq: 2,
+			seq: 9,
 			create_ts: None,
 			expire_ts: None,
 		};
@@ -349,17 +344,16 @@ mod tests {
 			.await
 			.unwrap();
 
-		// Build 3 sub-keys with version=42 (matching)
+		// Build 3 sub-keys. Version is now checked via RowEntry.seq.
 		let mut filter = NimbisCompactionFilter {
 			string_db: Some(string_db.clone()),
 			data_type: DataType::Set,
 		};
 
-		let build_sub_key = |version: u64, member: &[u8]| -> Bytes {
+		let build_sub_key = |member: &[u8]| -> Bytes {
 			let mut key = BytesMut::new();
 			key.put_u16(user_key.len() as u16);
 			key.extend_from_slice(&user_key);
-			key.put_u64(version);
 			key.put_u32(member.len() as u32);
 			key.extend_from_slice(member);
 			key.freeze()
@@ -368,9 +362,9 @@ mod tests {
 		let members: &[&[u8]] = &[b"alice", b"bob", b"carol"];
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(42, member),
+				key: build_sub_key(member),
 				value: ValueDeletable::Value(Bytes::new()),
-				seq: 1,
+				seq: 42,
 				create_ts: None,
 				expire_ts: None,
 			};
@@ -395,9 +389,9 @@ mod tests {
 		// Now all sub-keys should be marked for deletion (orphaned)
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(42, member),
+				key: build_sub_key(member),
 				value: ValueDeletable::Value(Bytes::new()),
-				seq: 1,
+				seq: 42,
 				create_ts: None,
 				expire_ts: None,
 			};
@@ -416,12 +410,12 @@ mod tests {
 			.await
 			.unwrap();
 
-		// Old version=42 data should still be reclaimed
+		// Old seq=42 data should still be reclaimed
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(42, member),
+				key: build_sub_key(member),
 				value: ValueDeletable::Value(Bytes::new()),
-				seq: 1,
+				seq: 42,
 				create_ts: None,
 				expire_ts: None,
 			};
@@ -433,11 +427,11 @@ mod tests {
 			);
 		}
 
-		// New version=100 data should be kept
+		// New seq=100 data should be kept
 		let new_entry = RowEntry {
-			key: build_sub_key(100, b"dave"),
+			key: build_sub_key(b"dave"),
 			value: ValueDeletable::Value(Bytes::new()),
-			seq: 2,
+			seq: 100,
 			create_ts: None,
 			expire_ts: None,
 		};

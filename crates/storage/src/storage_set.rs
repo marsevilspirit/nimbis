@@ -6,7 +6,6 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
-use crate::expirable::Expirable;
 use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
@@ -16,24 +15,33 @@ impl Storage {
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-
-		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
-			Some(meta) => meta,
-			None => SetMetaValue::new(self.version_generator.next(), 0),
-		};
-
-		let mut added_count = 0;
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
 		let put_opts = PutOptions::default();
 
-		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
-			let encoded_member_key = member_key.encode();
+		let (mut meta_val, meta_missing) = match self.get_meta::<SetMetaValue>(&key).await? {
+			Some(meta) => (meta, false),
+			None => (SetMetaValue::new(0, 0), true),
+		};
 
-			if self.set_db.get(encoded_member_key.clone()).await?.is_none() {
-				self.set_db
+		let mut added_count = 0;
+		let mut first_added_seq: Option<u64> = None;
+
+		for member in members {
+			let member_key = SetMemberKey::new(key.clone(), member);
+			let encoded_member_key = member_key.encode();
+			let exists = if meta_missing {
+				false
+			} else {
+				self.get_with_meta(&self.set_db, encoded_member_key.clone())
+					.await?
+					.is_some_and(|entry| entry.seq >= meta_val.version)
+			};
+
+			if !exists {
+				let wh = self
+					.set_db
 					.put_with_options(
 						encoded_member_key,
 						Bytes::new(), // value is empty for set members
@@ -41,20 +49,22 @@ impl Storage {
 						&write_opts,
 					)
 					.await?;
+				if meta_missing && first_added_seq.is_none() {
+					first_added_seq = Some(wh.seqnum());
+				}
 				added_count += 1;
 			}
 		}
 
 		if added_count > 0 {
+			if meta_missing {
+				meta_val.version = first_added_seq.ok_or_else(|| StorageError::DataInconsistency {
+					message: "missing first new set member seq after write".to_string(),
+				})?;
+			}
 			meta_val.len += added_count;
 
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
+			let put_opts = PutOptions::default();
 
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
@@ -69,11 +79,10 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key + version
-		let mut prefix = BytesMut::with_capacity(2 + key.len() + 8);
+		// Construct prefix: len(user_key) + user_key
+		let mut prefix = BytesMut::with_capacity(2 + key.len());
 		prefix.put_u16(key.len() as u16);
 		prefix.extend_from_slice(&key);
-		prefix.put_u64(meta_val.version);
 		let prefix = prefix.freeze();
 
 		let range = prefix.clone()..;
@@ -82,6 +91,9 @@ impl Storage {
 
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
+			if kv.seq < meta_val.version {
+				continue;
+			}
 			if !k.starts_with(&prefix) {
 				break;
 			}
@@ -111,8 +123,12 @@ impl Storage {
 			return Ok(false);
 		};
 
-		let member_key = SetMemberKey::new(key, meta_val.version, member);
-		Ok(self.set_db.get(member_key.encode()).await?.is_some())
+		let member_key = SetMemberKey::new(key, member);
+		let found = self
+			.get_with_meta(&self.set_db, member_key.encode())
+			.await?
+			.is_some_and(|entry| entry.seq >= meta_val.version);
+		Ok(found)
 	}
 
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
@@ -130,10 +146,14 @@ impl Storage {
 		};
 
 		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
+			let member_key = SetMemberKey::new(key.clone(), member);
 			let encoded_key = member_key.encode();
+			let exists = self
+				.get_with_meta(&self.set_db, encoded_key.clone())
+				.await?
+				.is_some_and(|entry| entry.seq >= meta_val.version);
 
-			if self.set_db.get(encoded_key.clone()).await?.is_some() {
+			if exists {
 				self.set_db
 					.delete_with_options(encoded_key, &write_opts)
 					.await?;
@@ -148,13 +168,7 @@ impl Storage {
 					.delete_with_options(meta_encoded_key, &write_opts)
 					.await?;
 			} else {
-				let ttl = meta_val
-					.remaining_ttl()
-					.map(|d| d.as_millis() as u64)
-					.map(slatedb::config::Ttl::ExpireAfter)
-					.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-				let put_opts = PutOptions { ttl };
+				let put_opts = PutOptions::default();
 				self.string_db
 					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
 					.await?;

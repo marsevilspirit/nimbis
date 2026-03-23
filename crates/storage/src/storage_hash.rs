@@ -7,7 +7,6 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
-use crate::expirable::Expirable;
 use crate::hash::field_key::HashFieldKey;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
@@ -17,19 +16,28 @@ impl Storage {
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		let put_opts = PutOptions::default();
 
 		// Get metadata first to obtain version
-		let mut meta_val = match self.get_meta::<HashMetaValue>(&key).await? {
-			Some(val) => val,
-			None => HashMetaValue::new(self.version_generator.next(), 0),
+		let (mut meta_val, meta_missing) = match self.get_meta::<HashMetaValue>(&key).await? {
+			Some(val) => (val, false),
+			None => (HashMetaValue::new(0, 0), true),
 		};
 
 		// Now create field key with the version from metadata
-		let field_key = HashFieldKey::new(key.clone(), meta_val.version, field);
+		let field_key = HashFieldKey::new(key.clone(), field);
 		let encoded_field_key = field_key.encode();
 
 		// Check if field already exists
-		let existing_field_raw = self.hash_db.get(encoded_field_key.clone()).await?;
+		let existing_field_raw = if meta_missing {
+			None
+		} else {
+			self.get_with_meta(&self.hash_db, encoded_field_key.clone())
+				.await?
+		};
 
 		// If meta was missing/expired (len 0), treat as new field even if loose field
 		// existed (zombie/deleted)
@@ -40,25 +48,19 @@ impl Storage {
 		};
 
 		// Set the field in hash_db
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.hash_db
+		let wh = self
+			.hash_db
 			.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
 			.await?;
+		if meta_missing {
+			meta_val.version = wh.seqnum();
+		}
 
 		// Update metadata in string_db if needed
 		if is_new_field {
 			meta_val.len += 1;
 
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
+			let put_opts = PutOptions::default();
 
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
@@ -75,9 +77,16 @@ impl Storage {
 			return Ok(None);
 		};
 
-		let field_key = HashFieldKey::new(key, meta_val.version, field);
-		let result = self.hash_db.get(field_key.encode()).await?;
-		Ok(result)
+		let field_key = HashFieldKey::new(key, field);
+		let result = self
+			.get_with_meta(&self.hash_db, field_key.encode())
+			.await?;
+		if let Some(entry) = result
+			&& entry.seq >= meta_val.version
+		{
+			return Ok(Some(entry.value));
+		}
+		Ok(None)
 	}
 
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, StorageError> {
@@ -106,13 +115,13 @@ impl Storage {
 			.map(|field| {
 				// We don't need to call self.hget() which repeats the check, we can access
 				// hash_db directly
-				let field_key = HashFieldKey::new(key.clone(), version, field.clone());
+				let field_key = HashFieldKey::new(key.clone(), field.clone());
 				// We need to clone the db handle for the closure/future if needed, but
 				// self.hash_db is Arc Actually self.hash_db.get is async.
 				// We can just call self.hash_db.get
 				async move {
 					let k = field_key.encode();
-					self.hash_db.get(k).await
+					self.get_with_meta(&self.hash_db, k).await
 				}
 			})
 			.collect();
@@ -126,7 +135,13 @@ impl Storage {
 		// For simplicity/safety, let's just map the results.
 
 		let results = future::try_join_all(futures).await?;
-		Ok(results)
+		Ok(results
+			.into_iter()
+			.map(|entry| match entry {
+				Some(kv) if kv.seq >= version => Some(kv.value),
+				_ => None,
+			})
+			.collect())
 	}
 
 	pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, StorageError> {
@@ -135,11 +150,10 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key + version
-		let mut prefix = BytesMut::with_capacity(2 + key.len() + 8);
+		// Construct prefix: len(user_key) + user_key
+		let mut prefix = BytesMut::with_capacity(2 + key.len());
 		prefix.put_u16(key.len() as u16);
 		prefix.extend_from_slice(&key);
-		prefix.put_u64(meta_val.version);
 		let prefix = prefix.freeze();
 
 		let range = prefix.clone()..;
@@ -149,12 +163,15 @@ impl Storage {
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
 			let v = kv.value;
+			if kv.seq < meta_val.version {
+				continue;
+			}
 
 			if !k.starts_with(&prefix) {
 				break;
 			}
 
-			// Parse field: prefix (key_len+key+version) + field_len(u32) + field
+			// Parse field: prefix (key_len+key) + field_len(u32) + field
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -189,11 +206,15 @@ impl Storage {
 		};
 
 		for field in fields {
-			let field_key = HashFieldKey::new(key.clone(), meta_val.version, field.clone());
+			let field_key = HashFieldKey::new(key.clone(), field.clone());
 			let encoded_field_key = field_key.encode();
 
 			// check if field exists
-			if self.hash_db.get(encoded_field_key.clone()).await?.is_some() {
+			let exists = self
+				.get_with_meta(&self.hash_db, encoded_field_key.clone())
+				.await?
+				.is_some_and(|entry| entry.seq >= meta_val.version);
+			if exists {
 				self.hash_db
 					.delete_with_options(encoded_field_key, &write_opts)
 					.await?;
@@ -211,13 +232,7 @@ impl Storage {
 				// Update meta
 				meta_val.len -= deleted_count as u64;
 
-				let ttl = meta_val
-					.remaining_ttl()
-					.map(|d| d.as_millis() as u64)
-					.map(slatedb::config::Ttl::ExpireAfter)
-					.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-				let put_opts = PutOptions { ttl };
+				let put_opts = PutOptions::default();
 
 				self.string_db
 					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)

@@ -13,7 +13,6 @@ use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
-use crate::version::VersionGenerator;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -22,7 +21,6 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
-	pub(crate) version_generator: Arc<VersionGenerator>,
 }
 
 impl Storage {
@@ -39,7 +37,6 @@ impl Storage {
 			list_db,
 			set_db,
 			zset_db,
-			version_generator: Arc::new(VersionGenerator::new()),
 		}
 	}
 
@@ -163,8 +160,11 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
+		let meta_bytes = match self
+			.get_with_meta(&self.string_db, meta_key.encode())
+			.await?
+		{
+			Some(entry) => entry.value,
 			None => return Ok(None),
 		};
 

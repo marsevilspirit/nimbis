@@ -1,5 +1,5 @@
-use chrono::Utc;
 use bytes::Bytes;
+use chrono::Utc;
 use slatedb::config::PutOptions;
 use slatedb::config::Ttl;
 use slatedb::config::WriteOptions;
@@ -35,7 +35,8 @@ impl Storage {
 	}
 
 	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
-		let key = StringKey::new(key);
+		let user_key = key;
+		let key = StringKey::new(user_key.clone());
 
 		// We need to check existence to return correct number of deleted keys (0 or 1).
 		// Even if we don't use the meta value, we need to know if it exists.
@@ -60,11 +61,9 @@ impl Storage {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
-		// Keep type-check and existence check centralized via get_meta.
-		match self.get_meta::<AnyValue>(&user_key).await? {
-			Some(AnyValue::String(_)) => {}
-			Some(val) => return Err(StorageError::wrong_type(DataType::String, val.data_type())),
-			None => return Ok(false),
+		// EXPIRE applies to all data types; only existence matters.
+		if self.get_meta::<AnyValue>(&user_key).await?.is_none() {
+			return Ok(false);
 		}
 
 		let encoded_val = match self.string_db.get(encoded_key.clone()).await? {

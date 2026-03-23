@@ -14,7 +14,9 @@ pub struct StringValue {
 
 impl StringValue {
 	pub fn new(value: impl Into<Bytes>) -> Self {
-		Self { value: value.into() }
+		Self {
+			value: value.into(),
+		}
 	}
 
 	pub fn encode(&self) -> Bytes {
@@ -42,8 +44,7 @@ impl Expirable for StringValue {
 		0
 	}
 
-	fn set_expire_time(&mut self, _timestamp: u64) {
-	}
+	fn set_expire_time(&mut self, _timestamp: u64) {}
 }
 
 impl From<Bytes> for StringValue {
