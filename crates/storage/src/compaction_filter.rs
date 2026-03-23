@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use bytes::Buf;
 use bytes::Bytes;
 use log::debug;
+use log::warn;
 use slatedb::CompactionFilter;
 use slatedb::CompactionFilterDecision;
 use slatedb::CompactionFilterError;
@@ -66,7 +67,13 @@ impl CompactionFilter for NimbisCompactionFilter {
 				};
 
 				if any_val.data_type() != DataType::String {
-					return Ok(CompactionFilterDecision::Keep);
+					warn!(
+						"[StringFilter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
+						DataType::String,
+						any_val.data_type(),
+						entry.key
+					);
+					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
 
 				if Storage::is_expired(entry.expire_ts) {
@@ -233,6 +240,30 @@ mod tests {
 
 		let decision = filter.filter(&entry).await.unwrap();
 		assert_eq!(decision, CompactionFilterDecision::Keep);
+	}
+
+	#[tokio::test]
+	async fn test_filter_string_type_mismatch_drops_entry() {
+		use crate::string::meta::HashMetaValue;
+
+		let mut filter = NimbisCompactionFilter {
+			string_db: None,
+			data_type: DataType::String,
+		};
+		let mismatched_value = HashMetaValue::new(1, 1).encode();
+		let entry = RowEntry {
+			key: Bytes::from("string-key"),
+			value: ValueDeletable::Value(mismatched_value),
+			seq: 1,
+			create_ts: None,
+			expire_ts: None,
+		};
+
+		let decision = filter.filter(&entry).await.unwrap();
+		assert_eq!(
+			decision,
+			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
+		);
 	}
 
 	#[tokio::test]
