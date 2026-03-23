@@ -58,9 +58,10 @@ impl Storage {
 
 		if added_count > 0 {
 			if meta_missing {
-				meta_val.version = first_added_seq.ok_or_else(|| StorageError::DataInconsistency {
-					message: "missing first new set member seq after write".to_string(),
-				})?;
+				meta_val.version =
+					first_added_seq.ok_or_else(|| StorageError::DataInconsistency {
+						message: "missing first new set member seq after write".to_string(),
+					})?;
 			}
 			meta_val.len += added_count;
 
