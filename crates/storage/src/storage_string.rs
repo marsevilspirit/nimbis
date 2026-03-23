@@ -1,10 +1,11 @@
+use chrono::Utc;
 use bytes::Bytes;
 use slatedb::config::PutOptions;
+use slatedb::config::Ttl;
 use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::error::StorageError;
-use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::meta::AnyValue;
@@ -59,47 +60,60 @@ impl Storage {
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
 
-		if let Some(mut val) = self.get_meta::<AnyValue>(&user_key).await? {
-			val.expire_at(expire_time);
-			let encoded_val = val.encode();
+		// Keep type-check and existence check centralized via get_meta.
+		match self.get_meta::<AnyValue>(&user_key).await? {
+			Some(AnyValue::String(_)) => {}
+			Some(val) => return Err(StorageError::wrong_type(DataType::String, val.data_type())),
+			None => return Ok(false),
+		}
 
-			// Check if already expired immediately
-			let now = chrono::Utc::now().timestamp_millis() as u64;
-			if expire_time > 0 && expire_time <= now {
-				self.del(user_key).await?;
-				return Ok(true);
-			}
+		let encoded_val = match self.string_db.get(encoded_key.clone()).await? {
+			Some(v) => v,
+			None => return Ok(false),
+		};
 
-			let ttl = if expire_time > 0 {
-				slatedb::config::Ttl::ExpireAfter(expire_time.saturating_sub(now))
-			} else {
-				slatedb::config::Ttl::NoExpiry
-			};
-
+		let now = Utc::now().timestamp_millis() as u64;
+		if expire_time > 0 && expire_time <= now {
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};
-
-			let put_opts = PutOptions { ttl };
-
 			self.string_db
-				.put_with_options(encoded_key, encoded_val, &put_opts, &write_opts)
+				.delete_with_options(encoded_key, &write_opts)
 				.await?;
-			Ok(true)
-		} else {
-			Ok(false)
+			return Ok(true);
 		}
+
+		let ttl = if expire_time > 0 {
+			Ttl::ExpireAfter(expire_time.saturating_sub(now))
+		} else {
+			Ttl::NoExpiry
+		};
+
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+
+		let put_opts = PutOptions { ttl };
+
+		self.string_db
+			.put_with_options(encoded_key, encoded_val, &put_opts, &write_opts)
+			.await?;
+		Ok(true)
 	}
 
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
-		if let Some(val) = self.get_meta::<AnyValue>(&key).await? {
-			match val.remaining_ttl() {
-				Some(duration) => Ok(Some(duration.as_millis() as i64)),
-				None => Ok(Some(-1)),
-			}
-		} else {
-			Ok(None)
-		}
+		let encoded_key = StringKey::new(key).encode();
+		let kv = match self.get_with_meta(&self.string_db, encoded_key).await? {
+			Some(kv) => kv,
+			None => return Ok(None),
+		};
+
+		let ttl = match kv.expire_ts {
+			Some(expire_ts) => (expire_ts - Utc::now().timestamp_millis()).max(0),
+			None => -1,
+		};
+
+		Ok(Some(ttl))
 	}
 
 	pub async fn exists(&self, key: Bytes) -> Result<bool, StorageError> {

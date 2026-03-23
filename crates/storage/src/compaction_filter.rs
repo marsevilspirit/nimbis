@@ -15,6 +15,7 @@ use slatedb::ValueDeletable;
 
 use crate::data_type::DataType;
 use crate::expirable::Expirable;
+use crate::storage::Storage;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 
@@ -54,7 +55,7 @@ impl CompactionFilter for NimbisCompactionFilter {
 
 		match self.data_type {
 			DataType::String => {
-				// String DB: Check TTL in value
+				// String DB: Check expiration from SlateDB metadata.
 				let any_val = match AnyValue::decode(bytes) {
 					Ok(val) => val,
 					Err(e) => {
@@ -66,7 +67,11 @@ impl CompactionFilter for NimbisCompactionFilter {
 					}
 				};
 
-				if any_val.is_expired() {
+				if any_val.data_type() != DataType::String {
+					return Ok(CompactionFilterDecision::Keep);
+				}
+
+				if Storage::is_expired(entry.expire_ts) {
 					debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 				}
@@ -197,19 +202,16 @@ mod tests {
 			string_db: None,
 			data_type: DataType::String,
 		};
-		let value = StringValue::new_with_ttl(Bytes::from("val"), 100);
+		let value = StringValue::new(Bytes::from("val"));
 		let entry = RowEntry {
 			key: Bytes::from("key"),
 			value: ValueDeletable::Value(value.encode()),
 			seq: 1,
 			create_ts: None,
-			expire_ts: None,
+			expire_ts: Some(100),
 		};
 
-		// Mock current time > 100
 		let decision = filter.filter(&entry).await.unwrap();
-		// Since we use Utc::now() in AnyValue::is_expired(), we need to make sure 100
-		// is past. 100ms since epoch is definitely in the past.
 		assert_eq!(
 			decision,
 			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
@@ -222,14 +224,14 @@ mod tests {
 			string_db: None,
 			data_type: DataType::String,
 		};
-		let future_time = (chrono::Utc::now().timestamp_millis() + 100000) as u64;
-		let value = StringValue::new_with_ttl(Bytes::from("val"), future_time);
+		let future_time = chrono::Utc::now().timestamp_millis() + 100000;
+		let value = StringValue::new(Bytes::from("val"));
 		let entry = RowEntry {
 			key: Bytes::from("key"),
 			value: ValueDeletable::Value(value.encode()),
 			seq: 1,
 			create_ts: None,
-			expire_ts: None,
+			expire_ts: Some(future_time),
 		};
 
 		let decision = filter.filter(&entry).await.unwrap();

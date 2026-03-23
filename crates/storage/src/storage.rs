@@ -2,7 +2,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use chrono::Utc;
 use slatedb::Db;
+use slatedb::KeyValue;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
@@ -130,6 +132,25 @@ impl Storage {
 		clear_db(&self.zset_db).await?;
 
 		Ok(())
+	}
+
+	pub(crate) fn is_expired(expire_ts: Option<i64>) -> bool {
+		expire_ts.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
+	}
+
+	pub(crate) async fn get_with_meta(
+		&self,
+		db: &Db,
+		key: Bytes,
+	) -> Result<Option<KeyValue>, StorageError> {
+		let kv = db.get_key_value(key).await?;
+		if kv
+			.as_ref()
+			.is_some_and(|entry| Self::is_expired(entry.expire_ts))
+		{
+			return Ok(None);
+		}
+		Ok(kv)
 	}
 
 	/// Helper to get and validate metadata for any collection type.
