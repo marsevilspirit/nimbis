@@ -185,6 +185,7 @@ impl Storage {
 
 		Ok(results)
 	}
+	
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
