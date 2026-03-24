@@ -130,7 +130,7 @@ impl Storage {
 			let element_key = ListElementKey::new(key.clone(), seq);
 			// Get element
 			if let Some(val) = self
-				.get_with_meta(&self.list_db, element_key.encode())
+				.get_entry(&self.list_db, element_key.encode())
 				.await?
 				.filter(|entry| entry.seq >= meta_val.version)
 				.map(|entry| entry.value)
@@ -232,7 +232,7 @@ impl Storage {
 			.map(|seq| {
 				let element_key = ListElementKey::new(key.clone(), seq);
 				async move {
-					self.get_with_meta(&self.list_db, element_key.encode())
+					self.get_entry(&self.list_db, element_key.encode())
 						.await
 				}
 			})

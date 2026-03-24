@@ -35,7 +35,7 @@ impl Storage {
 		let existing_field_raw = if meta_missing {
 			None
 		} else {
-			self.get_with_meta(&self.hash_db, encoded_field_key.clone())
+			self.get_entry(&self.hash_db, encoded_field_key.clone())
 				.await?
 		};
 
@@ -76,7 +76,7 @@ impl Storage {
 
 		let field_key = HashFieldKey::new(key, field);
 		let result = self
-			.get_with_meta(&self.hash_db, field_key.encode())
+			.get_entry(&self.hash_db, field_key.encode())
 			.await?;
 		if let Some(entry) = result
 			&& entry.seq >= meta_val.version
@@ -118,7 +118,7 @@ impl Storage {
 				// We can just call self.hash_db.get
 				async move {
 					let k = field_key.encode();
-					self.get_with_meta(&self.hash_db, k).await
+					self.get_entry(&self.hash_db, k).await
 				}
 			})
 			.collect();
@@ -208,7 +208,7 @@ impl Storage {
 
 			// check if field exists
 			let exists = self
-				.get_with_meta(&self.hash_db, encoded_field_key.clone())
+				.get_entry(&self.hash_db, encoded_field_key.clone())
 				.await?
 				.is_some_and(|entry| entry.seq >= meta_val.version);
 			if exists {

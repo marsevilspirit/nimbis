@@ -102,7 +102,7 @@ impl Storage {
 
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
 		let encoded_key = StringKey::new(key).encode();
-		let kv = match self.get_with_meta(&self.string_db, encoded_key).await? {
+		let kv = match self.get_entry(&self.string_db, encoded_key).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
 		};

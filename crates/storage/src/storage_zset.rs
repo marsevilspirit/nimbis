@@ -39,7 +39,7 @@ impl Storage {
 			let member_key = MemberKey::new(key.clone(), member.clone());
 			let enc = member_key.encode();
 			member_encoded_keys.push(enc.clone());
-			member_futs.push(self.get_with_meta(&self.zset_db, enc));
+			member_futs.push(self.get_entry(&self.zset_db, enc));
 		}
 
 		// Fetch all members in parallel
@@ -124,7 +124,7 @@ impl Storage {
 				});
 			};
 			let first_entry = self
-				.get_with_meta(&self.zset_db, first_key)
+				.get_entry(&self.zset_db, first_key)
 				.await?
 				.ok_or_else(|| StorageError::DataInconsistency {
 					message: "failed to read first new zset member after write".to_string(),
@@ -226,7 +226,7 @@ impl Storage {
 
 		let member_key = MemberKey::new(key, member);
 		if let Some(entry) = self
-			.get_with_meta(&self.zset_db, member_key.encode())
+			.get_entry(&self.zset_db, member_key.encode())
 			.await? && entry.seq >= meta_val.version
 		{
 			// Val is encoded score (u64 BE)
@@ -252,7 +252,7 @@ impl Storage {
 			let member_key = MemberKey::new(key.clone(), member.clone());
 			let encoded_key = member_key.encode();
 			member_encoded_keys.push(encoded_key.clone());
-			self.get_with_meta(&self.zset_db, encoded_key)
+			self.get_entry(&self.zset_db, encoded_key)
 		});
 
 		let old_values: Result<Vec<_>, _> =

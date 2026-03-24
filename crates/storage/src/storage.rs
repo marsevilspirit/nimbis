@@ -164,7 +164,7 @@ impl Storage {
 		expire_ts.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
 	}
 
-	pub(crate) async fn get_with_meta(
+	pub(crate) async fn get_entry(
 		&self,
 		db: &Db,
 		key: Bytes,
@@ -184,7 +184,7 @@ impl Storage {
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_entry = match self
-			.get_with_meta(&self.string_db, meta_key.encode())
+			.get_entry(&self.string_db, meta_key.encode())
 			.await?
 		{
 			Some(entry) => entry,
