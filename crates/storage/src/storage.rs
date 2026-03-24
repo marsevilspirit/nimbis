@@ -14,7 +14,6 @@ use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct Entry {
 	pub key: Bytes,
