@@ -261,6 +261,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::string::meta::ListMetaValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::new().to_string();
@@ -341,6 +342,72 @@ mod tests {
 		let part = storage.lrange(key.clone(), 0, 1).await.unwrap();
 		assert_eq!(part.len(), 2);
 		assert_eq!(part[1], Bytes::from("2"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_list_version_init_stable_and_recreate() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("list_version_lifecycle");
+
+		let len = storage
+			.rpush(key.clone(), vec![Bytes::from("a"), Bytes::from("b")])
+			.await
+			.unwrap();
+		assert_eq!(len, 2);
+
+		let version_v1 = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+
+		let len = storage
+			.rpush(key.clone(), vec![Bytes::from("c")])
+			.await
+			.unwrap();
+		assert_eq!(len, 3);
+
+		let version_after_push = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_push, version_v1);
+
+		let popped = storage.lpop(key.clone(), None).await.unwrap();
+		assert_eq!(popped, vec![Bytes::from("a")]);
+
+		let version_after_pop = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_pop, version_v1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let len = storage
+			.rpush(key.clone(), vec![Bytes::from("x")])
+			.await
+			.unwrap();
+		assert_eq!(len, 1);
+
+		let version_v2 = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert!(version_v2 > version_v1);
+
+		let elems = storage.lrange(key.clone(), 0, -1).await.unwrap();
+		assert_eq!(elems, vec![Bytes::from("x")]);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

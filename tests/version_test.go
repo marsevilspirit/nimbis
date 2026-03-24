@@ -182,6 +182,126 @@ var _ = Describe("Version Isolation", func() {
 		})
 	})
 
+	Describe("Non-recreate updates", func() {
+		It("should keep existing set members visible across normal updates", func() {
+			key := "version_set_non_recreate_test"
+			rdb.Del(ctx, key)
+
+			// Initial generation
+			n, err := rdb.SAdd(ctx, key, "m1", "m2").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(2)))
+
+			// Non-recreate updates: duplicate add + new member
+			n, err = rdb.SAdd(ctx, key, "m2", "m3").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(1)))
+
+			members, err := rdb.SMembers(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			sort.Strings(members)
+			Expect(members).To(Equal([]string{"m1", "m2", "m3"}))
+
+			// Remove one and add one more in the same generation
+			removed, err := rdb.SRem(ctx, key, "m2").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(removed).To(Equal(int64(1)))
+
+			n, err = rdb.SAdd(ctx, key, "m4").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(1)))
+
+			members, err = rdb.SMembers(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			sort.Strings(members)
+			Expect(members).To(Equal([]string{"m1", "m3", "m4"}))
+
+			card, err := rdb.SCard(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(card).To(Equal(int64(3)))
+
+			rdb.Del(ctx, key)
+		})
+
+		It("should keep existing zset members visible across score updates", func() {
+			key := "version_zset_non_recreate_test"
+			rdb.Del(ctx, key)
+
+			n, err := rdb.ZAdd(ctx, key,
+				redis.Z{Score: 1.0, Member: "m1"},
+				redis.Z{Score: 2.0, Member: "m2"},
+			).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(2)))
+
+			// Non-recreate update: update score of existing member
+			n, err = rdb.ZAdd(ctx, key,
+				redis.Z{Score: 5.0, Member: "m1"},
+			).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(0)))
+
+			// Add a new member in same generation
+			n, err = rdb.ZAdd(ctx, key,
+				redis.Z{Score: 3.0, Member: "m3"},
+			).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(1)))
+
+			score1, err := rdb.ZScore(ctx, key, "m1").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(score1).To(Equal(5.0))
+
+			score2, err := rdb.ZScore(ctx, key, "m2").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(score2).To(Equal(2.0))
+
+			score3, err := rdb.ZScore(ctx, key, "m3").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(score3).To(Equal(3.0))
+
+			card, err := rdb.ZCard(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(card).To(Equal(int64(3)))
+
+			rdb.Del(ctx, key)
+		})
+
+		It("should keep existing list elements visible across push and pop", func() {
+			key := "version_list_non_recreate_test"
+			rdb.Del(ctx, key)
+
+			n, err := rdb.RPush(ctx, key, "a", "b").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(2)))
+
+			// Non-recreate update: push new element
+			n, err = rdb.RPush(ctx, key, "c").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(3)))
+
+			// Non-recreate update: pop one element
+			popped, err := rdb.LPop(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(popped).To(Equal("a"))
+
+			// Non-recreate update: append again
+			n, err = rdb.RPush(ctx, key, "d").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(int64(3)))
+
+			elems, err := rdb.LRange(ctx, key, 0, -1).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(elems).To(Equal([]string{"b", "c", "d"}))
+
+			llen, err := rdb.LLen(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(llen).To(Equal(int64(3)))
+
+			rdb.Del(ctx, key)
+		})
+	})
+
 	// Stress test: rapid create-delete cycles should not accumulate visible data
 	Describe("Rapid create-delete cycles", func() {
 		It("should not accumulate stale data across many cycles", func() {

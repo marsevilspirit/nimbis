@@ -191,6 +191,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::string::meta::SetMetaValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::new().to_string();
@@ -275,6 +276,65 @@ mod tests {
 
 		storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(storage.scard(key.clone()).await.unwrap(), 1);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_set_version_init_stable_and_recreate() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("set_version_lifecycle");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+
+		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v1 = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+
+		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
+		assert_eq!(added, 0);
+
+		let version_after_dup = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_dup, version_v1);
+
+		let added = storage.sadd(key.clone(), vec![m2.clone()]).await.unwrap();
+		assert_eq!(added, 1);
+
+		let version_after_update = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_update, version_v1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v2 = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert!(version_v2 > version_v1);
+
+		let members = storage.smembers(key.clone()).await.unwrap();
+		assert_eq!(members, vec![m1]);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

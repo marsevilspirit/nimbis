@@ -31,7 +31,7 @@ impl Storage {
 		let field_key = HashFieldKey::new(key.clone(), field);
 		let encoded_field_key = field_key.encode();
 
-		// Check if field already exists
+		// Check if field already exists in current generation
 		let existing_field_raw = if meta_missing {
 			None
 		} else {
@@ -39,13 +39,10 @@ impl Storage {
 				.await?
 		};
 
-		// If meta was missing/expired (len 0), treat as new field even if loose field
-		// existed (zombie/deleted)
-		let is_new_field = if meta_val.len == 0 {
-			true
-		} else {
-			existing_field_raw.is_none()
-		};
+		let field_exists = existing_field_raw
+			.as_ref()
+			.is_some_and(|entry| entry.seq >= meta_val.version);
+		let is_new_field = !field_exists;
 
 		// Set the field in hash_db
 		let wh = self
@@ -388,6 +385,36 @@ mod tests {
 		assert!(!exists);
 
 		// Cleanup
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_hset_recreate_same_field_after_del() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("myhash_recreate_same_field");
+		let field = Bytes::from("f1");
+
+		let created = storage
+			.hset(key.clone(), field.clone(), Bytes::from("v1"))
+			.await
+			.unwrap();
+		assert_eq!(created, 1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let recreated = storage
+			.hset(key.clone(), field.clone(), Bytes::from("v2"))
+			.await
+			.unwrap();
+		assert_eq!(recreated, 1);
+
+		let len = storage.hlen(key.clone()).await.unwrap();
+		assert_eq!(len, 1);
+
+		let got = storage.hget(key.clone(), field.clone()).await.unwrap();
+		assert_eq!(got, Some(Bytes::from("v2")));
+
 		let _ = std::fs::remove_dir_all(path);
 	}
 }

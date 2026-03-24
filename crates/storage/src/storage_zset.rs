@@ -322,6 +322,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::string::meta::ZSetMetaValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::new().to_string();
@@ -443,6 +444,75 @@ mod tests {
 		let members = storage.zrange(key1.clone(), 0, -1, false).await.unwrap();
 		assert_eq!(members.len(), 1, "ZRange user1 should have 1 member");
 		assert_eq!(members[0], Bytes::from("m1"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zset_version_init_stable_and_recreate() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_version_lifecycle");
+
+		let added = storage
+			.zadd(key.clone(), vec![(1.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v1 = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+
+		let added = storage
+			.zadd(key.clone(), vec![(2.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 0);
+
+		let version_after_score_update = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_score_update, version_v1);
+
+		let added = storage
+			.zadd(key.clone(), vec![(3.0, Bytes::from("m2"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let version_after_new_member = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_new_member, version_v1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let added = storage
+			.zadd(key.clone(), vec![(10.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v2 = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert!(version_v2 > version_v1);
+
+		let members = storage.zrange(key.clone(), 0, -1, false).await.unwrap();
+		assert_eq!(members, vec![Bytes::from("m1")]);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
