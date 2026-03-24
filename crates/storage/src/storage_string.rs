@@ -102,10 +102,20 @@ impl Storage {
 
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
 		let encoded_key = StringKey::new(key).encode();
-		let kv = match self.string_db.get_key_value(encoded_key).await? {
+		let kv = match self.string_db.get_key_value(encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
 		};
+
+		if Storage::is_expired(kv.expire_ts) {
+			let write_opts = WriteOptions {
+				await_durable: false,
+			};
+			self.string_db
+				.delete_with_options(encoded_key, &write_opts)
+				.await?;
+			return Ok(None);
+		}
 
 		let ttl = match kv.expire_ts {
 			Some(expire_ts) => (expire_ts - Utc::now().timestamp_millis()).max(0),

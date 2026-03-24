@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::Utc;
+use slatedb::config::WriteOptions;
 use slatedb::Db;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
@@ -144,10 +145,23 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
+		let meta_encoded_key = meta_key.encode();
+		let kv = match self.string_db.get_key_value(meta_encoded_key.clone()).await? {
+			Some(kv) => kv,
 			None => return Ok(None),
 		};
+
+		if Self::is_expired(kv.expire_ts) {
+			let write_opts = WriteOptions {
+				await_durable: false,
+			};
+			self.string_db
+				.delete_with_options(meta_encoded_key, &write_opts)
+				.await?;
+			return Ok(None);
+		}
+
+		let meta_bytes = kv.value;
 
 		if meta_bytes.is_empty() {
 			return Ok(None);
