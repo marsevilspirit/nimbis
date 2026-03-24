@@ -14,6 +14,35 @@ use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct Entry {
+	pub key: Bytes,
+	pub value: Bytes,
+	pub seq: u64,
+	pub create_ts: i64,
+	pub expire_ts: Option<i64>,
+}
+
+impl Entry {
+	pub fn is_expired(&self) -> bool {
+		self.expire_ts
+			.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
+	}
+}
+
+impl From<KeyValue> for Entry {
+	fn from(value: KeyValue) -> Self {
+		Self {
+			key: value.key,
+			value: value.value,
+			seq: value.seq,
+			create_ts: value.create_ts,
+			expire_ts: value.expire_ts,
+		}
+	}
+}
+
 #[derive(Clone)]
 pub struct Storage {
 	pub(crate) string_db: Arc<Db>,
@@ -139,15 +168,9 @@ impl Storage {
 		&self,
 		db: &Db,
 		key: Bytes,
-	) -> Result<Option<KeyValue>, StorageError> {
+	) -> Result<Option<Entry>, StorageError> {
 		let kv = db.get_key_value(key).await?;
-		if kv
-			.as_ref()
-			.is_some_and(|entry| Self::is_expired(entry.expire_ts))
-		{
-			return Ok(None);
-		}
-		Ok(kv)
+		Ok(kv.map(Entry::from))
 	}
 
 	/// Helper to get and validate metadata for any collection type.
@@ -160,13 +183,19 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self
+		let meta_entry = match self
 			.get_with_meta(&self.string_db, meta_key.encode())
 			.await?
 		{
-			Some(entry) => entry.value,
+			Some(entry) => entry,
 			None => return Ok(None),
 		};
+
+		if meta_entry.is_expired() {
+			return Ok(None);
+		}
+
+		let meta_bytes = meta_entry.value;
 
 		if meta_bytes.is_empty() {
 			return Ok(None);
