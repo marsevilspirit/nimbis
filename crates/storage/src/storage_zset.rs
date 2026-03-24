@@ -1,6 +1,4 @@
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
 use futures::future;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
@@ -10,6 +8,7 @@ use crate::error::StorageError;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::ZSetMetaValue;
+use crate::util::zset_score_user_key_prefix;
 use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
@@ -164,13 +163,7 @@ impl Storage {
 
 			// We need to scan ScoreKeys.
 			// Key format: len(user_key) + user_key + b'S' + score + member
-			let prefix = {
-				let mut p = BytesMut::with_capacity(2 + key.len() + 1);
-				p.put_u16(key.len() as u16);
-				p.extend_from_slice(&key);
-				p.put_u8(b'S');
-				p.freeze()
-			};
+			let prefix = zset_score_user_key_prefix(&key);
 
 			let range = prefix.as_ref()..;
 			let mut stream = self.zset_db.scan(range).await?;

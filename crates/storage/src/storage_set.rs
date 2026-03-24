@@ -1,7 +1,5 @@
 use bytes::Buf;
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -10,6 +8,7 @@ use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
+use crate::util::user_key_prefix;
 
 impl Storage {
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
@@ -81,10 +80,7 @@ impl Storage {
 		};
 
 		// Construct prefix: len(user_key) + user_key
-		let mut prefix = BytesMut::with_capacity(2 + key.len());
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		let prefix = prefix.freeze();
+		let prefix = user_key_prefix(&key);
 
 		let range = prefix.clone()..;
 		let mut stream = self.set_db.scan(range).await?;
