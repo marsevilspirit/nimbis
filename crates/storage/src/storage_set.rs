@@ -33,9 +33,10 @@ impl Storage {
 			let exists = if meta_missing {
 				false
 			} else {
-				self.get_entry(&self.set_db, encoded_member_key.clone())
+				self.set_db
+					.get_key_value(encoded_member_key.clone())
 					.await?
-					.is_some_and(|entry| entry.seq >= meta_val.version)
+					.is_some_and(|kv| kv.seq >= meta_val.version)
 			};
 
 			if !exists {
@@ -122,9 +123,10 @@ impl Storage {
 
 		let member_key = SetMemberKey::new(key, member);
 		let found = self
-			.get_entry(&self.set_db, member_key.encode())
+			.set_db
+			.get_key_value(member_key.encode())
 			.await?
-			.is_some_and(|entry| entry.seq >= meta_val.version);
+			.is_some_and(|kv| kv.seq >= meta_val.version);
 		Ok(found)
 	}
 
@@ -146,9 +148,10 @@ impl Storage {
 			let member_key = SetMemberKey::new(key.clone(), member);
 			let encoded_key = member_key.encode();
 			let exists = self
-				.get_entry(&self.set_db, encoded_key.clone())
+				.set_db
+				.get_key_value(encoded_key.clone())
 				.await?
-				.is_some_and(|entry| entry.seq >= meta_val.version);
+				.is_some_and(|kv| kv.seq >= meta_val.version);
 
 			if exists {
 				self.set_db

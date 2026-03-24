@@ -20,37 +20,38 @@ impl Storage {
 		};
 		let put_opts = PutOptions::default();
 
-		// Get metadata first to obtain version
-		let (mut meta_val, meta_missing) = match self.get_meta::<HashMetaValue>(&key).await? {
-			Some(val) => (val, false),
-			None => (HashMetaValue::new(0, 0), true),
-		};
-
 		// Now create field key with the version from metadata
 		let field_key = HashFieldKey::new(key.clone(), field);
 		let encoded_field_key = field_key.encode();
 
-		// Check if field already exists in current generation
-		let existing_field_raw = if meta_missing {
-			None
-		} else {
-			self.get_entry(&self.hash_db, encoded_field_key.clone())
-				.await?
+		let Some(mut meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
+			let wh = self
+				.hash_db
+				.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
+				.await?;
+
+			let new_meta = HashMetaValue::new(wh.seqnum(), 1);
+			self.string_db
+				.put_with_options(meta_encoded_key, new_meta.encode(), &put_opts, &write_opts)
+				.await?;
+			return Ok(1);
 		};
+
+		// Check if field already exists in current generation
+		let existing_field_raw = self
+			.hash_db
+			.get_key_value(encoded_field_key.clone())
+			.await?;
 
 		let field_exists = existing_field_raw
 			.as_ref()
-			.is_some_and(|entry| entry.seq >= meta_val.version);
+			.is_some_and(|kv| kv.seq >= meta_val.version);
 		let is_new_field = !field_exists;
 
 		// Set the field in hash_db
-		let wh = self
-			.hash_db
+		self.hash_db
 			.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
 			.await?;
-		if meta_missing {
-			meta_val.version = wh.seqnum();
-		}
 
 		// Update metadata in string_db if needed
 		if is_new_field {
@@ -74,11 +75,11 @@ impl Storage {
 		};
 
 		let field_key = HashFieldKey::new(key, field);
-		let result = self.get_entry(&self.hash_db, field_key.encode()).await?;
-		if let Some(entry) = result
-			&& entry.seq >= meta_val.version
+		let result = self.hash_db.get_key_value(field_key.encode()).await?;
+		if let Some(kv) = result
+			&& kv.seq >= meta_val.version
 		{
-			return Ok(Some(entry.value));
+			return Ok(Some(kv.value));
 		}
 		Ok(None)
 	}
@@ -115,7 +116,10 @@ impl Storage {
 				// We can just call self.hash_db.get
 				async move {
 					let k = field_key.encode();
-					self.get_entry(&self.hash_db, k).await
+					self.hash_db
+						.get_key_value(k)
+						.await
+						.map_err(StorageError::from)
 				}
 			})
 			.collect();
@@ -131,7 +135,7 @@ impl Storage {
 		let results = future::try_join_all(futures).await?;
 		Ok(results
 			.into_iter()
-			.map(|entry| match entry {
+			.map(|kv| match kv {
 				Some(kv) if kv.seq >= version => Some(kv.value),
 				_ => None,
 			})
@@ -181,7 +185,7 @@ impl Storage {
 
 		Ok(results)
 	}
-	
+
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
@@ -203,9 +207,10 @@ impl Storage {
 
 			// check if field exists
 			let exists = self
-				.get_entry(&self.hash_db, encoded_field_key.clone())
+				.hash_db
+				.get_key_value(encoded_field_key.clone())
 				.await?
-				.is_some_and(|entry| entry.seq >= meta_val.version);
+				.is_some_and(|kv| kv.seq >= meta_val.version);
 			if exists {
 				self.hash_db
 					.delete_with_options(encoded_field_key, &write_opts)

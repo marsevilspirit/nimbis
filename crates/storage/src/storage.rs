@@ -4,7 +4,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::Utc;
 use slatedb::Db;
-use slatedb::KeyValue;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
@@ -13,34 +12,6 @@ use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
-
-#[derive(Debug, Clone)]
-pub(crate) struct Entry {
-	pub key: Bytes,
-	pub value: Bytes,
-	pub seq: u64,
-	pub create_ts: i64,
-	pub expire_ts: Option<i64>,
-}
-
-impl Entry {
-	pub fn is_expired(&self) -> bool {
-		self.expire_ts
-			.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
-	}
-}
-
-impl From<KeyValue> for Entry {
-	fn from(value: KeyValue) -> Self {
-		Self {
-			key: value.key,
-			value: value.value,
-			seq: value.seq,
-			create_ts: value.create_ts,
-			expire_ts: value.expire_ts,
-		}
-	}
-}
 
 #[derive(Clone)]
 pub struct Storage {
@@ -163,15 +134,6 @@ impl Storage {
 		expire_ts.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
 	}
 
-	pub(crate) async fn get_entry(
-		&self,
-		db: &Db,
-		key: Bytes,
-	) -> Result<Option<Entry>, StorageError> {
-		let kv = db.get_key_value(key).await?;
-		Ok(kv.map(Entry::from))
-	}
-
 	/// Helper to get and validate metadata for any collection type.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
@@ -182,16 +144,16 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_entry = match self.get_entry(&self.string_db, meta_key.encode()).await? {
-			Some(entry) => entry,
+		let meta_kv = match self.string_db.get_key_value(meta_key.encode()).await? {
+			Some(kv) => kv,
 			None => return Ok(None),
 		};
 
-		if meta_entry.is_expired() {
+		if Self::is_expired(meta_kv.expire_ts) {
 			return Ok(None);
 		}
 
-		let meta_bytes = meta_entry.value;
+		let meta_bytes = meta_kv.value;
 
 		if meta_bytes.is_empty() {
 			return Ok(None);

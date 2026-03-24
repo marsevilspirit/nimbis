@@ -130,10 +130,11 @@ impl Storage {
 			let element_key = ListElementKey::new(key.clone(), seq);
 			// Get element
 			if let Some(val) = self
-				.get_entry(&self.list_db, element_key.encode())
+				.list_db
+				.get_key_value(element_key.encode())
 				.await?
-				.filter(|entry| entry.seq >= meta_val.version)
-				.map(|entry| entry.value)
+				.filter(|kv| kv.seq >= meta_val.version)
+				.map(|kv| kv.value)
 			{
 				results.push(val);
 
@@ -231,17 +232,22 @@ impl Storage {
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {
 				let element_key = ListElementKey::new(key.clone(), seq);
-				async move { self.get_entry(&self.list_db, element_key.encode()).await }
+				async move {
+					self.list_db
+						.get_key_value(element_key.encode())
+						.await
+						.map_err(StorageError::from)
+				}
 			})
 			.collect();
 
 		let found_results = future::try_join_all(futures).await?;
 
 		for res in found_results {
-			if let Some(entry) = res
-				&& entry.seq >= meta_val.version
+			if let Some(kv) = res
+				&& kv.seq >= meta_val.version
 			{
-				results.push(entry.value);
+				results.push(kv.value);
 			} else {
 				// Should not happen if consistency is maintained
 				warn!(

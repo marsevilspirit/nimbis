@@ -38,7 +38,7 @@ impl Storage {
 			let member_key = MemberKey::new(key.clone(), member.clone());
 			let enc = member_key.encode();
 			member_encoded_keys.push(enc.clone());
-			member_futs.push(self.get_entry(&self.zset_db, enc));
+			member_futs.push(self.zset_db.get_key_value(enc));
 		}
 
 		// Fetch all members in parallel
@@ -123,7 +123,8 @@ impl Storage {
 				});
 			};
 			let first_entry = self
-				.get_entry(&self.zset_db, first_key)
+				.zset_db
+				.get_key_value(first_key)
 				.await?
 				.ok_or_else(|| StorageError::DataInconsistency {
 					message: "failed to read first new zset member after write".to_string(),
@@ -218,11 +219,11 @@ impl Storage {
 		};
 
 		let member_key = MemberKey::new(key, member);
-		if let Some(entry) = self.get_entry(&self.zset_db, member_key.encode()).await?
-			&& entry.seq >= meta_val.version
+		if let Some(kv) = self.zset_db.get_key_value(member_key.encode()).await?
+			&& kv.seq >= meta_val.version
 		{
 			// Val is encoded score (u64 BE)
-			let encoded_score = u64::from_be_bytes(entry.value[..8].try_into()?);
+			let encoded_score = u64::from_be_bytes(kv.value[..8].try_into()?);
 			Ok(Some(ScoreKey::decode_score(encoded_score)))
 		} else {
 			Ok(None)
@@ -244,7 +245,7 @@ impl Storage {
 			let member_key = MemberKey::new(key.clone(), member.clone());
 			let encoded_key = member_key.encode();
 			member_encoded_keys.push(encoded_key.clone());
-			self.get_entry(&self.zset_db, encoded_key)
+			self.zset_db.get_key_value(encoded_key)
 		});
 
 		let old_values: Result<Vec<_>, _> =
