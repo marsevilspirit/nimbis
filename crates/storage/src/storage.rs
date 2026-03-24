@@ -137,23 +137,17 @@ impl Storage {
 	/// Helper to get and validate metadata for any collection type.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
-	/// - Ok(None) if the key doesn't exist or is expired
+	/// - Ok(None) if the key doesn't exist (expired keys are already filtered by storage)
 	/// - Err if the key exists but is of wrong type
 	pub(crate) async fn get_meta<T: MetaValue>(
 		&self,
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_kv = match self.string_db.get_key_value(meta_key.encode()).await? {
-			Some(kv) => kv,
+		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
+			Some(bytes) => bytes,
 			None => return Ok(None),
 		};
-
-		if Self::is_expired(meta_kv.expire_ts) {
-			return Ok(None);
-		}
-
-		let meta_bytes = meta_kv.value;
 
 		if meta_bytes.is_empty() {
 			return Ok(None);

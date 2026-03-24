@@ -107,10 +107,6 @@ impl Storage {
 			None => return Ok(None),
 		};
 
-		if Self::is_expired(kv.expire_ts) {
-			return Ok(None);
-		}
-
 		let ttl = match kv.expire_ts {
 			Some(expire_ts) => (expire_ts - Utc::now().timestamp_millis()).max(0),
 			None => -1,
