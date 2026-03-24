@@ -231,10 +231,7 @@ impl Storage {
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {
 				let element_key = ListElementKey::new(key.clone(), seq);
-				async move {
-					self.get_entry(&self.list_db, element_key.encode())
-						.await
-				}
+				async move { self.get_entry(&self.list_db, element_key.encode()).await }
 			})
 			.collect();
 

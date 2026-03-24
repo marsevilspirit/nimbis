@@ -183,10 +183,7 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_entry = match self
-			.get_entry(&self.string_db, meta_key.encode())
-			.await?
-		{
+		let meta_entry = match self.get_entry(&self.string_db, meta_key.encode()).await? {
 			Some(entry) => entry,
 			None => return Ok(None),
 		};

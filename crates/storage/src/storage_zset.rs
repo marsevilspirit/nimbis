@@ -225,9 +225,8 @@ impl Storage {
 		};
 
 		let member_key = MemberKey::new(key, member);
-		if let Some(entry) = self
-			.get_entry(&self.zset_db, member_key.encode())
-			.await? && entry.seq >= meta_val.version
+		if let Some(entry) = self.get_entry(&self.zset_db, member_key.encode()).await?
+			&& entry.seq >= meta_val.version
 		{
 			// Val is encoded score (u64 BE)
 			let encoded_score = u64::from_be_bytes(entry.value[..8].try_into()?);

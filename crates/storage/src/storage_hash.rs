@@ -75,9 +75,7 @@ impl Storage {
 		};
 
 		let field_key = HashFieldKey::new(key, field);
-		let result = self
-			.get_entry(&self.hash_db, field_key.encode())
-			.await?;
+		let result = self.get_entry(&self.hash_db, field_key.encode()).await?;
 		if let Some(entry) = result
 			&& entry.seq >= meta_val.version
 		{
