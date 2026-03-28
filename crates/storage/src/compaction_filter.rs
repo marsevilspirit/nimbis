@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Buf;
 use bytes::Bytes;
-use log::debug;
+use log::warn;
+use log::info;
 use slatedb::CompactionFilter;
 use slatedb::CompactionFilterDecision;
 use slatedb::CompactionFilterError;
@@ -56,7 +57,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 
 		// Decode sub-key to get user_key
 		let Some(user_key) = Self::decode_sub_key(&entry.key) else {
-			debug!(
+			info!(
 				"[{:?}Filter] Invalid key format: {:?}",
 				self.data_type, entry.key
 			);
@@ -69,14 +70,14 @@ impl CompactionFilter for CollectionCompactionFilter {
 			Ok(Some(v)) => v,
 			Ok(None) => {
 				// Metadata missing -> Orphaned sub-key -> Delete
-				debug!(
+				info!(
 					"[{:?}Filter] Drop[Meta missing] key: {:?}",
 					self.data_type, user_key
 				);
 				return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 			}
 			Err(e) => {
-				debug!(
+				warn!(
 					"[{:?}Filter] Keep[Get meta failed: {:?}] key: {:?}",
 					self.data_type, e, user_key
 				);
@@ -89,7 +90,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 		let any_val = match AnyValue::decode(&meta_encoded) {
 			Ok(v) => v,
 			Err(e) => {
-				debug!(
+				warn!(
 					"[{:?}Filter] Keep[Decode meta failed: {:?}] key: {:?}",
 					self.data_type, e, user_key
 				);
@@ -99,7 +100,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 
 		// Check type — type mismatch means orphaned sub-key from a type collision
 		if any_val.data_type() != self.data_type {
-			debug!(
+			info!(
 				"[{:?}Filter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
 				self.data_type,
 				self.data_type,
@@ -113,7 +114,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 		if let Some(meta_version) = any_val.version()
 			&& entry.seq < meta_version
 		{
-			debug!(
+			info!(
 				"[{:?}Filter] Drop[old seq: meta_version {}, data_seq {}] key: {:?}",
 				self.data_type, meta_version, entry.seq, user_key
 			);
