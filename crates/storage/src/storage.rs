@@ -10,7 +10,6 @@ use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
-use crate::compaction_filter::StringCompactionFilterSupplier;
 use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
@@ -61,15 +60,12 @@ impl Storage {
 		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
 
-		// Open string_db with its own dedicated compaction filter
+		// Open string_db — no custom compaction filter needed;
+		// SlateDB's built-in TTL mechanism handles expiration during compaction.
 		let string_db = {
 			let db_path = slatedb::object_store::path::Path::from("/string");
-			let compactor_builder =
-				slatedb::CompactorBuilder::new(db_path.clone(), object_store.clone())
-					.with_compaction_filter_supplier(Arc::new(StringCompactionFilterSupplier));
 			let db = Db::builder(db_path, object_store.clone())
 				.with_db_cache(cache.clone())
-				.with_compactor_builder(compactor_builder)
 				.build()
 				.await
 				.map_err(StorageError::from)?;
