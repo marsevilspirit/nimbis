@@ -9,7 +9,6 @@ use crate::expirable::Expirable;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct StringValue {
-	pub expire_time: u64,
 	pub value: Bytes,
 }
 
@@ -17,22 +16,13 @@ impl StringValue {
 	pub fn new(value: impl Into<Bytes>) -> Self {
 		Self {
 			value: value.into(),
-			expire_time: 0,
-		}
-	}
-
-	pub fn new_with_ttl(value: impl Into<Bytes>, expire_time: u64) -> Self {
-		Self {
-			value: value.into(),
-			expire_time,
 		}
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// [Type: 's'] [expire_time: u64] [Value]
-		let mut bytes = BytesMut::with_capacity(1 + 8 + self.value.len());
+		// [Type: 's'] [Value]
+		let mut bytes = BytesMut::with_capacity(1 + self.value.len());
 		bytes.put_u8(DataType::String as u8);
-		bytes.put_u64(self.expire_time);
 		bytes.extend_from_slice(&self.value);
 		bytes.freeze()
 	}
@@ -45,22 +35,16 @@ impl StringValue {
 		if buf.get_u8() != DataType::String as u8 {
 			return Err(DecoderError::InvalidType);
 		}
-		if buf.len() < 8 {
-			return Err(DecoderError::InvalidLength);
-		}
-		let expire_time = buf.get_u64();
-		Ok(Self::new_with_ttl(Bytes::copy_from_slice(buf), expire_time))
+		Ok(Self::new(Bytes::copy_from_slice(buf)))
 	}
 }
 
 impl Expirable for StringValue {
 	fn expire_time(&self) -> u64 {
-		self.expire_time
+		0
 	}
 
-	fn set_expire_time(&mut self, timestamp: u64) {
-		self.expire_time = timestamp;
-	}
+	fn set_expire_time(&mut self, _timestamp: u64) {}
 }
 
 impl From<Bytes> for StringValue {
@@ -82,15 +66,13 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("hello world", 0)]
-	#[case("", 1000)]
-	#[case("test value", 123456789)]
-	fn test_roundtrip(#[case] input: &str, #[case] expire_time: u64) {
-		let original =
-			StringValue::new_with_ttl(Bytes::copy_from_slice(input.as_bytes()), expire_time);
+	#[case("hello world")]
+	#[case("")]
+	#[case("test value")]
+	fn test_roundtrip(#[case] input: &str) {
+		let original = StringValue::new(Bytes::copy_from_slice(input.as_bytes()));
 		let encoded = original.encode();
 		assert_eq!(encoded[0], DataType::String as u8);
-		assert_eq!(&encoded[1..9], &expire_time.to_be_bytes());
 		let decoded = StringValue::decode(&encoded).unwrap();
 		assert_eq!(original, decoded);
 	}
@@ -103,18 +85,16 @@ mod tests {
 	}
 
 	#[rstest]
-	#[case(0, b"")]
-	#[case(u64::MAX, b"val")]
-	#[case(12345, b"\x00\xff\xaa\x55")]
-	#[case(99999, b"normal value")]
-	fn test_decode_edge_cases(#[case] expire_time: u64, #[case] value_bytes: &[u8]) {
+	#[case(b"")]
+	#[case(b"val")]
+	#[case(b"\x00\xff\xaa\x55")]
+	#[case(b"normal value")]
+	fn test_decode_edge_cases(#[case] value_bytes: &[u8]) {
 		let mut buf = BytesMut::new();
 		buf.put_u8(DataType::String as u8);
-		buf.put_u64(expire_time);
 		buf.extend_from_slice(value_bytes);
 
 		let val = StringValue::decode(&buf.freeze()).unwrap();
-		assert_eq!(val.expire_time, expire_time);
 		assert_eq!(val.value, Bytes::copy_from_slice(value_bytes));
 	}
 
@@ -127,10 +107,5 @@ mod tests {
 		// Invalid Type
 		let err = StringValue::decode(b"x\x00\x00\x00\x00\x00\x00\x00\x01").unwrap_err();
 		assert!(matches!(err, DecoderError::InvalidType));
-
-		// Invalid Length (header too short)
-		let buf = b"s\x00\x00\x01"; // Type + partial u64
-		let err = StringValue::decode(buf).unwrap_err();
-		assert!(matches!(err, DecoderError::InvalidLength));
 	}
 }

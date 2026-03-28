@@ -11,7 +11,7 @@ build *args:
 # Run unit tests
 [group: 'test']
 test:
-    cargo nextest run
+    cargo nextest run --no-fail-fast
 
 # Run e2e tests
 [group: 'test']

@@ -1,16 +1,14 @@
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
 use futures::future;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
-use crate::expirable::Expirable;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::ZSetMetaValue;
+use crate::util::zset_score_user_key_prefix;
 use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
@@ -22,50 +20,56 @@ impl Storage {
 	) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-
-		// Get metadata first to obtain version
-		let mut meta_val = match self.get_meta::<ZSetMetaValue>(&key).await? {
-			Some(val) => val,
-			None => ZSetMetaValue::new(self.version_generator.next(), 0),
-		};
-
-		// Prepare member fetch futures using version from metadata
-		let mut member_encoded_keys = Vec::with_capacity(elements.len());
-		let mut member_futs = Vec::with_capacity(elements.len());
-		for (_, member) in &elements {
-			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
-			let enc = member_key.encode();
-			member_encoded_keys.push(enc.clone());
-			member_futs.push(self.zset_db.get(enc));
-		}
-
-		// Fetch all members in parallel
-		let members_res = future::join_all(member_futs).await;
-
-		let mut old_values: Vec<_> = members_res.into_iter().collect::<Result<_, _>>()?;
-
-		// If meta is new (len 0), treat all as new.
-		// get_meta already handles expiration by deleting content, so if we get
-		// None/empty here, it's effectively empty. However, we just fetched
-		// old_values. If the key was expired by get_meta, old_values might contain data
-		// that is now "gone". But wait, get_meta calls del() which deletes zset
-		// content. If get_meta found it expired, it deletes content.
-		// But we ran join_all(member_futs) CONCURRENTLY with get_meta.
-		// So member_futs might have returned data before deletion happened.
-		// If meta_val.len == 0 (implies new or expired-then-deleted), we should treat
-		// old_values as None.
-		if meta_val.len == 0 {
-			for val in &mut old_values {
-				*val = None;
-			}
-		}
-
-		let mut added_count = 0;
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
 		let put_opts = PutOptions::default();
 
+		// Get metadata first to obtain version
+		let (mut meta_val, meta_missing) = match self.get_meta::<ZSetMetaValue>(&key).await? {
+			Some(val) => (val, false),
+			None => (ZSetMetaValue::new(0, 0), true),
+		};
+
+		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD
+		// behavior)
+		let mut unique_elements = std::collections::HashMap::new();
+		for (score, member) in elements {
+			unique_elements.insert(member, score);
+		}
+		let elements: Vec<_> = unique_elements
+			.into_iter()
+			.map(|(member, score)| (score, member))
+			.collect();
+
+		// Unconditionally encode all member keys since we need them for insertion
+		let member_encoded_keys: Vec<_> = elements
+			.iter()
+			.map(|(_, member)| MemberKey::new(key.clone(), member.clone()).encode())
+			.collect();
+
+		let old_values: Vec<_> = if meta_missing {
+			vec![None; elements.len()]
+		} else {
+			// Fetch all existing members concurrently
+			let member_futs = member_encoded_keys
+				.iter()
+				.map(|enc| self.zset_db.get_key_value(enc.clone()));
+
+			future::join_all(member_futs)
+				.await
+				.into_iter()
+				.collect::<Result<Vec<_>, _>>()?
+				.into_iter()
+				.map(|entry| match entry {
+					Some(kv) if kv.seq >= meta_val.version => Some(kv.value),
+					_ => None,
+				})
+				.collect()
+		};
+
+		let mut added_count = 0;
+		let mut first_new_member_key: Option<Bytes> = None;
 		// Use WriteBatch to ensure atomicity of all zset operations
 		let mut batch = WriteBatch::new();
 		let mut has_writes = false;
@@ -81,13 +85,11 @@ impl Storage {
 				if old_score != score {
 					has_writes = true;
 					// Delete old ScoreKey
-					let old_score_key =
-						ScoreKey::new(key.clone(), meta_val.version, old_score, member.clone());
+					let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
 					batch.delete(old_score_key.encode());
 
 					// Add new ScoreKey
-					let new_score_key =
-						ScoreKey::new(key.clone(), meta_val.version, score, member.clone());
+					let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
 					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
 
 					// Update MemberKey
@@ -102,6 +104,9 @@ impl Storage {
 				has_writes = true;
 				// New member
 				added_count += 1;
+				if first_new_member_key.is_none() {
+					first_new_member_key = Some(encoded_member_key.clone());
+				}
 
 				// Add MemberKey
 				let encoded_score = ScoreKey::encode_score(score);
@@ -112,7 +117,7 @@ impl Storage {
 				);
 
 				// Add ScoreKey
-				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
+				let score_key = ScoreKey::new(key.clone(), score, member);
 				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
@@ -121,16 +126,26 @@ impl Storage {
 			self.zset_db.write_with_options(batch, &write_opts).await?;
 		}
 
+		if meta_missing && added_count > 0 {
+			let Some(first_key) = first_new_member_key else {
+				return Err(StorageError::DataInconsistency {
+					message: "missing first new zset member key after write".to_string(),
+				});
+			};
+			let first_entry = self
+				.zset_db
+				.get_key_value(first_key)
+				.await?
+				.ok_or_else(|| StorageError::DataInconsistency {
+					message: "failed to read first new zset member after write".to_string(),
+				})?;
+			meta_val.version = first_entry.seq;
+		}
+
 		if added_count > 0 {
 			meta_val.len += added_count;
 
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
+			let put_opts = Storage::meta_put_opts(&meta_val);
 
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
@@ -157,18 +172,9 @@ impl Storage {
 				return Ok(Vec::new());
 			}
 
-			let version = meta.version;
-
 			// We need to scan ScoreKeys.
-			// Key format: len(user_key) + user_key + version + b'S' + score + member
-			let prefix = {
-				let mut p = BytesMut::with_capacity(2 + key.len() + 1 + 8);
-				p.put_u16(key.len() as u16);
-				p.extend_from_slice(&key);
-				p.put_u64(version);
-				p.put_u8(b'S');
-				p.freeze()
-			};
+			// Key format: len(user_key) + user_key + b'S' + score + member
+			let prefix = zset_score_user_key_prefix(&key);
 
 			let range = prefix.as_ref()..;
 			let mut stream = self.zset_db.scan(range).await?;
@@ -176,7 +182,7 @@ impl Storage {
 			let mut result = Vec::new();
 			let mut current_idx = 0;
 			// Cache header length and offset to avoid repeated calculation
-			// prefix = key_len(2) + key + version(8) + b'S'(1), then score(8) + member
+			// prefix = key_len(2) + key + b'S'(1), then score(8) + member
 			let header_len = prefix.len() + 8; // prefix + score(8)
 			let score_offset = prefix.len(); // score starts right after prefix
 
@@ -185,10 +191,13 @@ impl Storage {
 				if !k.starts_with(&prefix) {
 					break;
 				}
+				if kv.seq < meta.version {
+					continue;
+				}
 
 				if current_idx >= start && current_idx <= stop {
 					// Extract member and score
-					// Key: len(user_key) + user_key + version(8) + b'S' + score(8) + member
+					// Key: len(user_key) + user_key + b'S' + score(8) + member
 					if k.len() > header_len {
 						let member = k.slice(header_len..);
 						result.push(member);
@@ -219,10 +228,12 @@ impl Storage {
 			return Ok(None);
 		};
 
-		let member_key = MemberKey::new(key, meta_val.version, member);
-		if let Some(val) = self.zset_db.get(member_key.encode()).await? {
+		let member_key = MemberKey::new(key, member);
+		if let Some(kv) = self.zset_db.get_key_value(member_key.encode()).await?
+			&& kv.seq >= meta_val.version
+		{
 			// Val is encoded score (u64 BE)
-			let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
+			let encoded_score = u64::from_be_bytes(kv.value[..8].try_into()?);
 			Ok(Some(ScoreKey::decode_score(encoded_score)))
 		} else {
 			Ok(None)
@@ -241,15 +252,21 @@ impl Storage {
 		// Fetch all member keys in parallel
 		let mut member_encoded_keys = Vec::with_capacity(members.len());
 		let fetch_futures = members.iter().map(|member| {
-			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
+			let member_key = MemberKey::new(key.clone(), member.clone());
 			let encoded_key = member_key.encode();
 			member_encoded_keys.push(encoded_key.clone());
-			self.zset_db.get(encoded_key)
+			self.zset_db.get_key_value(encoded_key)
 		});
 
 		let old_values: Result<Vec<_>, _> =
 			future::join_all(fetch_futures).await.into_iter().collect();
-		let old_values = old_values?;
+		let old_values = old_values?
+			.into_iter()
+			.map(|entry| match entry {
+				Some(kv) if kv.seq >= meta_val.version => Some(kv.value),
+				_ => None,
+			})
+			.collect::<Vec<_>>();
 
 		// Use WriteBatch to ensure atomicity of all delete operations
 		let mut batch = WriteBatch::new();
@@ -263,7 +280,7 @@ impl Storage {
 				// Delete ScoreKey
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
 				let score = ScoreKey::decode_score(encoded_score);
-				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
+				let score_key = ScoreKey::new(key.clone(), score, member);
 				batch.delete(score_key.encode());
 
 				removed_count += 1;
@@ -287,13 +304,7 @@ impl Storage {
 				.delete_with_options(meta_encoded_key, &write_opts)
 				.await?;
 		} else {
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
+			let put_opts = Storage::meta_put_opts(&meta_val);
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
 				.await?;
@@ -314,6 +325,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::string::meta::ZSetMetaValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::new().to_string();
@@ -435,6 +447,75 @@ mod tests {
 		let members = storage.zrange(key1.clone(), 0, -1, false).await.unwrap();
 		assert_eq!(members.len(), 1, "ZRange user1 should have 1 member");
 		assert_eq!(members[0], Bytes::from("m1"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zset_version_init_stable_and_recreate() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_version_lifecycle");
+
+		let added = storage
+			.zadd(key.clone(), vec![(1.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v1 = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+
+		let added = storage
+			.zadd(key.clone(), vec![(2.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 0);
+
+		let version_after_score_update = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_score_update, version_v1);
+
+		let added = storage
+			.zadd(key.clone(), vec![(3.0, Bytes::from("m2"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let version_after_new_member = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_new_member, version_v1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let added = storage
+			.zadd(key.clone(), vec![(10.0, Bytes::from("m1"))])
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v2 = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert!(version_v2 > version_v1);
+
+		let members = storage.zrange(key.clone(), 0, -1, false).await.unwrap();
+		assert_eq!(members, vec![Bytes::from("m1")]);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

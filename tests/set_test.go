@@ -65,6 +65,22 @@ var _ = Describe("Set Commands", func() {
 		Expect(isMember).To(BeFalse())
 	})
 
+	It("should deduplicate members during initial meta_missing SADD", func() {
+		key := "myset_dedup"
+		rdb.Del(ctx, key)
+
+		// Cold insert with duplicate members in the SAME command
+		n, err := rdb.SAdd(ctx, key, "a", "a", "b", "c", "b").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(int64(3))) // Should only add 'a', 'b', 'c' once
+
+		card, err := rdb.SCard(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(card).To(Equal(int64(3))) // Should not be inflated to 5
+		
+		rdb.Del(ctx, key)
+	})
+
 	It("should support SREM", func() {
 		key := "myset"
 		rdb.SAdd(ctx, key, "m1", "m2", "m3")

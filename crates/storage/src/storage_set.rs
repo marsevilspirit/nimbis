@@ -1,39 +1,54 @@
 use bytes::Buf;
-use bytes::BufMut;
 use bytes::Bytes;
-use bytes::BytesMut;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
-use crate::expirable::Expirable;
 use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
+use crate::util::user_key_prefix;
 
 impl Storage {
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-
-		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
-			Some(meta) => meta,
-			None => SetMetaValue::new(self.version_generator.next(), 0),
-		};
-
-		let mut added_count = 0;
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
 		let put_opts = PutOptions::default();
 
-		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
-			let encoded_member_key = member_key.encode();
+		let (mut meta_val, meta_missing) = match self.get_meta::<SetMetaValue>(&key).await? {
+			Some(meta) => (meta, false),
+			None => (SetMetaValue::new(0, 0), true),
+		};
 
-			if self.set_db.get(encoded_member_key.clone()).await?.is_none() {
+		// Deduplicate members, keeping the first occurrence
+		let mut unique_members = std::collections::HashSet::new();
+		let members: Vec<_> = members
+			.into_iter()
+			.filter(|m| unique_members.insert(m.clone()))
+			.collect();
+
+		let mut added_count = 0;
+		let mut first_added_seq: Option<u64> = None;
+
+		for member in members {
+			let member_key = SetMemberKey::new(key.clone(), member);
+			let encoded_member_key = member_key.encode();
+			let exists = if meta_missing {
+				false
+			} else {
 				self.set_db
+					.get_key_value(encoded_member_key.clone())
+					.await?
+					.is_some_and(|kv| kv.seq >= meta_val.version)
+			};
+
+			if !exists {
+				let wh = self
+					.set_db
 					.put_with_options(
 						encoded_member_key,
 						Bytes::new(), // value is empty for set members
@@ -41,20 +56,23 @@ impl Storage {
 						&write_opts,
 					)
 					.await?;
+				if meta_missing && first_added_seq.is_none() {
+					first_added_seq = Some(wh.seqnum());
+				}
 				added_count += 1;
 			}
 		}
 
 		if added_count > 0 {
+			if meta_missing {
+				meta_val.version =
+					first_added_seq.ok_or_else(|| StorageError::DataInconsistency {
+						message: "missing first new set member seq after write".to_string(),
+					})?;
+			}
 			meta_val.len += added_count;
 
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let put_opts = PutOptions { ttl };
+			let put_opts = Storage::meta_put_opts(&meta_val);
 
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
@@ -69,12 +87,8 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key + version
-		let mut prefix = BytesMut::with_capacity(2 + key.len() + 8);
-		prefix.put_u16(key.len() as u16);
-		prefix.extend_from_slice(&key);
-		prefix.put_u64(meta_val.version);
-		let prefix = prefix.freeze();
+		// Construct prefix: len(user_key) + user_key
+		let prefix = user_key_prefix(&key);
 
 		let range = prefix.clone()..;
 		let mut stream = self.set_db.scan(range).await?;
@@ -85,8 +99,11 @@ impl Storage {
 			if !k.starts_with(&prefix) {
 				break;
 			}
+			if kv.seq < meta_val.version {
+				continue;
+			}
 
-			// Parse member: prefix (key_len+key+version) + member_len(u32) + member
+			// Parse member: prefix (key_len+key) + member_len(u32) + member
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -111,8 +128,13 @@ impl Storage {
 			return Ok(false);
 		};
 
-		let member_key = SetMemberKey::new(key, meta_val.version, member);
-		Ok(self.set_db.get(member_key.encode()).await?.is_some())
+		let member_key = SetMemberKey::new(key, member);
+		let found = self
+			.set_db
+			.get_key_value(member_key.encode())
+			.await?
+			.is_some_and(|kv| kv.seq >= meta_val.version);
+		Ok(found)
 	}
 
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
@@ -130,10 +152,15 @@ impl Storage {
 		};
 
 		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
+			let member_key = SetMemberKey::new(key.clone(), member);
 			let encoded_key = member_key.encode();
+			let exists = self
+				.set_db
+				.get_key_value(encoded_key.clone())
+				.await?
+				.is_some_and(|kv| kv.seq >= meta_val.version);
 
-			if self.set_db.get(encoded_key.clone()).await?.is_some() {
+			if exists {
 				self.set_db
 					.delete_with_options(encoded_key, &write_opts)
 					.await?;
@@ -148,13 +175,7 @@ impl Storage {
 					.delete_with_options(meta_encoded_key, &write_opts)
 					.await?;
 			} else {
-				let ttl = meta_val
-					.remaining_ttl()
-					.map(|d| d.as_millis() as u64)
-					.map(slatedb::config::Ttl::ExpireAfter)
-					.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-				let put_opts = PutOptions { ttl };
+				let put_opts = Storage::meta_put_opts(&meta_val);
 				self.string_db
 					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
 					.await?;
@@ -176,6 +197,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::string::meta::SetMetaValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::new().to_string();
@@ -260,6 +282,65 @@ mod tests {
 
 		storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(storage.scard(key.clone()).await.unwrap(), 1);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_set_version_init_stable_and_recreate() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("set_version_lifecycle");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+
+		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v1 = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+
+		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
+		assert_eq!(added, 0);
+
+		let version_after_dup = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_dup, version_v1);
+
+		let added = storage.sadd(key.clone(), vec![m2.clone()]).await.unwrap();
+		assert_eq!(added, 1);
+
+		let version_after_update = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_update, version_v1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
+		assert_eq!(added, 1);
+
+		let version_v2 = storage
+			.get_meta::<SetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert!(version_v2 > version_v1);
+
+		let members = storage.smembers(key.clone()).await.unwrap();
+		assert_eq!(members, vec![m1]);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

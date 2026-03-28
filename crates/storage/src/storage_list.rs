@@ -5,7 +5,6 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
-use crate::expirable::Expirable;
 use crate::list::element_key::ListElementKey;
 use crate::storage::Storage;
 use crate::string::meta::ListMetaValue;
@@ -37,16 +36,16 @@ impl Storage {
 
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-
-		let mut meta_val = match self.get_meta::<ListMetaValue>(&key).await? {
-			Some(m) => m,
-			None => ListMetaValue::new(self.version_generator.next()),
-		};
-
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
 		let put_opts = PutOptions::default();
+
+		let (mut meta_val, meta_missing) = match self.get_meta::<ListMetaValue>(&key).await? {
+			Some(m) => (m, false),
+			None => (ListMetaValue::new(0), true),
+		};
+		let mut first_insert_seq: Option<u64> = None;
 
 		for element in elements {
 			let seq = if is_left {
@@ -58,22 +57,25 @@ impl Storage {
 				s
 			};
 
-			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
-			self.list_db
+			let element_key = ListElementKey::new(key.clone(), seq);
+			let wh = self
+				.list_db
 				.put_with_options(element_key.encode(), element, &put_opts, &write_opts)
 				.await?;
+			if meta_missing && first_insert_seq.is_none() {
+				first_insert_seq = Some(wh.seqnum());
+			}
 			meta_val.len += 1;
 		}
 
-		// Update metadata
-		// Preserve TTL if it exists
-		let ttl = meta_val
-			.remaining_ttl()
-			.map(|d| d.as_millis() as u64)
-			.map(slatedb::config::Ttl::ExpireAfter)
-			.unwrap_or(slatedb::config::Ttl::NoExpiry);
+		if meta_missing {
+			meta_val.version = first_insert_seq.ok_or_else(|| StorageError::DataInconsistency {
+				message: "missing first new list element seq after write".to_string(),
+			})?;
+		}
 
-		let meta_put_opts = PutOptions { ttl };
+		// Update metadata
+		let meta_put_opts = Storage::meta_put_opts(&meta_val);
 
 		self.string_db
 			.put_with_options(
@@ -125,9 +127,15 @@ impl Storage {
 				meta_val.tail - 1
 			};
 
-			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
+			let element_key = ListElementKey::new(key.clone(), seq);
 			// Get element
-			if let Some(val) = self.list_db.get(element_key.encode()).await? {
+			if let Some(val) = self
+				.list_db
+				.get_key_value(element_key.encode())
+				.await?
+				.filter(|kv| kv.seq >= meta_val.version)
+				.map(|kv| kv.value)
+			{
 				results.push(val);
 
 				// Only update meta and delete if element exists
@@ -153,13 +161,7 @@ impl Storage {
 				.delete_with_options(meta_key.encode(), &write_opts)
 				.await?;
 		} else {
-			let ttl = meta_val
-				.remaining_ttl()
-				.map(|d| d.as_millis() as u64)
-				.map(slatedb::config::Ttl::ExpireAfter)
-				.unwrap_or(slatedb::config::Ttl::NoExpiry);
-
-			let meta_put_opts = PutOptions { ttl };
+			let meta_put_opts = Storage::meta_put_opts(&meta_val);
 
 			self.string_db
 				.put_with_options(
@@ -229,16 +231,23 @@ impl Storage {
 
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {
-				let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
-				async move { self.list_db.get(element_key.encode()).await }
+				let element_key = ListElementKey::new(key.clone(), seq);
+				async move {
+					self.list_db
+						.get_key_value(element_key.encode())
+						.await
+						.map_err(StorageError::from)
+				}
 			})
 			.collect();
 
 		let found_results = future::try_join_all(futures).await?;
 
 		for res in found_results {
-			if let Some(val) = res {
-				results.push(val);
+			if let Some(kv) = res
+				&& kv.seq >= meta_val.version
+			{
+				results.push(kv.value);
 			} else {
 				// Should not happen if consistency is maintained
 				warn!(
@@ -255,6 +264,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::string::meta::ListMetaValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::new().to_string();
@@ -335,6 +345,72 @@ mod tests {
 		let part = storage.lrange(key.clone(), 0, 1).await.unwrap();
 		assert_eq!(part.len(), 2);
 		assert_eq!(part[1], Bytes::from("2"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_list_version_init_stable_and_recreate() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("list_version_lifecycle");
+
+		let len = storage
+			.rpush(key.clone(), vec![Bytes::from("a"), Bytes::from("b")])
+			.await
+			.unwrap();
+		assert_eq!(len, 2);
+
+		let version_v1 = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+
+		let len = storage
+			.rpush(key.clone(), vec![Bytes::from("c")])
+			.await
+			.unwrap();
+		assert_eq!(len, 3);
+
+		let version_after_push = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_push, version_v1);
+
+		let popped = storage.lpop(key.clone(), None).await.unwrap();
+		assert_eq!(popped, vec![Bytes::from("a")]);
+
+		let version_after_pop = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert_eq!(version_after_pop, version_v1);
+
+		let deleted = storage.del(key.clone()).await.unwrap();
+		assert!(deleted);
+
+		let len = storage
+			.rpush(key.clone(), vec![Bytes::from("x")])
+			.await
+			.unwrap();
+		assert_eq!(len, 1);
+
+		let version_v2 = storage
+			.get_meta::<ListMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		assert!(version_v2 > version_v1);
+
+		let elems = storage.lrange(key.clone(), 0, -1).await.unwrap();
+		assert_eq!(elems, vec![Bytes::from("x")]);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

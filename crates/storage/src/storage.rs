@@ -2,7 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use chrono::Utc;
 use slatedb::Db;
+use slatedb::config::PutOptions;
+use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
@@ -11,7 +14,6 @@ use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
-use crate::version::VersionGenerator;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -20,7 +22,6 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
-	pub(crate) version_generator: Arc<VersionGenerator>,
 }
 
 impl Storage {
@@ -37,7 +38,6 @@ impl Storage {
 			list_db,
 			set_db,
 			zset_db,
-			version_generator: Arc::new(VersionGenerator::new()),
 		}
 	}
 
@@ -132,20 +132,42 @@ impl Storage {
 		Ok(())
 	}
 
+	pub(crate) fn is_expired(expire_ts: Option<i64>) -> bool {
+		expire_ts.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
+	}
+
 	/// Helper to get and validate metadata for any collection type.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
-	/// - Ok(None) if the key doesn't exist or is expired
+	/// - Ok(None) if the key doesn't exist (expired keys are already filtered
+	///   by storage)
 	/// - Err if the key exists but is of wrong type
 	pub(crate) async fn get_meta<T: MetaValue>(
 		&self,
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_bytes = match self.string_db.get(meta_key.encode()).await? {
-			Some(bytes) => bytes,
+		let meta_encoded_key = meta_key.encode();
+		let kv = match self
+			.string_db
+			.get_key_value(meta_encoded_key.clone())
+			.await?
+		{
+			Some(kv) => kv,
 			None => return Ok(None),
 		};
+
+		if Self::is_expired(kv.expire_ts) {
+			let write_opts = WriteOptions {
+				await_durable: false,
+			};
+			self.string_db
+				.delete_with_options(meta_encoded_key, &write_opts)
+				.await?;
+			return Ok(None);
+		}
+
+		let meta_bytes = kv.value;
 
 		if meta_bytes.is_empty() {
 			return Ok(None);
@@ -159,8 +181,22 @@ impl Storage {
 			});
 		}
 
-		let meta_val = T::decode(&meta_bytes)?;
+		let mut meta_val = T::decode(&meta_bytes)?;
+
+		if let Some(ts) = kv.expire_ts {
+			meta_val.set_expire_time(ts as u64);
+		}
+
 		Ok(Some(meta_val))
+	}
+
+	pub(crate) fn meta_put_opts(meta: &impl crate::expirable::Expirable) -> PutOptions {
+		let ttl = meta
+			.remaining_ttl()
+			.map(|d| d.as_millis() as u64)
+			.map(slatedb::config::Ttl::ExpireAfter)
+			.unwrap_or(slatedb::config::Ttl::NoExpiry);
+		PutOptions { ttl }
 	}
 }
 
