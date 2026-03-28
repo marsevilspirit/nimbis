@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use chrono::Utc;
 use slatedb::Db;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
@@ -10,10 +9,12 @@ use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
 
+use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
+use crate::utils::is_expired;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -59,15 +60,29 @@ impl Storage {
 		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
 
-		let open_db = |name: &'static str, data_type: DataType, string_db: Option<Arc<Db>>| {
+		// Open string_db — no custom compaction filter needed;
+		// SlateDB's built-in TTL mechanism handles expiration during compaction.
+		let string_db = {
+			let db_path = slatedb::object_store::path::Path::from("/string");
+			let db = Db::builder(db_path, object_store.clone())
+				.with_db_cache(cache.clone())
+				.build()
+				.await
+				.map_err(StorageError::from)?;
+			Arc::new(db)
+		};
+
+		// Open collection DBs with CollectionCompactionFilter referencing string_db
+		let open_db_with_collection_filter = |name: &'static str, data_type: DataType| {
 			let store = object_store.clone();
 			let cache = cache.clone();
+			let string_db = string_db.clone();
 			async move {
 				let db_path = slatedb::object_store::path::Path::from(name);
 				let compactor_builder =
 					slatedb::CompactorBuilder::new(db_path.clone(), store.clone())
 						.with_compaction_filter_supplier(Arc::new(
-							crate::compaction_filter::NimbisCompactionFilterSupplier {
+							CollectionCompactionFilterSupplier {
 								string_db,
 								data_type,
 							},
@@ -81,16 +96,11 @@ impl Storage {
 			}
 		};
 
-		// Open string_db first as it is needed by others for compaction filtering
-		let string_db = open_db("/string", DataType::String, None).await?;
-		let string_db = Arc::new(string_db);
-
-		// Open collection DBs with reference to string_db
 		let (hash_db, list_db, set_db, zset_db) = tokio::try_join!(
-			open_db("/hash", DataType::Hash, Some(string_db.clone())),
-			open_db("/list", DataType::List, Some(string_db.clone())),
-			open_db("/set", DataType::Set, Some(string_db.clone())),
-			open_db("/zset", DataType::ZSet, Some(string_db.clone()))
+			open_db_with_collection_filter("/hash", DataType::Hash),
+			open_db_with_collection_filter("/list", DataType::List),
+			open_db_with_collection_filter("/set", DataType::Set),
+			open_db_with_collection_filter("/zset", DataType::ZSet)
 		)?;
 
 		Ok(Self::new(
@@ -132,10 +142,6 @@ impl Storage {
 		Ok(())
 	}
 
-	pub(crate) fn is_expired(expire_ts: Option<i64>) -> bool {
-		expire_ts.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
-	}
-
 	/// Helper to get and validate metadata for any collection type.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
@@ -157,7 +163,7 @@ impl Storage {
 			None => return Ok(None),
 		};
 
-		if Self::is_expired(kv.expire_ts) {
+		if is_expired(kv.expire_ts) {
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};
@@ -272,7 +278,7 @@ mod tests {
 	async fn test_physical_cleanup_after_logical_delete(#[future] ctx: TestContext) {
 		use slatedb::CompactionFilter;
 
-		use crate::compaction_filter::NimbisCompactionFilter;
+		use crate::compaction_filter::CollectionCompactionFilter;
 		use crate::data_type::DataType;
 
 		let ctx = ctx.await;
@@ -323,8 +329,8 @@ mod tests {
 		);
 
 		// Run compaction filter logic on all raw entries
-		let mut filter = NimbisCompactionFilter {
-			string_db: Some(ctx.storage.string_db.clone()),
+		let mut filter = CollectionCompactionFilter {
+			string_db: ctx.storage.string_db.clone(),
 			data_type: DataType::Set,
 		};
 

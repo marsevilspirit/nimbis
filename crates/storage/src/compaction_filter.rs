@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Buf;
 use bytes::Bytes;
-use log::debug;
+use log::info;
+use log::warn;
 use slatedb::CompactionFilter;
 use slatedb::CompactionFilterDecision;
 use slatedb::CompactionFilterError;
@@ -14,17 +15,18 @@ use slatedb::RowEntry;
 use slatedb::ValueDeletable;
 
 use crate::data_type::DataType;
-use crate::expirable::Expirable;
-use crate::storage::Storage;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 
-pub struct NimbisCompactionFilter {
-	pub(crate) string_db: Option<Arc<Db>>,
+// CollectionCompactionFilter used by hash_db, list_db, set_db, zset_db
+pub struct CollectionCompactionFilter {
+	pub(crate) string_db: Arc<Db>,
 	pub(crate) data_type: DataType,
 }
 
-impl NimbisCompactionFilter {
+impl CollectionCompactionFilter {
+	/// Decode a sub-key to extract the user_key portion.
+	/// Sub-key format: key_len(u16 BE) + user_key + ...
 	fn decode_sub_key(key: &[u8]) -> Option<Bytes> {
 		if key.len() < 2 {
 			return None;
@@ -40,135 +42,83 @@ impl NimbisCompactionFilter {
 }
 
 #[async_trait]
-impl CompactionFilter for NimbisCompactionFilter {
+impl CompactionFilter for CollectionCompactionFilter {
 	async fn filter(
 		&mut self,
 		entry: &RowEntry,
 	) -> Result<CompactionFilterDecision, CompactionFilterError> {
-		// We only care about entries that are not already tombstones
-		let bytes = match &entry.value {
-			ValueDeletable::Value(bytes) | ValueDeletable::Merge(bytes) => bytes,
-			ValueDeletable::Tombstone => return Ok(CompactionFilterDecision::Keep),
+		// Skip tombstones
+		if matches!(&entry.value, ValueDeletable::Tombstone) {
+			return Ok(CompactionFilterDecision::Keep);
+		}
+
+		// Decode sub-key to get user_key
+		let Some(user_key) = Self::decode_sub_key(&entry.key) else {
+			info!(
+				"[{:?}Filter] Invalid key format: {:?}",
+				self.data_type, entry.key
+			);
+			return Ok(CompactionFilterDecision::Keep);
 		};
 
-		match self.data_type {
-			DataType::String => {
-				// String DB: Check expiration from SlateDB metadata for all types (String,
-				// Hash, Set, etc.)
-				if Storage::is_expired(entry.expire_ts) {
-					debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
-
-				let _any_val = match AnyValue::decode(bytes) {
-					Ok(val) => val,
-					Err(e) => {
-						debug!(
-							"[StringFilter] failed to decode value for key {:?}: {:?}",
-							entry.key, e
-						);
-						return Ok(CompactionFilterDecision::Keep);
-					}
-				};
-
-				Ok(CompactionFilterDecision::Keep)
+		// Lookup metadata in string_db
+		let meta_key = MetaKey::new(user_key.clone());
+		let kv = match self.string_db.get_key_value(meta_key.encode()).await {
+			Ok(Some(v)) => v,
+			Ok(None) => {
+				// Metadata missing -> Orphaned sub-key -> Delete
+				info!(
+					"[{:?}Filter] Drop[Meta missing] key: {:?}",
+					self.data_type, user_key
+				);
+				return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 			}
-			_ => {
-				// Collection DB: Check metadata in string_db
-				let Some(string_db) = &self.string_db else {
-					// Should not happen if configured correctly
-					return Ok(CompactionFilterDecision::Keep);
-				};
-
-				// Decode sub-key to get user_key
-				let Some(user_key) = Self::decode_sub_key(&entry.key) else {
-					// Invalid key format? Keep safe.
-					debug!(
-						"[{:?}Filter] Invalid key format: {:?}",
-						self.data_type, entry.key
-					);
-					return Ok(CompactionFilterDecision::Keep);
-				};
-
-				// Lookup metadata
-				let meta_key = MetaKey::new(user_key.clone());
-				let kv = match string_db.get_key_value(meta_key.encode()).await {
-					Ok(Some(v)) => v,
-					Ok(None) => {
-						// Metadata missing -> Orphaned sub-key -> Delete
-						debug!(
-							"[{:?}DataFilter] Drop[Meta key not exist] key: {:?}",
-							self.data_type, user_key
-						);
-						return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-					}
-					Err(e) => {
-						debug!(
-							"[{:?}DataFilter] Reserve[Get meta_key failed: {:?}] key: {:?}",
-							self.data_type, e, user_key
-						);
-						return Ok(CompactionFilterDecision::Keep);
-					}
-				};
-
-				// Consider expired metadata as non-existent to allow sub-key cleanup
-				if Storage::is_expired(kv.expire_ts) {
-					debug!(
-						"[{:?}DataFilter] Drop[Meta key expired] key: {:?}",
-						self.data_type, user_key
-					);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
-
-				let meta_encoded = kv.value;
-
-				let any_val = match AnyValue::decode(&meta_encoded) {
-					Ok(v) => v,
-					Err(e) => {
-						debug!(
-							"[{:?}DataFilter] Reserve[Decode meta failed: {:?}] key: {:?}",
-							self.data_type, e, user_key
-						);
-						return Ok(CompactionFilterDecision::Keep);
-					}
-				};
-
-				// Check expiration
-				if any_val.is_expired() {
-					debug!(
-						"[{:?}DataFilter] Drop[Timeout] key: {:?}",
-						self.data_type, user_key
-					);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
-
-				// Check Type
-				if any_val.data_type() != self.data_type {
-					// Type mismatch -> Orphaned sub-key (collision) -> Delete
-					debug!(
-						"[{:?}DataFilter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
-						self.data_type,
-						self.data_type,
-						any_val.data_type(),
-						user_key
-					);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
-
-				// Check Version
-				if let Some(meta_version) = any_val.version()
-					&& entry.seq < meta_version
-				{
-					debug!(
-						"[{:?}DataFilter] Drop[old seq: meta_version {}, data_seq {}] key: {:?}",
-						self.data_type, meta_version, entry.seq, user_key
-					);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
-
-				Ok(CompactionFilterDecision::Keep)
+			Err(e) => {
+				warn!(
+					"[{:?}Filter] Keep[Get meta failed: {:?}] key: {:?}",
+					self.data_type, e, user_key
+				);
+				return Ok(CompactionFilterDecision::Keep);
 			}
+		};
+
+		let meta_encoded = kv.value;
+
+		let any_val = match AnyValue::decode(&meta_encoded) {
+			Ok(v) => v,
+			Err(e) => {
+				warn!(
+					"[{:?}Filter] Keep[Decode meta failed: {:?}] key: {:?}",
+					self.data_type, e, user_key
+				);
+				return Ok(CompactionFilterDecision::Keep);
+			}
+		};
+
+		// Check type — type mismatch means orphaned sub-key from a type collision
+		if any_val.data_type() != self.data_type {
+			info!(
+				"[{:?}Filter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
+				self.data_type,
+				self.data_type,
+				any_val.data_type(),
+				user_key
+			);
+			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
+
+		// Check version — old generation sub-keys should be tombstoned
+		if let Some(meta_version) = any_val.version()
+			&& entry.seq < meta_version
+		{
+			info!(
+				"[{:?}Filter] Drop[old seq: meta_version {}, data_seq {}] key: {:?}",
+				self.data_type, meta_version, entry.seq, user_key
+			);
+			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
+		}
+
+		Ok(CompactionFilterDecision::Keep)
 	}
 
 	async fn on_compaction_end(&mut self) -> Result<(), CompactionFilterError> {
@@ -176,18 +126,18 @@ impl CompactionFilter for NimbisCompactionFilter {
 	}
 }
 
-pub struct NimbisCompactionFilterSupplier {
-	pub string_db: Option<Arc<Db>>,
+pub struct CollectionCompactionFilterSupplier {
+	pub string_db: Arc<Db>,
 	pub data_type: DataType,
 }
 
 #[async_trait]
-impl CompactionFilterSupplier for NimbisCompactionFilterSupplier {
+impl CompactionFilterSupplier for CollectionCompactionFilterSupplier {
 	async fn create_compaction_filter(
 		&self,
 		_context: &CompactionJobContext,
 	) -> Result<Box<dyn CompactionFilter>, CompactionFilterError> {
-		Ok(Box::new(NimbisCompactionFilter {
+		Ok(Box::new(CollectionCompactionFilter {
 			string_db: self.string_db.clone(),
 			data_type: self.data_type,
 		}))
@@ -200,100 +150,9 @@ mod tests {
 	use slatedb::ValueDeletable;
 
 	use super::*;
-	use crate::string::value::StringValue;
 
 	#[tokio::test]
-	async fn test_filter_expired_key() {
-		let mut filter = NimbisCompactionFilter {
-			string_db: None,
-			data_type: DataType::String,
-		};
-		let value = StringValue::new(Bytes::from("val"));
-		let entry = RowEntry {
-			key: Bytes::from("key"),
-			value: ValueDeletable::Value(value.encode()),
-			seq: 1,
-			create_ts: None,
-			expire_ts: Some(100),
-		};
-
-		let decision = filter.filter(&entry).await.unwrap();
-		assert_eq!(
-			decision,
-			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
-		);
-	}
-
-	#[tokio::test]
-	async fn test_filter_not_expired_key() {
-		let mut filter = NimbisCompactionFilter {
-			string_db: None,
-			data_type: DataType::String,
-		};
-		let future_time = chrono::Utc::now().timestamp_millis() + 100000;
-		let value = StringValue::new(Bytes::from("val"));
-		let entry = RowEntry {
-			key: Bytes::from("key"),
-			value: ValueDeletable::Value(value.encode()),
-			seq: 1,
-			create_ts: None,
-			expire_ts: Some(future_time),
-		};
-
-		let decision = filter.filter(&entry).await.unwrap();
-		assert_eq!(decision, CompactionFilterDecision::Keep);
-	}
-
-	#[tokio::test]
-	async fn test_filter_string_type_mismatch_keeps_meta_value() {
-		use crate::string::meta::HashMetaValue;
-
-		let mut filter = NimbisCompactionFilter {
-			string_db: None,
-			data_type: DataType::String,
-		};
-		// HashMetaValue is a non-String type that should be kept in string_db
-		let meta_value = HashMetaValue::new(1, 1).encode();
-		let entry = RowEntry {
-			key: Bytes::from("string-key"),
-			value: ValueDeletable::Value(meta_value),
-			seq: 1,
-			create_ts: None,
-			expire_ts: None,
-		};
-
-		let decision = filter.filter(&entry).await.unwrap();
-		assert_eq!(decision, CompactionFilterDecision::Keep);
-	}
-
-	#[tokio::test]
-	async fn test_filter_string_meta_expired_drops_entry() {
-		use crate::string::meta::HashMetaValue;
-
-		let mut filter = NimbisCompactionFilter {
-			string_db: None,
-			data_type: DataType::String,
-		};
-		let meta_value = HashMetaValue::new(1, 1).encode();
-		let past_time = chrono::Utc::now().timestamp_millis() - 60000;
-
-		let entry = RowEntry {
-			key: Bytes::from("expired-meta-key"),
-			value: ValueDeletable::Value(meta_value),
-			seq: 1,
-			create_ts: None,
-			expire_ts: Some(past_time),
-		};
-
-		let decision = filter.filter(&entry).await.unwrap();
-		assert_eq!(
-			decision,
-			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
-		);
-	}
-
-	#[tokio::test]
-	async fn test_filter_version_mismatch() {
+	async fn test_collection_filter_version_mismatch() {
 		use std::sync::Arc;
 
 		use bytes::BufMut;
@@ -325,13 +184,12 @@ mod tests {
 			.unwrap();
 
 		// Setup Filter
-		let mut filter = NimbisCompactionFilter {
-			string_db: Some(string_db.clone()),
+		let mut filter = CollectionCompactionFilter {
+			string_db: string_db.clone(),
 			data_type: DataType::Hash,
 		};
 
 		// Test Valid seq (10)
-		// SubKey: len(2) + key + field_len(4) + field
 		let mut valid_key = BytesMut::new();
 		valid_key.put_u16(user_key.len() as u16);
 		valid_key.extend_from_slice(&user_key);
@@ -369,7 +227,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_compaction_reclaims_orphaned_data() {
+	async fn test_collection_filter_reclaims_orphaned_data() {
 		use std::sync::Arc;
 
 		use bytes::BufMut;
@@ -401,9 +259,8 @@ mod tests {
 			.await
 			.unwrap();
 
-		// Build 3 sub-keys. Version is now checked via RowEntry.seq.
-		let mut filter = NimbisCompactionFilter {
-			string_db: Some(string_db.clone()),
+		let mut filter = CollectionCompactionFilter {
+			string_db: string_db.clone(),
 			data_type: DataType::Set,
 		};
 
@@ -425,7 +282,6 @@ mod tests {
 				create_ts: None,
 				expire_ts: None,
 			};
-			// All should be kept (version matches)
 			assert_eq!(
 				filter.filter(&entry).await.unwrap(),
 				CompactionFilterDecision::Keep,
