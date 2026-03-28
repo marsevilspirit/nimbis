@@ -133,61 +133,88 @@ var _ = Describe("Expire/TTL Commands", func() {
 
 	It("should retain TTL after SREM", func() {
 		key := "set_ttl_srem_key"
-		rdb.SAdd(ctx, key, "m1", "m2")
+		_, err := rdb.SAdd(ctx, key, "m1", "m2").Result()
+		Expect(err).NotTo(HaveOccurred())
 
-		rdb.Expire(ctx, key, 10*time.Second)
+		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(BeTrue())
 
-		ttlBefore, _ := rdb.TTL(ctx, key).Result()
+		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
-		rdb.SRem(ctx, key, "m1")
+		_, err = rdb.SRem(ctx, key, "m1").Result()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, _ := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
 	})
 
 	It("should retain TTL after HSET", func() {
 		key := "hash_ttl_hset_key"
-		rdb.HSet(ctx, key, "f1", "v1")
-		rdb.Expire(ctx, key, 10*time.Second)
+		err := rdb.HSet(ctx, key, "f1", "v1").Err()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlBefore, _ := rdb.TTL(ctx, key).Result()
+		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(BeTrue())
+
+		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
-		rdb.HSet(ctx, key, "f2", "v2")
+		err = rdb.HSet(ctx, key, "f2", "v2").Err()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, _ := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
 	})
 
 	It("should retain TTL after LPUSH", func() {
 		key := "list_ttl_lpush_key"
-		rdb.LPush(ctx, key, "m1")
-		rdb.Expire(ctx, key, 10*time.Second)
+		_, err := rdb.LPush(ctx, key, "m1").Result()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlBefore, _ := rdb.TTL(ctx, key).Result()
+		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(BeTrue())
+
+		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
-		rdb.LPush(ctx, key, "m2")
+		_, err = rdb.LPush(ctx, key, "m2").Result()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, _ := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
 	})
 
 	It("should retain TTL after ZADD", func() {
 		key := "zset_ttl_zadd_key"
-		rdb.ZAdd(ctx, key, redis.Z{Score: 1.0, Member: "m1"})
-		rdb.Expire(ctx, key, 10*time.Second)
+		_, err := rdb.ZAdd(ctx, key, redis.Z{Score: 1.0, Member: "m1"}).Result()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlBefore, _ := rdb.TTL(ctx, key).Result()
+		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(BeTrue())
+
+		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
-		rdb.ZAdd(ctx, key, redis.Z{Score: 2.0, Member: "m2"})
+		_, err = rdb.ZAdd(ctx, key, redis.Z{Score: 2.0, Member: "m2"}).Result()
+		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, _ := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
 	})
