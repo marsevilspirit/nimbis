@@ -18,10 +18,7 @@ use crate::data_type::DataType;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 
-// ---------------------------------------------------------------------------
-// CollectionCompactionFilter — used by hash_db, list_db, set_db, zset_db
-// ---------------------------------------------------------------------------
-
+// CollectionCompactionFilter used by hash_db, list_db, set_db, zset_db
 pub struct CollectionCompactionFilter {
 	pub(crate) string_db: Arc<Db>,
 	pub(crate) data_type: DataType,
@@ -153,10 +150,6 @@ mod tests {
 	use slatedb::ValueDeletable;
 
 	use super::*;
-
-	// -----------------------------------------------------------------------
-	// CollectionCompactionFilter tests
-	// -----------------------------------------------------------------------
 
 	#[tokio::test]
 	async fn test_collection_filter_version_mismatch() {
