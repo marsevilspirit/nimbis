@@ -14,10 +14,8 @@ use slatedb::RowEntry;
 use slatedb::ValueDeletable;
 
 use crate::data_type::DataType;
-use crate::expirable::Expirable;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
-use crate::utils::is_expired;
 
 // ---------------------------------------------------------------------------
 // CollectionCompactionFilter — used by hash_db, list_db, set_db, zset_db
@@ -52,10 +50,9 @@ impl CompactionFilter for CollectionCompactionFilter {
 		entry: &RowEntry,
 	) -> Result<CompactionFilterDecision, CompactionFilterError> {
 		// Skip tombstones
-		let _bytes = match &entry.value {
-			ValueDeletable::Value(bytes) | ValueDeletable::Merge(bytes) => bytes,
-			ValueDeletable::Tombstone => return Ok(CompactionFilterDecision::Keep),
-		};
+		if matches!(&entry.value, ValueDeletable::Tombstone) {
+			return Ok(CompactionFilterDecision::Keep);
+		}
 
 		// Decode sub-key to get user_key
 		let Some(user_key) = Self::decode_sub_key(&entry.key) else {
@@ -87,15 +84,6 @@ impl CompactionFilter for CollectionCompactionFilter {
 			}
 		};
 
-		// Consider expired metadata as non-existent to allow sub-key cleanup
-		if is_expired(kv.expire_ts) {
-			debug!(
-				"[{:?}Filter] Drop[Meta expired] key: {:?}",
-				self.data_type, user_key
-			);
-			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-		}
-
 		let meta_encoded = kv.value;
 
 		let any_val = match AnyValue::decode(&meta_encoded) {
@@ -108,15 +96,6 @@ impl CompactionFilter for CollectionCompactionFilter {
 				return Ok(CompactionFilterDecision::Keep);
 			}
 		};
-
-		// Check expiration from decoded metadata
-		if any_val.is_expired() {
-			debug!(
-				"[{:?}Filter] Drop[Timeout] key: {:?}",
-				self.data_type, user_key
-			);
-			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-		}
 
 		// Check type — type mismatch means orphaned sub-key from a type collision
 		if any_val.data_type() != self.data_type {
