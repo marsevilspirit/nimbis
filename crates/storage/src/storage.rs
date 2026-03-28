@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::Utc;
-use slatedb::config::WriteOptions;
 use slatedb::Db;
+use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::local::LocalFileSystem;
@@ -138,7 +138,8 @@ impl Storage {
 	/// Helper to get and validate metadata for any collection type.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
-	/// - Ok(None) if the key doesn't exist (expired keys are already filtered by storage)
+	/// - Ok(None) if the key doesn't exist (expired keys are already filtered
+	///   by storage)
 	/// - Err if the key exists but is of wrong type
 	pub(crate) async fn get_meta<T: MetaValue>(
 		&self,
@@ -146,7 +147,11 @@ impl Storage {
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let kv = match self.string_db.get_key_value(meta_encoded_key.clone()).await? {
+		let kv = match self
+			.string_db
+			.get_key_value(meta_encoded_key.clone())
+			.await?
+		{
 			Some(kv) => kv,
 			None => return Ok(None),
 		};

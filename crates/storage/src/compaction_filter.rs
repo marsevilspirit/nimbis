@@ -101,7 +101,7 @@ impl CompactionFilter for NimbisCompactionFilter {
 
 				// Lookup metadata
 				let meta_key = MetaKey::new(user_key.clone());
-				let meta_encoded = match string_db.get(meta_key.encode()).await {
+				let kv = match string_db.get_key_value(meta_key.encode()).await {
 					Ok(Some(v)) => v,
 					Ok(None) => {
 						// Metadata missing -> Orphaned sub-key -> Delete
@@ -119,6 +119,17 @@ impl CompactionFilter for NimbisCompactionFilter {
 						return Ok(CompactionFilterDecision::Keep);
 					}
 				};
+
+				// Consider expired metadata as non-existent to allow sub-key cleanup
+				if Storage::is_expired(kv.expire_ts) {
+					debug!(
+						"[{:?}DataFilter] Drop[Meta key expired] key: {:?}",
+						self.data_type, user_key
+					);
+					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
+				}
+
+				let meta_encoded = kv.value;
 
 				let any_val = match AnyValue::decode(&meta_encoded) {
 					Ok(v) => v,
