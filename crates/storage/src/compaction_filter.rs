@@ -54,8 +54,13 @@ impl CompactionFilter for NimbisCompactionFilter {
 
 		match self.data_type {
 			DataType::String => {
-				// String DB: Check expiration from SlateDB metadata.
-				let any_val = match AnyValue::decode(bytes) {
+				// String DB: Check expiration from SlateDB metadata for all types (String, Hash, Set, etc.)
+				if Storage::is_expired(entry.expire_ts) {
+					debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
+					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
+				}
+
+				let _any_val = match AnyValue::decode(bytes) {
 					Ok(val) => val,
 					Err(e) => {
 						debug!(
@@ -66,20 +71,6 @@ impl CompactionFilter for NimbisCompactionFilter {
 					}
 				};
 
-				if any_val.data_type() != DataType::String {
-					warn!(
-						"[StringFilter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
-						DataType::String,
-						any_val.data_type(),
-						entry.key
-					);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
-
-				if Storage::is_expired(entry.expire_ts) {
-					debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
-					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
-				}
 				Ok(CompactionFilterDecision::Keep)
 			}
 			_ => {
