@@ -32,10 +32,9 @@ impl CompactionFilter for StringCompactionFilter {
 		entry: &RowEntry,
 	) -> Result<CompactionFilterDecision, CompactionFilterError> {
 		// Skip tombstones
-		let _bytes = match &entry.value {
-			ValueDeletable::Value(bytes) | ValueDeletable::Merge(bytes) => bytes,
-			ValueDeletable::Tombstone => return Ok(CompactionFilterDecision::Keep),
-		};
+		if matches!(&entry.value, ValueDeletable::Tombstone) {
+			return Ok(CompactionFilterDecision::Keep);
+		}
 
 		// Check expiration from SlateDB metadata for all types stored in string_db
 		// (String values, Hash/Set/List/ZSet metadata)
