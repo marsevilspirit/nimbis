@@ -31,23 +31,22 @@ impl Storage {
 			None => (ZSetMetaValue::new(0, 0), true),
 		};
 
-		// Prepare member fetch futures using version from metadata
-		let mut member_encoded_keys = Vec::with_capacity(elements.len());
-		let mut member_futs = Vec::with_capacity(elements.len());
-		for (_, member) in &elements {
-			let member_key = MemberKey::new(key.clone(), member.clone());
-			let enc = member_key.encode();
-			member_encoded_keys.push(enc.clone());
-			member_futs.push(self.zset_db.get_key_value(enc));
-		}
-
-		// Fetch all members in parallel
-		let members_res = future::join_all(member_futs).await;
+		// Unconditionally encode all member keys since we need them for insertion
+		let member_encoded_keys: Vec<_> = elements
+			.iter()
+			.map(|(_, member)| MemberKey::new(key.clone(), member.clone()).encode())
+			.collect();
 
 		let old_values: Vec<_> = if meta_missing {
 			vec![None; elements.len()]
 		} else {
-			members_res
+			// Fetch all existing members concurrently
+			let member_futs = member_encoded_keys
+				.iter()
+				.map(|enc| self.zset_db.get_key_value(enc.clone()));
+			
+			future::join_all(member_futs)
+				.await
 				.into_iter()
 				.collect::<Result<Vec<_>, _>>()?
 				.into_iter()
