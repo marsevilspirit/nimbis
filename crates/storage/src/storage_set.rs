@@ -89,11 +89,11 @@ impl Storage {
 
 		while let Some(kv) = stream.next().await? {
 			let k = kv.key;
-			if kv.seq < meta_val.version {
-				continue;
-			}
 			if !k.starts_with(&prefix) {
 				break;
+			}
+			if kv.seq < meta_val.version {
+				continue;
 			}
 
 			// Parse member: prefix (key_len+key+version) + member_len(u32) + member
