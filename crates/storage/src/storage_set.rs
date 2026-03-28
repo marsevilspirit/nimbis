@@ -103,7 +103,7 @@ impl Storage {
 				continue;
 			}
 
-			// Parse member: prefix (key_len+key+version) + member_len(u32) + member
+			// Parse member: prefix (key_len+key) + member_len(u32) + member
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;

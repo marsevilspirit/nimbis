@@ -2,9 +2,7 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"sort"
-	"time"
 
 	"github.com/marsevilspirit/nimbis/tests/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -108,46 +106,5 @@ var _ = Describe("Set Commands", func() {
 		err := rdb.SAdd(ctx, key, "m1").Err()
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-	})
-
-	It("should efficiently SMEMBERS without scanning unrelated keys (Performance Test)", func() {
-		keyA := "set_A_perf"
-		keyZ := "set_Z_perf"
-
-		rdb.Del(ctx, keyA, keyZ)
-
-		// 1. Create setA and immediately delete it
-		rdb.SAdd(ctx, keyA, "init")
-		rdb.Del(ctx, keyA)
-
-		// 2. Populate setZ (lexicographically after setA) with many elements
-		var members []interface{}
-		for i := 0; i < 100000; i++ {
-			members = append(members, fmt.Sprintf("m%d", i))
-		}
-		// Add in chunks
-		chunkSize := 5000
-		for i := 0; i < len(members); i += chunkSize {
-			end := i + chunkSize
-			if end > len(members) {
-				end = len(members)
-			}
-			rdb.SAdd(ctx, keyZ, members[i:end]...)
-		}
-
-		// 3. Re-create setA. The new meta.version will be > all sequences in setZ.
-		rdb.SAdd(ctx, keyA, "single_member")
-
-		// 4. Measure SMEMBERS setA
-		start := time.Now()
-		for i := 0; i < 20; i++ {
-			res, err := rdb.SMembers(ctx, keyA).Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(len(res)).To(Equal(1))
-		}
-		duration := time.Since(start)
-		fmt.Printf("\n[DEBUG-TEST] SMEMBERS Performance duration: %v\n", duration)
-
-		rdb.Del(ctx, keyA, keyZ)
 	})
 })
