@@ -10,6 +10,7 @@ use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::meta::AnyValue;
 use crate::string::value::StringValue;
+use crate::utils::is_expired;
 
 impl Storage {
 	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
@@ -107,7 +108,7 @@ impl Storage {
 			None => return Ok(None),
 		};
 
-		if Storage::is_expired(kv.expire_ts) {
+		if is_expired(kv.expire_ts) {
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};

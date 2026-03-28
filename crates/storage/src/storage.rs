@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use chrono::Utc;
 use slatedb::Db;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
@@ -16,6 +15,7 @@ use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
+use crate::utils::is_expired;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -146,10 +146,6 @@ impl Storage {
 		Ok(())
 	}
 
-	pub(crate) fn is_expired(expire_ts: Option<i64>) -> bool {
-		expire_ts.is_some_and(|ts| ts <= Utc::now().timestamp_millis())
-	}
-
 	/// Helper to get and validate metadata for any collection type.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
@@ -171,7 +167,7 @@ impl Storage {
 			None => return Ok(None),
 		};
 
-		if Self::is_expired(kv.expire_ts) {
+		if is_expired(kv.expire_ts) {
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};

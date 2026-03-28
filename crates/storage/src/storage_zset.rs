@@ -8,7 +8,7 @@ use crate::error::StorageError;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::ZSetMetaValue;
-use crate::util::zset_score_user_key_prefix;
+use crate::utils::zset_score_user_key_prefix;
 use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 

@@ -15,9 +15,9 @@ use slatedb::ValueDeletable;
 
 use crate::data_type::DataType;
 use crate::expirable::Expirable;
-use crate::storage::Storage;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
+use crate::utils::is_expired;
 
 // ---------------------------------------------------------------------------
 // StringCompactionFilter — used exclusively by string_db
@@ -38,7 +38,7 @@ impl CompactionFilter for StringCompactionFilter {
 
 		// Check expiration from SlateDB metadata for all types stored in string_db
 		// (String values, Hash/Set/List/ZSet metadata)
-		if Storage::is_expired(entry.expire_ts) {
+		if is_expired(entry.expire_ts) {
 			debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
 			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
@@ -132,7 +132,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 		};
 
 		// Consider expired metadata as non-existent to allow sub-key cleanup
-		if Storage::is_expired(kv.expire_ts) {
+		if is_expired(kv.expire_ts) {
 			debug!(
 				"[{:?}Filter] Drop[Meta expired] key: {:?}",
 				self.data_type, user_key

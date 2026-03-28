@@ -12,7 +12,7 @@ pub mod storage_set;
 pub mod storage_string;
 pub mod storage_zset;
 pub mod string;
-pub mod util;
+pub mod utils;
 pub mod version;
 pub mod zset;
 

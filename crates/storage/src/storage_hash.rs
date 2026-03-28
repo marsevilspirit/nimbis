@@ -9,7 +9,7 @@ use crate::hash::field_key::HashFieldKey;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
-use crate::util::user_key_prefix;
+use crate::utils::user_key_prefix;
 
 impl Storage {
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
