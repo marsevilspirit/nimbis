@@ -31,6 +31,16 @@ impl Storage {
 			None => (ZSetMetaValue::new(0, 0), true),
 		};
 
+		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD behavior)
+		let mut unique_elements = std::collections::HashMap::new();
+		for (score, member) in elements {
+			unique_elements.insert(member, score);
+		}
+		let elements: Vec<_> = unique_elements
+			.into_iter()
+			.map(|(member, score)| (score, member))
+			.collect();
+
 		// Unconditionally encode all member keys since we need them for insertion
 		let member_encoded_keys: Vec<_> = elements
 			.iter()

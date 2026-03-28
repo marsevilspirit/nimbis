@@ -24,6 +24,13 @@ impl Storage {
 			None => (SetMetaValue::new(0, 0), true),
 		};
 
+		// Deduplicate members, keeping the first occurrence
+		let mut unique_members = std::collections::HashSet::new();
+		let members: Vec<_> = members
+			.into_iter()
+			.filter(|m| unique_members.insert(m.clone()))
+			.collect();
+
 		let mut added_count = 0;
 		let mut first_added_seq: Option<u64> = None;
 
