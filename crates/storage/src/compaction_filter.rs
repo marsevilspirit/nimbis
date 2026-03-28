@@ -268,7 +268,6 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_filter_string_meta_expired_drops_entry() {
-
 		use crate::string::meta::HashMetaValue;
 
 		let mut filter = NimbisCompactionFilter {
