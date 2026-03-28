@@ -161,7 +161,7 @@ impl Storage {
 			if !k.starts_with(&prefix) {
 				break;
 			}
-			
+
 			if kv.seq < meta_val.version {
 				continue;
 			}

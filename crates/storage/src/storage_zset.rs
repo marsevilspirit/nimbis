@@ -31,7 +31,8 @@ impl Storage {
 			None => (ZSetMetaValue::new(0, 0), true),
 		};
 
-		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD behavior)
+		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD
+		// behavior)
 		let mut unique_elements = std::collections::HashMap::new();
 		for (score, member) in elements {
 			unique_elements.insert(member, score);
@@ -54,7 +55,7 @@ impl Storage {
 			let member_futs = member_encoded_keys
 				.iter()
 				.map(|enc| self.zset_db.get_key_value(enc.clone()));
-			
+
 			future::join_all(member_futs)
 				.await
 				.into_iter()

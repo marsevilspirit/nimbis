@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use bytes::Buf;
 use bytes::Bytes;
 use log::debug;
-use log::warn;
 use slatedb::CompactionFilter;
 use slatedb::CompactionFilterDecision;
 use slatedb::CompactionFilterError;
@@ -54,7 +53,8 @@ impl CompactionFilter for NimbisCompactionFilter {
 
 		match self.data_type {
 			DataType::String => {
-				// String DB: Check expiration from SlateDB metadata for all types (String, Hash, Set, etc.)
+				// String DB: Check expiration from SlateDB metadata for all types (String,
+				// Hash, Set, etc.)
 				if Storage::is_expired(entry.expire_ts) {
 					debug!("[StringFilter] Drop[Stale] key: {:?}", entry.key);
 					return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
@@ -245,20 +245,50 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_filter_string_type_mismatch_drops_entry() {
+	async fn test_filter_string_type_mismatch_keeps_meta_value() {
 		use crate::string::meta::HashMetaValue;
 
 		let mut filter = NimbisCompactionFilter {
 			string_db: None,
 			data_type: DataType::String,
 		};
-		let mismatched_value = HashMetaValue::new(1, 1).encode();
+		// HashMetaValue is a non-String type that should be kept in string_db
+		let meta_value = HashMetaValue::new(1, 1).encode();
 		let entry = RowEntry {
 			key: Bytes::from("string-key"),
-			value: ValueDeletable::Value(mismatched_value),
+			value: ValueDeletable::Value(meta_value),
 			seq: 1,
 			create_ts: None,
 			expire_ts: None,
+		};
+
+		let decision = filter.filter(&entry).await.unwrap();
+		assert_eq!(decision, CompactionFilterDecision::Keep);
+	}
+
+	#[tokio::test]
+	async fn test_filter_string_meta_expired_drops_entry() {
+		use std::time::SystemTime;
+
+		use crate::string::meta::HashMetaValue;
+
+		let mut filter = NimbisCompactionFilter {
+			string_db: None,
+			data_type: DataType::String,
+		};
+		let meta_value = HashMetaValue::new(1, 1).encode();
+		let past_time = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap()
+			.as_secs()
+			- 60;
+
+		let entry = RowEntry {
+			key: Bytes::from("expired-meta-key"),
+			value: ValueDeletable::Value(meta_value),
+			seq: 1,
+			create_ts: None,
+			expire_ts: Some(past_time as i64),
 		};
 
 		let decision = filter.filter(&entry).await.unwrap();
