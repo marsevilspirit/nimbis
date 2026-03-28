@@ -75,7 +75,7 @@ impl Storage {
 		}
 
 		// Update metadata
-		let meta_put_opts = PutOptions::default();
+		let meta_put_opts = Storage::meta_put_opts(&meta_val);
 
 		self.string_db
 			.put_with_options(
@@ -161,7 +161,7 @@ impl Storage {
 				.delete_with_options(meta_key.encode(), &write_opts)
 				.await?;
 		} else {
-			let meta_put_opts = PutOptions::default();
+			let meta_put_opts = Storage::meta_put_opts(&meta_val);
 
 			self.string_db
 				.put_with_options(

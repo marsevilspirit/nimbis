@@ -135,7 +135,7 @@ impl Storage {
 		if added_count > 0 {
 			meta_val.len += added_count;
 
-			let put_opts = PutOptions::default();
+			let put_opts = Storage::meta_put_opts(&meta_val);
 
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
@@ -294,7 +294,7 @@ impl Storage {
 				.delete_with_options(meta_encoded_key, &write_opts)
 				.await?;
 		} else {
-			let put_opts = PutOptions::default();
+			let put_opts = Storage::meta_put_opts(&meta_val);
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
 				.await?;

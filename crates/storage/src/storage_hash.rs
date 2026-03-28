@@ -57,7 +57,7 @@ impl Storage {
 		if is_new_field {
 			meta_val.len += 1;
 
-			let put_opts = PutOptions::default();
+			let put_opts = Storage::meta_put_opts(&meta_val);
 
 			self.string_db
 				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
@@ -229,7 +229,7 @@ impl Storage {
 				// Update meta
 				meta_val.len -= deleted_count as u64;
 
-				let put_opts = PutOptions::default();
+				let put_opts = Storage::meta_put_opts(&meta_val);
 
 				self.string_db
 					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)

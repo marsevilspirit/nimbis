@@ -4,6 +4,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::Utc;
 use slatedb::Db;
+use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
@@ -180,8 +181,22 @@ impl Storage {
 			});
 		}
 
-		let meta_val = T::decode(&meta_bytes)?;
+		let mut meta_val = T::decode(&meta_bytes)?;
+
+		if let Some(ts) = kv.expire_ts {
+			meta_val.set_expire_time(ts as u64);
+		}
+
 		Ok(Some(meta_val))
+	}
+
+	pub(crate) fn meta_put_opts(meta: &impl crate::expirable::Expirable) -> PutOptions {
+		let ttl = meta
+			.remaining_ttl()
+			.map(|d| d.as_millis() as u64)
+			.map(slatedb::config::Ttl::ExpireAfter)
+			.unwrap_or(slatedb::config::Ttl::NoExpiry);
+		PutOptions { ttl }
 	}
 }
 
