@@ -22,6 +22,8 @@ var _ = Describe("Expire/TTL Commands", func() {
 		"hash_ttl_hset_key",
 		"list_ttl_lpush_key",
 		"zset_ttl_zadd_key",
+		"expire_update_key",
+		"non_existent_key_expire",
 	}
 
 	BeforeEach(func() {

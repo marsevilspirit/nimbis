@@ -268,7 +268,6 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_filter_string_meta_expired_drops_entry() {
-		use std::time::SystemTime;
 
 		use crate::string::meta::HashMetaValue;
 
@@ -277,18 +276,14 @@ mod tests {
 			data_type: DataType::String,
 		};
 		let meta_value = HashMetaValue::new(1, 1).encode();
-		let past_time = SystemTime::now()
-			.duration_since(SystemTime::UNIX_EPOCH)
-			.unwrap()
-			.as_secs()
-			- 60;
+		let past_time = chrono::Utc::now().timestamp_millis() - 60000;
 
 		let entry = RowEntry {
 			key: Bytes::from("expired-meta-key"),
 			value: ValueDeletable::Value(meta_value),
 			seq: 1,
 			create_ts: None,
-			expire_ts: Some(past_time as i64),
+			expire_ts: Some(past_time),
 		};
 
 		let decision = filter.filter(&entry).await.unwrap();
