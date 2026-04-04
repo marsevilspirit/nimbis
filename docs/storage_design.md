@@ -485,7 +485,7 @@ When a key is deleted and immediately recreated with the same name:
 New and old records are physically isolated by their versions. Even if the old `(myset, 100, m1)` hasn't been cleaned up yet, it will not conflict with the new data.
 
 #### Async Cleanup (Compaction Filter)
-Invalid data is asynchronously cleaned up by the `NimbisCompactionFilter` during the background compaction process.
+Invalid data is asynchronously cleaned up by the `CollectionCompactionFilter` during the background compaction process.
 
 **Logic**:
 1.  The Compaction Filter scans each data item.
@@ -527,7 +527,7 @@ When `EXPIRE` is called, Nimbis sets a native SlateDB TTL (`PutOptions { ttl }`)
 Collection types (Hash, List, Set, ZSet) use a "Master Expiration" pattern:
 - The expiration is stored **ONLY** in the metadata value (in `string_db`).
 - Individual members/fields/elements in their respective DBs do NOT store their own expiration.
-- When SlateDB returns `None` for the metadata key (expired), the collection is treated as non-existent. Orphaned data records are cleaned up asynchronously by the `NimbisCompactionFilter`.
+- When SlateDB returns `None` for the metadata key (expired), the collection is treated as non-existent. Orphaned data records are cleaned up asynchronously by the `CollectionCompactionFilter`.
 
 #### Expirable Trait (Code Organization)
 To avoid code duplication across different value types, the expiration logic is centralized in the `Expirable` trait defined in `crates/storage/src/expirable.rs`.
@@ -562,7 +562,7 @@ All data types store meta in `string_db` and implement `Expirable` and `MetaValu
 #### Expiration Handling
 When a read operation encounters an expired key:
 1. SlateDB's native TTL returns `None` for the key automatically.
-2. Orphaned data records (collection members under the expired version) are cleaned up asynchronously by the `NimbisCompactionFilter` during compaction.
+2. Orphaned data records (collection members under the expired version) are cleaned up asynchronously by the `CollectionCompactionFilter` during compaction.
 
 #### Unit Conversion
 - **User Interface**: `EXPIRE` and `TTL` operate in **seconds**.

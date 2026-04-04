@@ -190,7 +190,7 @@ When `log_output = "file"`, the immutable `log_rotation` field controls time-bas
 - `daily`: rotate once per day. This is the default to avoid unbounded log growth.
 - `never`: disable rotation and keep writing to the single file `{data_path}/nimbis.log`.
 
-For the rotating modes, Nimbis passes `{data_path}/nimbis.log` to the tracing rolling appender as a path template. In practice, that means logs are created in `{data_path}/` with `nimbis` as the filename prefix and `log` as the suffix, while the appender adds its own time-based component to the on-disk file name according to the selected rotation policy.
+For the rotating modes, Nimbis uses a custom rolling file implementation that manages log files directly. Logs are created in `{data_path}/` with `nimbis` as the filename prefix and `.log` as the suffix. When rotation is enabled, the appender adds timestamp-based suffixes to archived log files according to the selected rotation policy.
 
 Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the same reason: rotation is part of bootstrap-only logger setup.
 
