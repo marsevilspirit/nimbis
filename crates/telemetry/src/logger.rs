@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Local;
+use chrono::TimeZone;
 use chrono::Timelike;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
@@ -183,28 +184,40 @@ impl CustomRollingFile {
 		}
 	}
 
-	fn calculate_next_rotation(now: DateTime<Local>, rotation: LogRotation) -> Option<std::time::SystemTime> {
-		use chrono::TimeZone;
+	fn calculate_next_rotation(
+		now: DateTime<Local>,
+		rotation: LogRotation,
+	) -> Option<std::time::SystemTime> {
 		match rotation {
 			LogRotation::Minutely => {
 				let next = now + chrono::Duration::minutes(1);
-				Local.with_ymd_and_hms(next.year(), next.month(), next.day(), next.hour(), next.minute(), 0)
+				Local
+					.with_ymd_and_hms(
+						next.year(),
+						next.month(),
+						next.day(),
+						next.hour(),
+						next.minute(),
+						0,
+					)
 					.latest()
-					.or_else(|| Some(next))
+					.or(Some(next))
 					.map(|dt| dt.into())
 			}
 			LogRotation::Hourly => {
 				let next = now + chrono::Duration::hours(1);
-				Local.with_ymd_and_hms(next.year(), next.month(), next.day(), next.hour(), 0, 0)
+				Local
+					.with_ymd_and_hms(next.year(), next.month(), next.day(), next.hour(), 0, 0)
 					.latest()
-					.or_else(|| Some(next))
+					.or(Some(next))
 					.map(|dt| dt.into())
 			}
 			LogRotation::Daily => {
 				let next = now + chrono::Duration::days(1);
-				Local.with_ymd_and_hms(next.year(), next.month(), next.day(), 0, 0, 0)
+				Local
+					.with_ymd_and_hms(next.year(), next.month(), next.day(), 0, 0, 0)
 					.latest()
-					.or_else(|| Some(next))
+					.or(Some(next))
 					.map(|dt| dt.into())
 			}
 			LogRotation::Never => None,
@@ -271,9 +284,10 @@ impl File {
 	/// The parent directory is used as the log directory. The appender always
 	/// writes to the active file at the exact path provided. With time-based
 	/// rotation (`minutely`, `hourly`, `daily`), the active file is archived
-	/// upon rotation. The file stem becomes the prefix, the extension becomes 
+	/// upon rotation. The file stem becomes the prefix, the extension becomes
 	/// the suffix, and a rotation timestamp is added to the archived file name.
-	/// With `never`, it keeps writing to the single provided path without archiving.
+	/// With `never`, it keeps writing to the single provided path without
+	/// archiving.
 	pub fn new(path: impl Into<PathBuf>, rotation: LogRotation) -> Self {
 		Self {
 			path: path.into(),
@@ -356,10 +370,10 @@ where
 ///
 /// * `level` - The log level filter string (e.g., "info", "debug", "warn")
 /// * `output` - The output sink to use. When configured for file output with a
-///   path like `./nimbis_store/nimbis.log`, it writes to that exact path. On 
-///   time-based rotation, it archives the file in `./nimbis_store/` using `nimbis` 
-///   as the base name, the timestamp, and `log` as the suffix; `LogRotation::Never` 
-///   skips archiving and keeps writing to `nimbis.log`.
+///   path like `./nimbis_store/nimbis.log`, it writes to that exact path. On
+///   time-based rotation, it archives the file in `./nimbis_store/` using
+///   `nimbis` as the base name, the timestamp, and `log` as the suffix;
+///   `LogRotation::Never` skips archiving and keeps writing to `nimbis.log`.
 ///
 /// # Example
 ///
