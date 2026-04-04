@@ -109,27 +109,6 @@ impl LogRotation {
 	}
 }
 
-#[derive(PartialEq, Eq)]
-enum Period {
-	Minutely(i32, u32, u32, u32, u32),
-	Hourly(i32, u32, u32, u32),
-	Daily(i32, u32, u32),
-	Never,
-}
-
-impl Period {
-	fn current(now: DateTime<Local>, rotation: LogRotation) -> Self {
-		match rotation {
-			LogRotation::Minutely => {
-				Self::Minutely(now.year(), now.month(), now.day(), now.hour(), now.minute())
-			}
-			LogRotation::Hourly => Self::Hourly(now.year(), now.month(), now.day(), now.hour()),
-			LogRotation::Daily => Self::Daily(now.year(), now.month(), now.day()),
-			LogRotation::Never => Self::Never,
-		}
-	}
-}
-
 pub struct CustomRollingFile {
 	directory: PathBuf,
 	file_stem: String,
@@ -137,7 +116,7 @@ pub struct CustomRollingFile {
 	rotation: LogRotation,
 	active_path: PathBuf,
 	active_file: Option<StdFile>,
-	active_period: Period,
+	next_rotation_time: Option<std::time::SystemTime>,
 }
 
 impl CustomRollingFile {
@@ -169,7 +148,7 @@ impl CustomRollingFile {
 			rotation,
 			active_path: path.clone(),
 			active_file: None,
-			active_period: Period::Never,
+			next_rotation_time: None,
 		};
 
 		appender.archive_active_file();
@@ -199,6 +178,34 @@ impl CustomRollingFile {
 		}
 	}
 
+	fn calculate_next_rotation(now: DateTime<Local>, rotation: LogRotation) -> Option<std::time::SystemTime> {
+		use chrono::TimeZone;
+		match rotation {
+			LogRotation::Minutely => {
+				let next = now + chrono::Duration::minutes(1);
+				Local.with_ymd_and_hms(next.year(), next.month(), next.day(), next.hour(), next.minute(), 0)
+					.latest()
+					.or_else(|| Some(next))
+					.map(|dt| dt.into())
+			}
+			LogRotation::Hourly => {
+				let next = now + chrono::Duration::hours(1);
+				Local.with_ymd_and_hms(next.year(), next.month(), next.day(), next.hour(), 0, 0)
+					.latest()
+					.or_else(|| Some(next))
+					.map(|dt| dt.into())
+			}
+			LogRotation::Daily => {
+				let next = now + chrono::Duration::days(1);
+				Local.with_ymd_and_hms(next.year(), next.month(), next.day(), 0, 0, 0)
+					.latest()
+					.or_else(|| Some(next))
+					.map(|dt| dt.into())
+			}
+			LogRotation::Never => None,
+		}
+	}
+
 	fn open_active_file(&mut self) -> Result<(), TelemetryError> {
 		let file = OpenOptions::new()
 			.create(true)
@@ -207,16 +214,19 @@ impl CustomRollingFile {
 			.map_err(|e| TelemetryError::InitFailed(e.to_string()))?;
 
 		self.active_file = Some(file);
-		self.active_period = Period::current(Local::now(), self.rotation);
+		self.next_rotation_time = Self::calculate_next_rotation(Local::now(), self.rotation);
 		Ok(())
 	}
 }
 
 impl Write for CustomRollingFile {
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		let current_period = Period::current(Local::now(), self.rotation);
+		let should_rotate = match self.next_rotation_time {
+			Some(time) => std::time::SystemTime::now() >= time,
+			None => false,
+		};
 
-		if current_period != self.active_period && self.rotation != LogRotation::Never {
+		if should_rotate && self.rotation != LogRotation::Never {
 			self.active_file = None;
 			self.archive_active_file();
 			if let Err(e) = self.open_active_file() {
