@@ -7,7 +7,6 @@ pub const LOGO: &str = r#"
 
 const LABEL_WIDTH: usize = 13;
 
-#[allow(clippy::disallowed_macros)]
 pub fn show_logo() {
 	let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
@@ -33,5 +32,5 @@ pub fn show_logo() {
 		.collect::<Vec<_>>()
 		.join("\n");
 
-	println!("{}\n{}\n", LOGO.trim_end(), info);
+	log::info!("nimbis version info:\n{}\n{}", LOGO.trim_end(), info);
 }
