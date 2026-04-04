@@ -151,7 +151,10 @@ impl CustomRollingFile {
 			next_rotation_time: None,
 		};
 
-		appender.archive_active_file();
+		if rotation != LogRotation::Never {
+			appender.archive_active_file();
+		}
+
 		appender.open_active_file()?;
 
 		Ok(appender)
@@ -174,7 +177,9 @@ impl CustomRollingFile {
 			}
 			let archive_path = self.directory.join(archive_name);
 
-			let _ = std::fs::rename(&self.active_path, &archive_path);
+			if let Err(e) = std::fs::rename(&self.active_path, &archive_path) {
+				panic!("telemetry: failed to rotate log file: {}", e);
+			}
 		}
 	}
 
