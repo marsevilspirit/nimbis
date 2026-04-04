@@ -1,8 +1,15 @@
+use std::fs::File as StdFile;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::io::{self};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use chrono::DateTime;
+use chrono::Datelike;
+use chrono::Local;
+use chrono::Timelike;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::rolling::Rotation;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::fmt;
@@ -100,13 +107,135 @@ impl LogRotation {
 			_ => Err(TelemetryError::InvalidLogRotation(mode.to_string())),
 		}
 	}
+}
 
-	fn as_rotation(self) -> Rotation {
-		match self {
-			Self::Minutely => Rotation::MINUTELY,
-			Self::Hourly => Rotation::HOURLY,
-			Self::Daily => Rotation::DAILY,
-			Self::Never => Rotation::NEVER,
+#[derive(PartialEq, Eq)]
+enum Period {
+	Minutely(i32, u32, u32, u32, u32),
+	Hourly(i32, u32, u32, u32),
+	Daily(i32, u32, u32),
+	Never,
+}
+
+impl Period {
+	fn current(now: DateTime<Local>, rotation: LogRotation) -> Self {
+		match rotation {
+			LogRotation::Minutely => {
+				Self::Minutely(now.year(), now.month(), now.day(), now.hour(), now.minute())
+			}
+			LogRotation::Hourly => Self::Hourly(now.year(), now.month(), now.day(), now.hour()),
+			LogRotation::Daily => Self::Daily(now.year(), now.month(), now.day()),
+			LogRotation::Never => Self::Never,
+		}
+	}
+}
+
+pub struct CustomRollingFile {
+	directory: PathBuf,
+	file_stem: String,
+	extension: Option<String>,
+	rotation: LogRotation,
+	active_path: PathBuf,
+	active_file: Option<StdFile>,
+	active_period: Period,
+}
+
+impl CustomRollingFile {
+	pub fn new(path: impl Into<PathBuf>, rotation: LogRotation) -> Result<Self, TelemetryError> {
+		let path = path.into();
+		let directory = path
+			.parent()
+			.unwrap_or(std::path::Path::new(""))
+			.to_path_buf();
+
+		if !directory.exists() && directory.to_string_lossy() != "" {
+			std::fs::create_dir_all(&directory)
+				.map_err(|e| TelemetryError::InitFailed(e.to_string()))?;
+		}
+
+		let file_stem = path
+			.file_stem()
+			.ok_or_else(|| {
+				TelemetryError::InitFailed(format!("log file has no stem: {}", path.display()))
+			})?
+			.to_string_lossy()
+			.into_owned();
+		let extension = path.extension().map(|e| e.to_string_lossy().into_owned());
+
+		let mut appender = Self {
+			directory,
+			file_stem,
+			extension,
+			rotation,
+			active_path: path.clone(),
+			active_file: None,
+			active_period: Period::Never,
+		};
+
+		appender.archive_active_file();
+		appender.open_active_file()?;
+
+		Ok(appender)
+	}
+
+	fn archive_active_file(&mut self) {
+		if self.active_path.exists() {
+			let meta = std::fs::metadata(&self.active_path);
+			let modified_time: DateTime<Local> = meta
+				.and_then(|m| m.modified())
+				.unwrap_or_else(|_| std::time::SystemTime::now())
+				.into();
+
+			let timestamp = modified_time.format("%Y-%m-%d-%H-%M-%3f").to_string();
+
+			let mut archive_name = format!("{}-{}", self.file_stem, timestamp);
+			if let Some(ext) = &self.extension {
+				archive_name.push('.');
+				archive_name.push_str(ext);
+			}
+			let archive_path = self.directory.join(archive_name);
+
+			let _ = std::fs::rename(&self.active_path, &archive_path);
+		}
+	}
+
+	fn open_active_file(&mut self) -> Result<(), TelemetryError> {
+		let file = OpenOptions::new()
+			.create(true)
+			.append(true)
+			.open(&self.active_path)
+			.map_err(|e| TelemetryError::InitFailed(e.to_string()))?;
+
+		self.active_file = Some(file);
+		self.active_period = Period::current(Local::now(), self.rotation);
+		Ok(())
+	}
+}
+
+impl Write for CustomRollingFile {
+	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+		let current_period = Period::current(Local::now(), self.rotation);
+
+		if current_period != self.active_period && self.rotation != LogRotation::Never {
+			self.active_file = None;
+			self.archive_active_file();
+			if let Err(e) = self.open_active_file() {
+				return Err(io::Error::other(e.to_string()));
+			}
+		}
+
+		if let Some(file) = &mut self.active_file {
+			file.write(buf)
+		} else {
+			Err(io::Error::other("file closed"))
+		}
+	}
+
+	fn flush(&mut self) -> io::Result<()> {
+		if let Some(file) = &mut self.active_file {
+			file.flush()
+		} else {
+			Ok(())
 		}
 	}
 }
@@ -116,7 +245,7 @@ impl Terminal {
 		self,
 		filter_layer: reload::Layer<EnvFilter, Registry>,
 	) -> Result<LoggerGuard, TelemetryError> {
-		init_subscriber(filter_layer, std::io::stderr)?;
+		init_subscriber(filter_layer, std::io::stderr, true)?;
 		Ok(LoggerGuard::terminal())
 	}
 }
@@ -141,32 +270,10 @@ impl File {
 		self,
 		filter_layer: reload::Layer<EnvFilter, Registry>,
 	) -> Result<LoggerGuard, TelemetryError> {
-		let parent = self.path.parent().ok_or_else(|| {
-			TelemetryError::InitFailed(format!(
-				"log file path has no parent directory: {}",
-				self.path.display()
-			))
-		})?;
-		let file_stem = self.path.file_stem().ok_or_else(|| {
-			TelemetryError::InitFailed(format!(
-				"log file path has no file stem: {}",
-				self.path.display()
-			))
-		})?;
-		let mut builder = tracing_appender::rolling::Builder::new()
-			.rotation(self.rotation.as_rotation())
-			.filename_prefix(file_stem.to_string_lossy().into_owned());
-
-		if let Some(extension) = self.path.extension() {
-			builder = builder.filename_suffix(extension.to_string_lossy().into_owned());
-		}
-
-		let file_appender = builder
-			.build(parent)
-			.map_err(|e| TelemetryError::InitFailed(e.to_string()))?;
+		let file_appender = CustomRollingFile::new(self.path.clone(), self.rotation)?;
 		let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-		init_subscriber(filter_layer, non_blocking)?;
+		init_subscriber(filter_layer, non_blocking, false)?;
 		Ok(LoggerGuard::file(guard))
 	}
 }
@@ -202,6 +309,7 @@ impl LogOutput {
 fn init_subscriber<W>(
 	filter_layer: reload::Layer<EnvFilter, Registry>,
 	writer: W,
+	use_ansi: bool,
 ) -> Result<(), TelemetryError>
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
@@ -210,6 +318,7 @@ where
 		.with(filter_layer)
 		.with(
 			fmt::layer()
+				.with_ansi(use_ansi)
 				.with_timer(CustomTimeFormat)
 				.with_target(false)
 				.with_thread_ids(true)
