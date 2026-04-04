@@ -540,4 +540,136 @@ mod tests {
 			level
 		);
 	}
+
+	// CustomRollingFile tests
+
+	/// Test that creating CustomRollingFile with valid path succeeds
+	#[test]
+	fn test_custom_rolling_file_new_success() {
+		let temp_dir = std::env::temp_dir().join("nimbis_test_new");
+		std::fs::create_dir_all(&temp_dir).ok();
+		let log_path = temp_dir.join("test.log");
+
+		let result = CustomRollingFile::new(&log_path, LogRotation::Never);
+		assert!(result.is_ok());
+
+		// Cleanup
+		std::fs::remove_file(&log_path).ok();
+		std::fs::remove_dir(&temp_dir).ok();
+	}
+
+	/// Test that creating CustomRollingFile with no file stem returns error
+	#[test]
+	fn test_custom_rolling_file_no_stem_error() {
+		// Using a directory path (no file name component) should fail
+		let temp_dir = std::env::temp_dir().join("nimbis_test_no_stem");
+		std::fs::create_dir_all(&temp_dir).ok();
+
+		// This is essentially a directory, not a file path
+		let result = CustomRollingFile::new(&temp_dir, LogRotation::Never);
+		assert!(matches!(result, Err(TelemetryError::InitFailed(_))));
+
+		// Cleanup
+		std::fs::remove_dir(&temp_dir).ok();
+	}
+
+	/// Test that LogRotation::Never skips archiving
+	#[test]
+	fn test_custom_rolling_file_no_archive_on_never() {
+		let temp_dir = std::env::temp_dir().join("nimbis_test_no_archive");
+		std::fs::create_dir_all(&temp_dir).ok();
+		let log_path = temp_dir.join("test.log");
+
+		// Create initial file
+		std::fs::write(&log_path, "initial content").ok();
+
+		let result = CustomRollingFile::new(&log_path, LogRotation::Never);
+		assert!(result.is_ok());
+
+		// File should still exist (not archived)
+		assert!(log_path.exists());
+		let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+		assert!(content.contains("initial content"));
+
+		// Cleanup
+		std::fs::remove_file(&log_path).ok();
+		std::fs::remove_dir(&temp_dir).ok();
+	}
+
+	/// Test that archiving happens when rotation is not Never
+	#[test]
+	fn test_custom_rolling_file_archive_on_rotation() {
+		let temp_dir = std::env::temp_dir().join("nimbis_test_archive");
+		std::fs::create_dir_all(&temp_dir).ok();
+		let log_path = temp_dir.join("test.log");
+
+		// Create initial file with content
+		std::fs::write(&log_path, "old content").ok();
+
+		// Create with hourly rotation - should archive existing file
+		let result = CustomRollingFile::new(&log_path, LogRotation::Hourly);
+		assert!(result.is_ok());
+
+		// Original file should be renamed to archive
+		// The active file should exist (empty or new)
+		assert!(log_path.exists(), "Active file should exist");
+
+		// There should be an archive file in the directory
+		let entries: Vec<_> = std::fs::read_dir(&temp_dir)
+			.unwrap()
+			.filter_map(|e| e.ok())
+			.map(|e| e.file_name().to_string_lossy().to_string())
+			.filter(|n| n.starts_with("test-"))
+			.collect();
+		assert!(
+			!entries.is_empty(),
+			"Archive file should exist with prefix test-"
+		);
+
+		// Cleanup
+		for entry in std::fs::read_dir(&temp_dir).unwrap().filter_map(|e| e.ok()) {
+			std::fs::remove_file(entry.path()).ok();
+		}
+		std::fs::remove_dir(&temp_dir).ok();
+	}
+
+	/// Test writing to CustomRollingFile
+	#[test]
+	fn test_custom_rolling_file_write() {
+		let temp_dir = std::env::temp_dir().join("nimbis_test_write");
+		std::fs::create_dir_all(&temp_dir).ok();
+		let log_path = temp_dir.join("test.log");
+
+		let mut file = CustomRollingFile::new(&log_path, LogRotation::Never).unwrap();
+		let write_result = file.write_all(b"test message\n");
+		assert!(write_result.is_ok());
+
+		let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+		assert!(content.contains("test message"));
+
+		// Cleanup
+		drop(file);
+		std::fs::remove_file(&log_path).ok();
+		std::fs::remove_dir(&temp_dir).ok();
+	}
+
+	/// Test that creating file in non-existent directory creates it
+	#[test]
+	fn test_custom_rolling_file_creates_directory() {
+		let temp_dir = std::env::temp_dir()
+			.join("nimbis_test_nested")
+			.join("subdir");
+		let log_path = temp_dir.join("test.log");
+
+		// Directory should not exist
+		assert!(!temp_dir.exists());
+
+		let result = CustomRollingFile::new(&log_path, LogRotation::Never);
+		assert!(result.is_ok());
+		assert!(temp_dir.exists());
+
+		// Cleanup
+		std::fs::remove_file(&log_path).ok();
+		std::fs::remove_dir_all(temp_dir.parent().unwrap()).ok();
+	}
 }
