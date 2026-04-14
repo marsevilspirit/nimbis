@@ -49,8 +49,8 @@ jobs:
     - name: Check
       run: just check
     
-    - name: Build
-      run: just build
+    - name: Build Release
+      run: just build --release
     
     - name: Run Unit Test
       run: just test
