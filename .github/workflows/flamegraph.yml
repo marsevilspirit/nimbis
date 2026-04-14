@@ -106,7 +106,7 @@ jobs:
           script: |
             const run_id = context.runId;
             const repo_url = context.payload.repository.html_url;
-            const rawPrNumber = '${{ inputs.pr_number }}'.trim();
+            const rawPrNumber = (context.payload.inputs?.pr_number ?? '').trim();
             const validPrNumberPattern = /^[1-9]\d*$/;
 
             if (!validPrNumberPattern.test(rawPrNumber)) {
