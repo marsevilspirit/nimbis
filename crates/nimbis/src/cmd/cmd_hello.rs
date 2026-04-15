@@ -113,3 +113,65 @@ impl Cmd for HelloCmd {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use resp::RespValue;
+
+	use super::HelloCmd;
+
+	#[test]
+	fn test_parse_proto_default_to_resp2() {
+		let proto = HelloCmd::parse_proto(&[]).expect("parse proto should succeed");
+		assert_eq!(proto, 2);
+	}
+
+	#[test]
+	fn test_parse_proto_resp2() {
+		let proto = HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"2")])
+			.expect("parse proto should succeed");
+		assert_eq!(proto, 2);
+	}
+
+	#[test]
+	fn test_parse_proto_resp3() {
+		let proto = HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"3")])
+			.expect("parse proto should succeed");
+		assert_eq!(proto, 3);
+	}
+
+	#[test]
+	fn test_parse_proto_rejects_invalid_version() {
+		let err =
+			HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"4")]).expect_err("should error");
+		assert_eq!(
+			err,
+			RespValue::error("NOPROTO unsupported protocol version")
+		);
+	}
+
+	#[test]
+	fn test_resp2_hello_structure() {
+		let resp = HelloCmd::resp2_hello(2);
+		let arr = resp.as_array().expect("HELLO 2 should return RESP2 array");
+		assert_eq!(arr.len(), 14);
+		assert_eq!(arr[0], RespValue::bulk_string("server"));
+		assert_eq!(arr[1], RespValue::bulk_string("nimbis"));
+		assert_eq!(arr[4], RespValue::bulk_string("proto"));
+		assert_eq!(arr[5], RespValue::integer(2));
+	}
+
+	#[test]
+	fn test_resp3_hello_contains_proto() {
+		let resp = HelloCmd::resp3_hello(3);
+		let map = resp.as_map().expect("HELLO 3 should return RESP3 map");
+		assert_eq!(
+			map.get(&RespValue::bulk_string("proto")),
+			Some(&RespValue::integer(3))
+		);
+		assert_eq!(
+			map.get(&RespValue::bulk_string("server")),
+			Some(&RespValue::bulk_string("nimbis"))
+		);
+	}
+}

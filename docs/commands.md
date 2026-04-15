@@ -132,6 +132,7 @@ The following table lists all currently implemented Redis-compatible commands.
 | Category    | Command      | Arity | Description                                         |
 | :---------- | :----------- | :---- | :-------------------------------------------------- |
 | **Generic** | `PING`       | `-1`  | Ping the server (optionally with a message).        |
+| **Generic** | `HELLO`      | `-1`  | Protocol handshake (`HELLO`, `HELLO 2`, `HELLO 3`). |
 | **Generic** | `DEL`        | `-2`  | Delete one or more keys.                            |
 | **Generic** | `EXISTS`     | `-2`  | Check if one or more keys exist.                    |
 | **Generic** | `EXPIRE`     | `3`   | Set a timeout on key.                               |
