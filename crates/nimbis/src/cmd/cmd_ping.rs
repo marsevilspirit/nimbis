@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use resp::RespValue;
 use storage::Storage;
 
@@ -28,12 +29,7 @@ impl Cmd for PingCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(
-		&self,
-		_storage: &Storage,
-		args: &[bytes::Bytes],
-		_ctx: &CmdContext,
-	) -> RespValue {
+	async fn do_cmd(&self, _storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		match args.len() {
 			0 => RespValue::simple_string("PONG"),
 			1 => RespValue::bulk_string(args[0].clone()),

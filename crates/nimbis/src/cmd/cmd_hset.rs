@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use resp::RespValue;
 use storage::Storage;
 
@@ -27,12 +28,7 @@ impl Cmd for HSetCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(
-		&self,
-		storage: &Storage,
-		args: &[bytes::Bytes],
-		_ctx: &CmdContext,
-	) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		// args: [key, field, value, field, value, ...]
 		if args.len() < 3 || !(args.len() - 1).is_multiple_of(2) {
 			return RespValue::error(
