@@ -153,6 +153,29 @@ mod tests {
 	}
 
 	#[test]
+	fn test_parse_proto_rejects_too_many_arguments() {
+		let err = HelloCmd::parse_proto(&[
+			bytes::Bytes::from_static(b"3"),
+			bytes::Bytes::from_static(b"SETNAME"),
+		])
+		.expect_err("should error");
+		assert_eq!(
+			err,
+			RespValue::error("ERR HELLO expects at most one argument (protocol version)")
+		);
+	}
+
+	#[test]
+	fn test_parse_proto_rejects_non_utf8_input() {
+		let err =
+			HelloCmd::parse_proto(&[bytes::Bytes::from_static(&[0xFF])]).expect_err("should error");
+		assert_eq!(
+			err,
+			RespValue::error("NOPROTO unsupported protocol version")
+		);
+	}
+
+	#[test]
 	fn test_resp2_hello_structure() {
 		let resp = HelloCmd::resp2_hello(2);
 		let arr = resp.as_array().expect("HELLO 2 should return RESP2 array");
