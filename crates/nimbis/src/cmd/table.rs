@@ -10,6 +10,7 @@ use super::ExistsCmd;
 use super::ExpireCmd;
 use super::FlushDbCmd;
 use super::GetCmd;
+use super::HelloCmd;
 use super::HDelCmd;
 use super::HGetAllCmd;
 use super::HGetCmd;
@@ -52,6 +53,7 @@ impl CmdTable {
 		let mut inner: HashMap<&'static str, Arc<dyn Cmd>> = HashMap::new();
 		// ping cmd
 		inner.insert("PING", Arc::new(PingCmd::default()));
+		inner.insert("HELLO", Arc::new(HelloCmd::default()));
 		// string type cmd
 		inner.insert("SET", Arc::new(SetCmd::default()));
 		inner.insert("GET", Arc::new(GetCmd::default()));
