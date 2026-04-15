@@ -8,7 +8,7 @@ use storage::Storage;
 use super::Cmd;
 use super::CmdMeta;
 
-const DEFAULT_CLIENT_ID: i64 = 1;
+const CLIENT_ID: i64 = 1;
 
 /// HELLO command implementation
 pub struct HelloCmd {
@@ -56,7 +56,7 @@ impl HelloCmd {
 			RespValue::bulk_string("proto"),
 			RespValue::integer(proto),
 			RespValue::bulk_string("id"),
-			RespValue::integer(DEFAULT_CLIENT_ID),
+			RespValue::integer(CLIENT_ID),
 			RespValue::bulk_string("mode"),
 			RespValue::bulk_string("standalone"),
 			RespValue::bulk_string("role"),
@@ -82,7 +82,7 @@ impl HelloCmd {
 		);
 		map.insert(
 			RespValue::bulk_string(Bytes::from_static(b"id")),
-			RespValue::integer(DEFAULT_CLIENT_ID),
+			RespValue::integer(CLIENT_ID),
 		);
 		map.insert(
 			RespValue::bulk_string(Bytes::from_static(b"mode")),

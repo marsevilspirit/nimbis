@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const expectedClientID int64 = 1
+
 func normalizeHelloMap(result interface{}) map[string]interface{} {
 	switch v := result.(type) {
 	case map[string]interface{}:
@@ -76,7 +78,7 @@ var _ = Describe("HELLO Command", func() {
 		hello := normalizeHelloMap(result)
 		expectHelloFieldString(hello, "server", "nimbis")
 		expectHelloFieldInt(hello, "proto", 2)
-		expectHelloFieldInt(hello, "id", 1)
+		expectHelloFieldInt(hello, "id", expectedClientID)
 	})
 
 	It("should support HELLO 2", func() {
@@ -86,7 +88,7 @@ var _ = Describe("HELLO Command", func() {
 		hello := normalizeHelloMap(result)
 		expectHelloFieldString(hello, "server", "nimbis")
 		expectHelloFieldInt(hello, "proto", 2)
-		expectHelloFieldInt(hello, "id", 1)
+		expectHelloFieldInt(hello, "id", expectedClientID)
 	})
 
 	It("should support HELLO 3", func() {
@@ -96,7 +98,7 @@ var _ = Describe("HELLO Command", func() {
 		hello := normalizeHelloMap(result)
 		expectHelloFieldString(hello, "server", "nimbis")
 		expectHelloFieldInt(hello, "proto", 3)
-		expectHelloFieldInt(hello, "id", 1)
+		expectHelloFieldInt(hello, "id", expectedClientID)
 	})
 
 	It("should reject unsupported HELLO protocol version", func() {
