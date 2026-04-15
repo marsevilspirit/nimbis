@@ -26,7 +26,7 @@ impl Default for HelloCmd {
 }
 
 impl HelloCmd {
-	fn parse_proto(args: &[bytes::Bytes]) -> Result<i64, RespValue> {
+	fn parse_proto(args: &[Bytes]) -> Result<i64, RespValue> {
 		if args.is_empty() {
 			return Ok(2);
 		}
@@ -105,12 +105,7 @@ impl Cmd for HelloCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(
-		&self,
-		_storage: &Storage,
-		args: &[bytes::Bytes],
-		ctx: &CmdContext,
-	) -> RespValue {
+	async fn do_cmd(&self, _storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
 		let proto = match Self::parse_proto(args) {
 			Ok(proto) => proto,
 			Err(err) => return err,
@@ -128,6 +123,7 @@ impl Cmd for HelloCmd {
 mod tests {
 	use resp::RespValue;
 
+	use super::Bytes;
 	use super::HelloCmd;
 
 	#[test]
@@ -138,22 +134,21 @@ mod tests {
 
 	#[test]
 	fn test_parse_proto_resp2() {
-		let proto = HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"2")])
-			.expect("parse proto should succeed");
+		let proto =
+			HelloCmd::parse_proto(&[Bytes::from_static(b"2")]).expect("parse proto should succeed");
 		assert_eq!(proto, 2);
 	}
 
 	#[test]
 	fn test_parse_proto_resp3() {
-		let proto = HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"3")])
-			.expect("parse proto should succeed");
+		let proto =
+			HelloCmd::parse_proto(&[Bytes::from_static(b"3")]).expect("parse proto should succeed");
 		assert_eq!(proto, 3);
 	}
 
 	#[test]
 	fn test_parse_proto_rejects_invalid_version() {
-		let err =
-			HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"4")]).expect_err("should error");
+		let err = HelloCmd::parse_proto(&[Bytes::from_static(b"4")]).expect_err("should error");
 		assert_eq!(
 			err,
 			RespValue::error("NOPROTO unsupported protocol version. Use 2 or 3")
@@ -162,11 +157,9 @@ mod tests {
 
 	#[test]
 	fn test_parse_proto_rejects_too_many_arguments() {
-		let err = HelloCmd::parse_proto(&[
-			bytes::Bytes::from_static(b"3"),
-			bytes::Bytes::from_static(b"SETNAME"),
-		])
-		.expect_err("should error");
+		let err =
+			HelloCmd::parse_proto(&[Bytes::from_static(b"3"), Bytes::from_static(b"SETNAME")])
+				.expect_err("should error");
 		assert_eq!(
 			err,
 			RespValue::error("ERR HELLO expects at most one argument (protocol version)")
@@ -175,8 +168,7 @@ mod tests {
 
 	#[test]
 	fn test_parse_proto_rejects_non_utf8_input() {
-		let err =
-			HelloCmd::parse_proto(&[bytes::Bytes::from_static(&[0xFF])]).expect_err("should error");
+		let err = HelloCmd::parse_proto(&[Bytes::from_static(&[0xFF])]).expect_err("should error");
 		assert_eq!(
 			err,
 			RespValue::error("NOPROTO unsupported protocol version. Use 2 or 3")

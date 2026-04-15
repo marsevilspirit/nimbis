@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use resp::RespValue;
 use storage::Storage;
 
@@ -28,12 +29,7 @@ impl Cmd for SetCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(
-		&self,
-		storage: &Storage,
-		args: &[bytes::Bytes],
-		_ctx: &CmdContext,
-	) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		let key = args[0].clone();
 		let value = args[1].clone();
 

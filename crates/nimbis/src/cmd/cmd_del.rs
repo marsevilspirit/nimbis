@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use resp::RespValue;
 use storage::Storage;
 
@@ -27,12 +28,7 @@ impl Cmd for DelCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(
-		&self,
-		storage: &Storage,
-		args: &[bytes::Bytes],
-		_ctx: &CmdContext,
-	) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		// TODO: Support multi-key deletion via scatter-gather across workers
 		// (similar to FLUSHDB broadcast pattern, not MGET/MSET which are for get/set)
 		if let Some(key) = args.first() {
