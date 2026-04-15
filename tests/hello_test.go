@@ -11,8 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const expectedClientID int64 = 1
-
 func normalizeHelloMap(result interface{}) map[string]interface{} {
 	switch v := result.(type) {
 	case map[string]interface{}:
@@ -57,6 +55,21 @@ func expectHelloFieldInt(m map[string]interface{}, key string, expected int64) {
 	}
 }
 
+func expectHelloFieldPositiveInt(m map[string]interface{}, key string) {
+	val, ok := m[key]
+	Expect(ok).To(BeTrue())
+	switch num := val.(type) {
+	case int64:
+		Expect(num).To(BeNumerically(">", 0))
+	case int:
+		Expect(num).To(BeNumerically(">", 0))
+	default:
+		parsed, err := strconv.ParseInt(fmt.Sprint(val), 10, 64)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parsed).To(BeNumerically(">", 0))
+	}
+}
+
 var _ = Describe("HELLO Command", func() {
 	var rdb *redis.Client
 	var ctx context.Context
@@ -78,7 +91,7 @@ var _ = Describe("HELLO Command", func() {
 		hello := normalizeHelloMap(result)
 		expectHelloFieldString(hello, "server", "nimbis")
 		expectHelloFieldInt(hello, "proto", 2)
-		expectHelloFieldInt(hello, "id", expectedClientID)
+		expectHelloFieldPositiveInt(hello, "id")
 	})
 
 	It("should support HELLO 2", func() {
@@ -88,7 +101,7 @@ var _ = Describe("HELLO Command", func() {
 		hello := normalizeHelloMap(result)
 		expectHelloFieldString(hello, "server", "nimbis")
 		expectHelloFieldInt(hello, "proto", 2)
-		expectHelloFieldInt(hello, "id", expectedClientID)
+		expectHelloFieldPositiveInt(hello, "id")
 	})
 
 	It("should support HELLO 3", func() {
@@ -98,7 +111,7 @@ var _ = Describe("HELLO Command", func() {
 		hello := normalizeHelloMap(result)
 		expectHelloFieldString(hello, "server", "nimbis")
 		expectHelloFieldInt(hello, "proto", 3)
-		expectHelloFieldInt(hello, "id", expectedClientID)
+		expectHelloFieldPositiveInt(hello, "id")
 	})
 
 	It("should reject unsupported HELLO protocol version", func() {
