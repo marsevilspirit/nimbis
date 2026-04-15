@@ -1,92 +1,108 @@
 package tests
 
 import (
-	"bufio"
-	"net"
-	"strings"
-	"time"
+	"context"
+	"fmt"
+	"strconv"
 
+	"github.com/marsevilspirit/nimbis/tests/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/redis/go-redis/v9"
 )
 
-func readLineOrFail(reader *bufio.Reader) string {
-	line, err := reader.ReadString('\n')
-	Expect(err).NotTo(HaveOccurred())
-	return line
+func normalizeHelloMap(result interface{}) map[string]interface{} {
+	switch v := result.(type) {
+	case map[string]interface{}:
+		return v
+	case map[interface{}]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for key, val := range v {
+			out[fmt.Sprint(key)] = val
+		}
+		return out
+	case []interface{}:
+		Expect(len(v) % 2).To(Equal(0))
+		out := make(map[string]interface{}, len(v)/2)
+		for i := 0; i < len(v); i += 2 {
+			out[fmt.Sprint(v[i])] = v[i+1]
+		}
+		return out
+	default:
+		Fail(fmt.Sprintf("unexpected HELLO result type: %T", result))
+		return nil
+	}
 }
 
-func assertHelloResp2Response(reader *bufio.Reader) {
-	Expect(readLineOrFail(reader)).To(Equal("*14\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$6\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("server\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$6\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("nimbis\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$7\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("version\r\n"))
-	Expect(strings.HasPrefix(readLineOrFail(reader), "$")).To(BeTrue())
-	versionValue := strings.TrimSpace(readLineOrFail(reader))
-	Expect(versionValue).To(MatchRegexp(`^\d+\.\d+\.\d+`))
-	Expect(readLineOrFail(reader)).To(Equal("$5\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("proto\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal(":2\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$2\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("id\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal(":1\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$4\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("mode\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$10\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("standalone\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$4\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("role\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$6\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("master\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("$7\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("modules\r\n"))
-	Expect(readLineOrFail(reader)).To(Equal("*0\r\n"))
+func expectHelloFieldString(m map[string]interface{}, key string, expected string) {
+	val, ok := m[key]
+	Expect(ok).To(BeTrue())
+	Expect(fmt.Sprint(val)).To(Equal(expected))
+}
+
+func expectHelloFieldInt(m map[string]interface{}, key string, expected int64) {
+	val, ok := m[key]
+	Expect(ok).To(BeTrue())
+	switch num := val.(type) {
+	case int64:
+		Expect(num).To(Equal(expected))
+	case int:
+		Expect(int64(num)).To(Equal(expected))
+	default:
+		parsed, err := strconv.ParseInt(fmt.Sprint(val), 10, 64)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parsed).To(Equal(expected))
+	}
 }
 
 var _ = Describe("HELLO Command", func() {
-	var conn net.Conn
-	var reader *bufio.Reader
+	var rdb *redis.Client
+	var ctx context.Context
 
 	BeforeEach(func() {
-		var err error
-		conn, err = net.Dial("tcp", "localhost:6379")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(conn.SetDeadline(time.Now().Add(5 * time.Second))).To(Succeed())
-		reader = bufio.NewReader(conn)
+		rdb = util.NewClient()
+		ctx = context.Background()
+		Expect(rdb.Ping(ctx).Err()).To(Succeed())
 	})
 
 	AfterEach(func() {
-		if conn != nil {
-			_ = conn.Close()
-		}
+		Expect(rdb.Close()).To(Succeed())
 	})
 
-	It("should support HELLO default as RESP2 handshake", func() {
-		_, err := conn.Write([]byte("HELLO\r\n"))
+	It("should support HELLO default", func() {
+		result, err := rdb.Do(ctx, "HELLO").Result()
 		Expect(err).NotTo(HaveOccurred())
-		assertHelloResp2Response(reader)
+
+		hello := normalizeHelloMap(result)
+		expectHelloFieldString(hello, "server", "nimbis")
+		expectHelloFieldInt(hello, "proto", 2)
+		expectHelloFieldInt(hello, "id", 1)
 	})
 
 	It("should support HELLO 2", func() {
-		_, err := conn.Write([]byte("HELLO 2\r\n"))
+		result, err := rdb.Do(ctx, "HELLO", "2").Result()
 		Expect(err).NotTo(HaveOccurred())
-		assertHelloResp2Response(reader)
+
+		hello := normalizeHelloMap(result)
+		expectHelloFieldString(hello, "server", "nimbis")
+		expectHelloFieldInt(hello, "proto", 2)
+		expectHelloFieldInt(hello, "id", 1)
 	})
 
-	It("should support HELLO 3 with RESP3 map response", func() {
-		_, err := conn.Write([]byte("HELLO 3\r\n"))
+	It("should support HELLO 3", func() {
+		result, err := rdb.Do(ctx, "HELLO", "3").Result()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(readLineOrFail(reader)).To(Equal("%7\r\n"))
+
+		hello := normalizeHelloMap(result)
+		expectHelloFieldString(hello, "server", "nimbis")
+		expectHelloFieldInt(hello, "proto", 3)
+		expectHelloFieldInt(hello, "id", 1)
 	})
 
 	It("should reject unsupported HELLO protocol version", func() {
-		_, err := conn.Write([]byte("HELLO 4\r\n"))
-		Expect(err).NotTo(HaveOccurred())
-		line := readLineOrFail(reader)
-		Expect(line).To(HavePrefix("-NOPROTO"))
-		Expect(line).To(ContainSubstring("Use 2 or 3"))
+		_, err := rdb.Do(ctx, "HELLO", "4").Result()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("NOPROTO unsupported protocol version"))
+		Expect(err.Error()).To(ContainSubstring("Use 2 or 3"))
 	})
 })
