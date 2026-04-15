@@ -31,7 +31,9 @@ impl HelloCmd {
 		}
 
 		if args.len() > 1 {
-			return Err(RespValue::error("ERR syntax error"));
+			return Err(RespValue::error(
+				"ERR HELLO expects at most one argument (protocol version)",
+			));
 		}
 
 		match std::str::from_utf8(&args[0]) {
@@ -106,10 +108,10 @@ impl Cmd for HelloCmd {
 			Err(err) => return err,
 		};
 
-		match proto {
-			2 => Self::resp2_hello(proto),
-			3 => Self::resp3_hello(proto),
-			_ => RespValue::error("NOPROTO unsupported protocol version"),
+		if proto == 2 {
+			Self::resp2_hello(proto)
+		} else {
+			Self::resp3_hello(proto)
 		}
 	}
 }
