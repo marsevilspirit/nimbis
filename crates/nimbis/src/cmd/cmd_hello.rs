@@ -18,7 +18,7 @@ impl Default for HelloCmd {
 		Self {
 			meta: CmdMeta {
 				name: "HELLO".to_string(),
-				arity: -1, // HELLO [protover [AUTH username password] [SETNAME clientname]]
+				arity: -1, // HELLO [protover]
 			},
 		}
 	}
@@ -39,7 +39,9 @@ impl HelloCmd {
 		match std::str::from_utf8(&args[0]) {
 			Ok("2") => Ok(2),
 			Ok("3") => Ok(3),
-			_ => Err(RespValue::error("NOPROTO unsupported protocol version")),
+			_ => Err(RespValue::error(
+				"NOPROTO unsupported protocol version. Use 2 or 3",
+			)),
 		}
 	}
 
@@ -148,7 +150,7 @@ mod tests {
 			HelloCmd::parse_proto(&[bytes::Bytes::from_static(b"4")]).expect_err("should error");
 		assert_eq!(
 			err,
-			RespValue::error("NOPROTO unsupported protocol version")
+			RespValue::error("NOPROTO unsupported protocol version. Use 2 or 3")
 		);
 	}
 
@@ -171,7 +173,7 @@ mod tests {
 			HelloCmd::parse_proto(&[bytes::Bytes::from_static(&[0xFF])]).expect_err("should error");
 		assert_eq!(
 			err,
-			RespValue::error("NOPROTO unsupported protocol version")
+			RespValue::error("NOPROTO unsupported protocol version. Use 2 or 3")
 		);
 	}
 
