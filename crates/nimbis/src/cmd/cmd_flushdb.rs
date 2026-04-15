@@ -4,6 +4,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 pub struct FlushDbCmd {
@@ -27,7 +28,7 @@ impl Cmd for FlushDbCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, _args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, _args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		// FLUSHDB removes all keys from the current database.
 		// Storage provides a flush_all method to delete all data while keeping the
 		// storage instances valid.

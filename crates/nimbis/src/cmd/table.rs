@@ -16,6 +16,7 @@ use super::HGetCmd;
 use super::HLenCmd;
 use super::HMGetCmd;
 use super::HSetCmd;
+use super::HelloCmd;
 use super::IncrCmd;
 use super::LLenCmd;
 use super::LPopCmd;
@@ -52,6 +53,7 @@ impl CmdTable {
 		let mut inner: HashMap<&'static str, Arc<dyn Cmd>> = HashMap::new();
 		// ping cmd
 		inner.insert("PING", Arc::new(PingCmd::default()));
+		inner.insert("HELLO", Arc::new(HelloCmd::default()));
 		// string type cmd
 		inner.insert("SET", Arc::new(SetCmd::default()));
 		inner.insert("GET", Arc::new(GetCmd::default()));

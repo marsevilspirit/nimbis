@@ -11,6 +11,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
+use crate::cmd::CmdContext;
 use crate::cmd::ParsedCmd;
 use crate::worker::CmdRequest;
 use crate::worker::WorkerMessage;
@@ -52,14 +53,19 @@ async fn aggregate_flushdb_responses(
 /// Command dispatcher for managing command routing and response collection
 pub struct CommandDispatcher {
 	peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+	ctx: CmdContext,
 	batches: HashMap<usize, Vec<CmdRequest>>,
 	ordered_responses: Vec<oneshot::Receiver<RespValue>>,
 }
 
 impl CommandDispatcher {
-	pub fn new(peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>) -> Self {
+	pub fn new(
+		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		ctx: CmdContext,
+	) -> Self {
 		Self {
 			peers,
+			ctx,
 			batches: HashMap::new(),
 			ordered_responses: Vec::new(),
 		}
@@ -91,6 +97,7 @@ impl CommandDispatcher {
 			let req = CmdRequest {
 				cmd_name: "FLUSHDB".to_string(),
 				args: cmd.args.clone(),
+				ctx: self.ctx,
 				resp_tx: tx,
 			};
 			self.batches.entry(worker_idx).or_default().push(req);
@@ -111,6 +118,7 @@ impl CommandDispatcher {
 		let req = CmdRequest {
 			cmd_name: cmd.name,
 			args: cmd.args,
+			ctx: self.ctx,
 			resp_tx,
 		};
 

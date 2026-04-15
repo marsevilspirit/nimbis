@@ -3,6 +3,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 pub struct DelCmd {
@@ -26,7 +27,12 @@ impl Cmd for DelCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		storage: &Storage,
+		args: &[bytes::Bytes],
+		_ctx: &CmdContext,
+	) -> RespValue {
 		// TODO: Support multi-key deletion via scatter-gather across workers
 		// (similar to FLUSHDB broadcast pattern, not MGET/MSET which are for get/set)
 		if let Some(key) = args.first() {

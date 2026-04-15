@@ -12,11 +12,13 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use crate::client::ClientSession;
+use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
 
 pub struct CmdRequest {
 	pub(crate) cmd_name: String,
 	pub(crate) args: Vec<Bytes>,
+	pub(crate) ctx: CmdContext,
 	pub(crate) resp_tx: oneshot::Sender<RespValue>,
 }
 
@@ -94,7 +96,7 @@ impl Worker {
 
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
 		let response = match cmd_table.get_cmd(&req.cmd_name) {
-			Some(cmd) => cmd.execute(storage, &req.args).await,
+			Some(cmd) => cmd.execute(storage, &req.args, &req.ctx).await,
 			None => RespValue::error(format!(
 				"ERR unknown command '{}'",
 				req.cmd_name.to_lowercase()

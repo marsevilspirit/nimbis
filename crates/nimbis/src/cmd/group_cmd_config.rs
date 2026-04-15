@@ -6,6 +6,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 use crate::config::SERVER_CONF;
 use crate::config::ServerConfig;
@@ -39,7 +40,12 @@ impl Cmd for ConfigGroupCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		storage: &Storage,
+		args: &[bytes::Bytes],
+		ctx: &CmdContext,
+	) -> RespValue {
 		// First argument should be the subcommand name (e.g., "GET")
 		if args.is_empty() {
 			return RespValue::error("ERR wrong number of arguments for CONFIG command");
@@ -53,7 +59,7 @@ impl Cmd for ConfigGroupCmd {
 		match self.sub_cmds.get(&sub_cmd_name) {
 			Some(sub_cmd) => {
 				// Pass remaining arguments to the subcommand
-				sub_cmd.execute(storage, &args[1..]).await
+				sub_cmd.execute(storage, &args[1..], ctx).await
 			}
 			None => RespValue::error(format!("ERR unknown CONFIG subcommand '{}'", sub_cmd_name)),
 		}
@@ -81,7 +87,12 @@ impl Cmd for ConfigGetCommand {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		_storage: &Storage,
+		args: &[bytes::Bytes],
+		_ctx: &CmdContext,
+	) -> RespValue {
 		let pattern = String::from_utf8_lossy(&args[0]);
 
 		// Check if pattern contains wildcard
@@ -144,7 +155,12 @@ impl Cmd for ConfigSetCommand {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		_storage: &Storage,
+		args: &[bytes::Bytes],
+		_ctx: &CmdContext,
+	) -> RespValue {
 		let field_name = String::from_utf8_lossy(&args[0]);
 		let value = String::from_utf8_lossy(&args[1]);
 

@@ -4,6 +4,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 pub struct ExistsCmd {
@@ -27,7 +28,7 @@ impl Cmd for ExistsCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		// TODO: Support multi-key existence check via scatter-gather across workers
 		if let Some(key) = args.first() {
 			match storage.exists(key.clone()).await {
