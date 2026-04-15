@@ -3,6 +3,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 pub struct HSetCmd {
@@ -26,7 +27,12 @@ impl Cmd for HSetCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		storage: &Storage,
+		args: &[bytes::Bytes],
+		_ctx: &CmdContext,
+	) -> RespValue {
 		// args: [key, field, value, field, value, ...]
 		if args.len() < 3 || !(args.len() - 1).is_multiple_of(2) {
 			return RespValue::error(

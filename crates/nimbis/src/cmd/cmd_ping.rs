@@ -3,6 +3,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 /// PING command implementation
@@ -27,7 +28,12 @@ impl Cmd for PingCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		_storage: &Storage,
+		args: &[bytes::Bytes],
+		_ctx: &CmdContext,
+	) -> RespValue {
 		match args.len() {
 			0 => RespValue::simple_string("PONG"),
 			1 => RespValue::bulk_string(args[0].clone()),

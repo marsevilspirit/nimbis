@@ -3,6 +3,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 #[derive(Debug)]
@@ -27,7 +28,12 @@ impl Cmd for HDelCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		storage: &Storage,
+		args: &[bytes::Bytes],
+		_ctx: &CmdContext,
+	) -> RespValue {
 		let key = args[0].clone();
 		let fields = &args[1..];
 

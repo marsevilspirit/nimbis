@@ -9,6 +9,11 @@ pub struct CmdMeta {
 	pub arity: i16,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CmdContext {
+	pub client_id: i64,
+}
+
 impl CmdMeta {
 	/// Validate argument count against arity
 	/// - Positive arity: requires exact match
@@ -43,15 +48,21 @@ pub trait Cmd: Send + Sync {
 	/// Get command metadata
 	fn meta(&self) -> &CmdMeta;
 
-	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue;
+	async fn do_cmd(&self, storage: &Storage, args: &[bytes::Bytes], ctx: &CmdContext)
+	-> RespValue;
 
-	/// Execute the command
-	async fn execute(&self, storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	/// Execute command with request context.
+	async fn execute(
+		&self,
+		storage: &Storage,
+		args: &[bytes::Bytes],
+		ctx: &CmdContext,
+	) -> RespValue {
 		if let Err(err) = self.meta().validate_arity(args.len() + 1) {
 			return RespValue::error(err);
 		}
 
-		self.do_cmd(storage, args).await
+		self.do_cmd(storage, args, ctx).await
 	}
 }
 

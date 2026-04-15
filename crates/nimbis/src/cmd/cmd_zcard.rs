@@ -4,6 +4,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 pub struct ZCardCmd {
@@ -27,7 +28,7 @@ impl Cmd for ZCardCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		let key = args[0].clone();
 
 		match storage.zcard(key).await {

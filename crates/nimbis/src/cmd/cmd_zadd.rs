@@ -4,6 +4,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 pub struct ZAddCmd {
@@ -27,7 +28,7 @@ impl Cmd for ZAddCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		// args: [key, score1, member1, score2, member2, ...]
 		let key = args[0].clone();
 		let remaining_args = &args[1..];

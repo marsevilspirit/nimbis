@@ -4,6 +4,7 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
 
 #[derive(Debug, Clone)]
@@ -28,7 +29,7 @@ impl Cmd for ExpireCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes]) -> RespValue {
+	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		let key = args[0].clone();
 		let seconds_str = String::from_utf8_lossy(&args[1]);
 		let seconds = match seconds_str.parse::<u64>() {

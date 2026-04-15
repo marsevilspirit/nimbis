@@ -6,9 +6,8 @@ use resp::RespValue;
 use storage::Storage;
 
 use super::Cmd;
+use super::CmdContext;
 use super::CmdMeta;
-
-const CLIENT_ID: i64 = 1;
 
 /// HELLO command implementation
 pub struct HelloCmd {
@@ -47,7 +46,7 @@ impl HelloCmd {
 		}
 	}
 
-	fn resp2_hello(proto: i64) -> RespValue {
+	fn resp2_hello(proto: i64, client_id: i64) -> RespValue {
 		RespValue::array(vec![
 			RespValue::bulk_string("server"),
 			RespValue::bulk_string("nimbis"),
@@ -56,7 +55,7 @@ impl HelloCmd {
 			RespValue::bulk_string("proto"),
 			RespValue::integer(proto),
 			RespValue::bulk_string("id"),
-			RespValue::integer(CLIENT_ID),
+			RespValue::integer(client_id),
 			RespValue::bulk_string("mode"),
 			RespValue::bulk_string("standalone"),
 			RespValue::bulk_string("role"),
@@ -66,7 +65,7 @@ impl HelloCmd {
 		])
 	}
 
-	fn resp3_hello(proto: i64) -> RespValue {
+	fn resp3_hello(proto: i64, client_id: i64) -> RespValue {
 		let mut map = HashMap::new();
 		map.insert(
 			RespValue::bulk_string(Bytes::from_static(b"server")),
@@ -82,7 +81,7 @@ impl HelloCmd {
 		);
 		map.insert(
 			RespValue::bulk_string(Bytes::from_static(b"id")),
-			RespValue::integer(CLIENT_ID),
+			RespValue::integer(client_id),
 		);
 		map.insert(
 			RespValue::bulk_string(Bytes::from_static(b"mode")),
@@ -106,16 +105,21 @@ impl Cmd for HelloCmd {
 		&self.meta
 	}
 
-	async fn do_cmd(&self, _storage: &Storage, args: &[bytes::Bytes]) -> RespValue {
+	async fn do_cmd(
+		&self,
+		_storage: &Storage,
+		args: &[bytes::Bytes],
+		ctx: &CmdContext,
+	) -> RespValue {
 		let proto = match Self::parse_proto(args) {
 			Ok(proto) => proto,
 			Err(err) => return err,
 		};
 
 		if proto == 2 {
-			Self::resp2_hello(proto)
+			Self::resp2_hello(proto, ctx.client_id)
 		} else {
-			Self::resp3_hello(proto)
+			Self::resp3_hello(proto, ctx.client_id)
 		}
 	}
 }
@@ -181,22 +185,27 @@ mod tests {
 
 	#[test]
 	fn test_resp2_hello_structure() {
-		let resp = HelloCmd::resp2_hello(2);
+		let resp = HelloCmd::resp2_hello(2, 42);
 		let arr = resp.as_array().expect("HELLO 2 should return RESP2 array");
 		assert_eq!(arr.len(), 14);
 		assert_eq!(arr[0], RespValue::bulk_string("server"));
 		assert_eq!(arr[1], RespValue::bulk_string("nimbis"));
 		assert_eq!(arr[4], RespValue::bulk_string("proto"));
 		assert_eq!(arr[5], RespValue::integer(2));
+		assert_eq!(arr[7], RespValue::integer(42));
 	}
 
 	#[test]
 	fn test_resp3_hello_contains_proto() {
-		let resp = HelloCmd::resp3_hello(3);
+		let resp = HelloCmd::resp3_hello(3, 7);
 		let map = resp.as_map().expect("HELLO 3 should return RESP3 map");
 		assert_eq!(
 			map.get(&RespValue::bulk_string("proto")),
 			Some(&RespValue::integer(3))
+		);
+		assert_eq!(
+			map.get(&RespValue::bulk_string("id")),
+			Some(&RespValue::integer(7))
 		);
 		assert_eq!(
 			map.get(&RespValue::bulk_string("server")),

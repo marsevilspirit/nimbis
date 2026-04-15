@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
 
 use bytes::BytesMut;
 use log::debug;
@@ -12,11 +14,15 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
+use crate::cmd::CmdContext;
 use crate::cmd::ParsedCmd;
 use crate::dispatcher::CommandDispatcher;
 use crate::worker::WorkerMessage;
 
+static NEXT_CLIENT_SESSION_ID: AtomicI64 = AtomicI64::new(1);
+
 pub struct ClientSession {
+	id: i64,
 	socket: TcpStream,
 	dispatcher: CommandDispatcher,
 	parser: RespParser,
@@ -27,15 +33,18 @@ impl ClientSession {
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 	) -> Self {
+		let id = NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
 		Self {
+			id,
 			socket,
-			dispatcher: CommandDispatcher::new(peers),
+			dispatcher: CommandDispatcher::new(peers, CmdContext { client_id: id }),
 			parser: RespParser::new(),
 		}
 	}
 
 	pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let mut buffer = BytesMut::with_capacity(4096);
+		debug!("Client session {} started", self.id);
 
 		loop {
 			let n = match self.socket.read_buf(&mut buffer).await {
