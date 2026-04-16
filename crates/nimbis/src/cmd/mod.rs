@@ -133,6 +133,7 @@ mod cmd_zcard;
 mod cmd_zrange;
 mod cmd_zrem;
 mod cmd_zscore;
+mod group_cmd_client;
 mod group_cmd_config;
 mod table;
 
@@ -170,5 +171,6 @@ pub use cmd_zcard::ZCardCmd;
 pub use cmd_zrange::ZRangeCmd;
 pub use cmd_zrem::ZRemCmd;
 pub use cmd_zscore::ZScoreCmd;
+pub use group_cmd_client::ClientGroupCmd;
 pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;

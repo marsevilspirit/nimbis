@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
+use bytes::Bytes;
 use bytes::BytesMut;
+use dashmap::DashMap;
 use log::debug;
 use resp::RespEncoder;
 use resp::RespParseResult;
@@ -21,30 +23,84 @@ use crate::worker::WorkerMessage;
 
 static NEXT_CLIENT_SESSION_ID: AtomicI64 = AtomicI64::new(1);
 
+pub fn next_client_session_id() -> i64 {
+	NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ClientSession {
-	id: i64,
+	pub id: i64,
+	pub name: Option<Bytes>,
+}
+
+#[derive(Clone, Default)]
+pub struct ClientSessions(Arc<DashMap<i64, ClientSession>>);
+
+impl ClientSessions {
+	pub fn new() -> Self {
+		Self(Arc::new(DashMap::new()))
+	}
+
+	pub fn register(&self, client_id: i64) {
+		self.0.entry(client_id).or_insert_with(|| ClientSession {
+			id: client_id,
+			name: None,
+		});
+	}
+
+	pub fn unregister(&self, client_id: i64) {
+		self.0.remove(&client_id);
+	}
+
+	pub fn set_name(&self, client_id: i64, name: Bytes) -> bool {
+		if let Some(mut session) = self.0.get_mut(&client_id) {
+			session.name = Some(name);
+			return true;
+		}
+
+		false
+	}
+
+	pub fn get_name(&self, client_id: i64) -> Option<Bytes> {
+		self.0
+			.get(&client_id)
+			.and_then(|session| session.name.clone())
+	}
+
+	pub fn list(&self) -> Vec<(i64, Option<Bytes>)> {
+		let mut entries = self
+			.0
+			.iter()
+			.map(|entry| (*entry.key(), entry.value().name.clone()))
+			.collect::<Vec<_>>();
+
+		entries.sort_by_key(|(client_id, _)| *client_id);
+		entries
+	}
+}
+
+pub struct ClientConnection {
 	socket: TcpStream,
 	dispatcher: CommandDispatcher,
 	parser: RespParser,
 }
 
-impl ClientSession {
+impl ClientConnection {
 	pub fn new(
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		ctx: CmdContext,
 	) -> Self {
-		let id = NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
 		Self {
-			id,
 			socket,
-			dispatcher: CommandDispatcher::new(peers, CmdContext { client_id: id }),
+			dispatcher: CommandDispatcher::new(peers, ctx),
 			parser: RespParser::new(),
 		}
 	}
 
 	pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let mut buffer = BytesMut::with_capacity(4096);
-		debug!("Client session {} started", self.id);
+		debug!("Client connection started");
 
 		loop {
 			let n = match self.socket.read_buf(&mut buffer).await {

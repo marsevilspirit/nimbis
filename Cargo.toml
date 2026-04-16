@@ -28,6 +28,7 @@ async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"
 clap = { version = "4.6.0", features = ["derive"] }
+dashmap = "6.1.0"
 futures = "0.3.31"
 log = "0.4.29"
 memchr = "2.8.0"

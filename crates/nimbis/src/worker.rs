@@ -11,7 +11,9 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use crate::client::ClientSession;
+use crate::client::ClientConnection;
+use crate::client::ClientSessions;
+use crate::client::next_client_session_id;
 use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
 
@@ -39,6 +41,7 @@ impl Worker {
 		tx: mpsc::UnboundedSender<WorkerMessage>,
 		mut rx: mpsc::UnboundedReceiver<WorkerMessage>,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		client_sessions: ClientSessions,
 		storage: Arc<Storage>,
 		cmd_table: Arc<CmdTable>,
 	) -> Self {
@@ -70,11 +73,16 @@ impl Worker {
 						match msg {
 							WorkerMessage::NewConnection(socket) => {
 								let peers = peers.clone();
+								let client_sessions = client_sessions.clone();
 								tokio::spawn(async move {
-									let mut session = ClientSession::new(socket, peers);
+									let client_id = next_client_session_id();
+									let ctx = CmdContext { client_id };
+									let mut session = ClientConnection::new(socket, peers, ctx);
+									client_sessions.register(client_id);
 									if let Err(e) = session.run().await {
 										debug!("Client session error: {}", e);
 									}
+									client_sessions.unregister(client_id);
 								});
 							}
 							WorkerMessage::CmdBatch(reqs) => {

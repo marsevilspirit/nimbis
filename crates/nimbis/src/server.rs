@@ -8,6 +8,7 @@ use storage::Storage;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
+use crate::client::ClientSessions;
 use crate::cmd::CmdTable;
 use crate::server_config;
 use crate::worker::Worker;
@@ -24,7 +25,8 @@ impl Server {
 		let data_path = &server_config!(data_path);
 		std::fs::create_dir_all(data_path)?;
 
-		let cmd_table = Arc::new(CmdTable::new());
+		let client_sessions = ClientSessions::new();
+		let cmd_table = Arc::new(CmdTable::new(client_sessions.clone()));
 
 		// Determine number of workers from config
 		let workers_num = server_config!(worker_threads);
@@ -58,6 +60,7 @@ impl Server {
 				my_tx,
 				rx,
 				senders.clone(),
+				client_sessions.clone(),
 				storage, // This is now unique per worker
 				cmd_table.clone(),
 			));

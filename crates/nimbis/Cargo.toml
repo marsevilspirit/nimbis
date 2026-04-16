@@ -17,6 +17,7 @@ arc-swap = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+dashmap = { workspace = true }
 log = { workspace = true }
 num_cpus = { workspace = true }
 serde = { workspace = true }

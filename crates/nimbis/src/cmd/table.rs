@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::AppendCmd;
+use super::ClientGroupCmd;
 use super::Cmd;
 use super::ConfigGroupCmd;
 use super::DecrCmd;
@@ -37,6 +38,7 @@ use super::ZCardCmd;
 use super::ZRangeCmd;
 use super::ZRemCmd;
 use super::ZScoreCmd;
+use crate::client::ClientSessions;
 
 pub struct CmdTable {
 	inner: HashMap<&'static str, Arc<dyn Cmd>>,
@@ -44,12 +46,12 @@ pub struct CmdTable {
 
 impl Default for CmdTable {
 	fn default() -> Self {
-		Self::new()
+		Self::new(Default::default())
 	}
 }
 
 impl CmdTable {
-	pub fn new() -> Self {
+	pub fn new(client_sessions: ClientSessions) -> Self {
 		let mut inner: HashMap<&'static str, Arc<dyn Cmd>> = HashMap::new();
 		// ping cmd
 		inner.insert("PING", Arc::new(PingCmd::default()));
@@ -92,6 +94,7 @@ impl CmdTable {
 		inner.insert("TTL", Arc::new(TtlCmd::default()));
 		// config type cmd
 		inner.insert("CONFIG", Arc::new(ConfigGroupCmd::default()));
+		inner.insert("CLIENT", Arc::new(ClientGroupCmd::new(client_sessions)));
 		// other type cmd
 		inner.insert("FLUSHDB", Arc::new(FlushDbCmd::default()));
 		Self { inner }
