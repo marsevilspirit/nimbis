@@ -51,10 +51,6 @@ impl Cmd for ClientGroupCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		if args.is_empty() {
-			return RespValue::error("ERR wrong number of arguments for CLIENT command");
-		}
-
 		let sub_cmd_name = String::from_utf8_lossy(&args[0]).to_uppercase();
 		match self.sub_cmds.get(&sub_cmd_name) {
 			Some(sub_cmd) => sub_cmd.execute(storage, &args[1..], ctx).await,
