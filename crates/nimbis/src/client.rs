@@ -62,8 +62,7 @@ impl ClientSessions {
 	}
 
 	pub fn get_name(&self, client_id: i64) -> Option<Bytes> {
-		self
-			.0
+		self.0
 			.get(&client_id)
 			.and_then(|session| session.name.clone())
 	}
