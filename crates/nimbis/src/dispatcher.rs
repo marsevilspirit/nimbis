@@ -97,7 +97,7 @@ impl CommandDispatcher {
 			let req = CmdRequest {
 				cmd_name: "FLUSHDB".to_string(),
 				args: cmd.args.clone(),
-				ctx: self.ctx.clone(),
+				ctx: self.ctx,
 				resp_tx: tx,
 			};
 			self.batches.entry(worker_idx).or_default().push(req);
@@ -118,7 +118,7 @@ impl CommandDispatcher {
 		let req = CmdRequest {
 			cmd_name: cmd.name,
 			args: cmd.args,
-			ctx: self.ctx.clone(),
+			ctx: self.ctx,
 			resp_tx,
 		};
 

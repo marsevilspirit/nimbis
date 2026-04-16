@@ -10,7 +10,7 @@ pub struct CmdMeta {
 	pub arity: i16,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CmdContext {
 	pub client_id: i64,
 }
