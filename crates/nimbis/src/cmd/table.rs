@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::client::ClientSessions;
-
 use super::AppendCmd;
 use super::ClientGroupCmd;
 use super::Cmd;
@@ -40,6 +38,7 @@ use super::ZCardCmd;
 use super::ZRangeCmd;
 use super::ZRemCmd;
 use super::ZScoreCmd;
+use crate::client::ClientSessions;
 
 pub struct CmdTable {
 	inner: HashMap<&'static str, Arc<dyn Cmd>>,

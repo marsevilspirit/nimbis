@@ -64,22 +64,22 @@ pub fn unregister_client(client_sessions: &ClientSessions, client_id: i64) {
 }
 
 pub fn set_client_name(client_sessions: &ClientSessions, client_id: i64, name: Bytes) -> bool {
-	if let Ok(mut guard) = client_sessions.0.write() {
-		if let Some(session) = guard.get_mut(&client_id) {
-			session.name = Some(name);
-			return true;
-		}
+	if let Ok(mut guard) = client_sessions.0.write()
+		&& let Some(session) = guard.get_mut(&client_id)
+	{
+		session.name = Some(name);
+		return true;
 	}
 
 	false
 }
 
 pub fn get_client_name(client_sessions: &ClientSessions, client_id: i64) -> Option<Bytes> {
-	client_sessions
-		.0
-		.read()
-		.ok()
-		.and_then(|guard| guard.get(&client_id).and_then(|session| session.name.clone()))
+	client_sessions.0.read().ok().and_then(|guard| {
+		guard
+			.get(&client_id)
+			.and_then(|session| session.name.clone())
+	})
 }
 
 pub fn list_clients(client_sessions: &ClientSessions) -> Vec<(i64, Option<Bytes>)> {

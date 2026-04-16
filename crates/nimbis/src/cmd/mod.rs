@@ -10,17 +10,9 @@ pub struct CmdMeta {
 	pub arity: i16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CmdContext {
 	pub client_id: i64,
-}
-
-impl Default for CmdContext {
-	fn default() -> Self {
-		Self {
-			client_id: 0,
-		}
-	}
 }
 
 impl CmdMeta {
@@ -114,7 +106,6 @@ mod cmd_exists;
 mod cmd_expire;
 mod cmd_flushdb;
 mod cmd_get;
-mod group_cmd_client;
 mod cmd_hdel;
 mod cmd_hello;
 mod cmd_hget;
@@ -142,6 +133,7 @@ mod cmd_zcard;
 mod cmd_zrange;
 mod cmd_zrem;
 mod cmd_zscore;
+mod group_cmd_client;
 mod group_cmd_config;
 mod table;
 

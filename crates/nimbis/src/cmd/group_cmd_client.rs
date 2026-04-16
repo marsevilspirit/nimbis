@@ -59,10 +59,7 @@ impl Cmd for ClientGroupCmd {
 		let sub_cmd_name = String::from_utf8_lossy(&args[0]).to_uppercase();
 		match self.sub_cmds.get(&sub_cmd_name) {
 			Some(sub_cmd) => sub_cmd.execute(storage, &args[1..], ctx).await,
-			None => RespValue::error(format!(
-				"ERR unknown CLIENT subcommand '{}'",
-				sub_cmd_name
-			)),
+			None => RespValue::error(format!("ERR unknown CLIENT subcommand '{}'", sub_cmd_name)),
 		}
 	}
 }
