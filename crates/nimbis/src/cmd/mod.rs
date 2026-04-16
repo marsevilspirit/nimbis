@@ -10,9 +10,17 @@ pub struct CmdMeta {
 	pub arity: i16,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone)]
 pub struct CmdContext {
 	pub client_id: i64,
+}
+
+impl Default for CmdContext {
+	fn default() -> Self {
+		Self {
+			client_id: 0,
+		}
+	}
 }
 
 impl CmdMeta {
@@ -106,6 +114,7 @@ mod cmd_exists;
 mod cmd_expire;
 mod cmd_flushdb;
 mod cmd_get;
+mod group_cmd_client;
 mod cmd_hdel;
 mod cmd_hello;
 mod cmd_hget;
@@ -170,5 +179,6 @@ pub use cmd_zcard::ZCardCmd;
 pub use cmd_zrange::ZRangeCmd;
 pub use cmd_zrem::ZRemCmd;
 pub use cmd_zscore::ZScoreCmd;
+pub use group_cmd_client::ClientGroupCmd;
 pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;

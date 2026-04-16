@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
+use bytes::Bytes;
 use bytes::BytesMut;
 use log::debug;
 use resp::RespEncoder;
@@ -21,30 +23,104 @@ use crate::worker::WorkerMessage;
 
 static NEXT_CLIENT_SESSION_ID: AtomicI64 = AtomicI64::new(1);
 
+pub fn next_client_session_id() -> i64 {
+	NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ClientSession {
-	id: i64,
+	pub id: i64,
+	pub name: Option<Bytes>,
+}
+
+#[derive(Clone)]
+pub struct ClientSessions(Arc<RwLock<HashMap<i64, ClientSession>>>);
+
+impl ClientSessions {
+	pub fn new() -> Self {
+		Self(Arc::new(RwLock::new(HashMap::new())))
+	}
+}
+
+impl Default for ClientSessions {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+pub fn register_client(client_sessions: &ClientSessions, client_id: i64) {
+	if let Ok(mut guard) = client_sessions.0.write() {
+		guard.entry(client_id).or_insert_with(|| ClientSession {
+			id: client_id,
+			name: None,
+		});
+	}
+}
+
+pub fn unregister_client(client_sessions: &ClientSessions, client_id: i64) {
+	if let Ok(mut guard) = client_sessions.0.write() {
+		guard.remove(&client_id);
+	}
+}
+
+pub fn set_client_name(client_sessions: &ClientSessions, client_id: i64, name: Bytes) -> bool {
+	if let Ok(mut guard) = client_sessions.0.write() {
+		if let Some(session) = guard.get_mut(&client_id) {
+			session.name = Some(name);
+			return true;
+		}
+	}
+
+	false
+}
+
+pub fn get_client_name(client_sessions: &ClientSessions, client_id: i64) -> Option<Bytes> {
+	client_sessions
+		.0
+		.read()
+		.ok()
+		.and_then(|guard| guard.get(&client_id).and_then(|session| session.name.clone()))
+}
+
+pub fn list_clients(client_sessions: &ClientSessions) -> Vec<(i64, Option<Bytes>)> {
+	let mut entries = client_sessions
+		.0
+		.read()
+		.ok()
+		.map(|guard| {
+			guard
+				.iter()
+				.map(|(client_id, session)| (*client_id, session.name.clone()))
+				.collect::<Vec<_>>()
+		})
+		.unwrap_or_default();
+
+	entries.sort_by_key(|(client_id, _)| *client_id);
+	entries
+}
+
+pub struct ClientConnection {
 	socket: TcpStream,
 	dispatcher: CommandDispatcher,
 	parser: RespParser,
 }
 
-impl ClientSession {
+impl ClientConnection {
 	pub fn new(
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		ctx: CmdContext,
 	) -> Self {
-		let id = NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
 		Self {
-			id,
 			socket,
-			dispatcher: CommandDispatcher::new(peers, CmdContext { client_id: id }),
+			dispatcher: CommandDispatcher::new(peers, ctx),
 			parser: RespParser::new(),
 		}
 	}
 
 	pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let mut buffer = BytesMut::with_capacity(4096);
-		debug!("Client session {} started", self.id);
+		debug!("Client connection started");
 
 		loop {
 			let n = match self.socket.read_buf(&mut buffer).await {
