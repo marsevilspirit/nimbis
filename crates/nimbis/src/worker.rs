@@ -14,8 +14,6 @@ use tokio::sync::oneshot;
 use crate::client::ClientConnection;
 use crate::client::ClientSessions;
 use crate::client::next_client_session_id;
-use crate::client::register_client;
-use crate::client::unregister_client;
 use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
 
@@ -80,11 +78,11 @@ impl Worker {
 									let client_id = next_client_session_id();
 									let ctx = CmdContext { client_id };
 									let mut session = ClientConnection::new(socket, peers, ctx);
-									register_client(&client_sessions, client_id);
+									client_sessions.register(client_id);
 									if let Err(e) = session.run().await {
 										debug!("Client session error: {}", e);
 									}
-									unregister_client(&client_sessions, client_id);
+									client_sessions.unregister(client_id);
 								});
 							}
 							WorkerMessage::CmdBatch(reqs) => {

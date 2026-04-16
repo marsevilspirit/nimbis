@@ -8,7 +8,6 @@ use storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use crate::client;
 use crate::client::ClientSessions;
 
 /// Client group command implementation.
@@ -114,7 +113,7 @@ impl Cmd for ClientSetNameCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		if client::set_client_name(&self.client_sessions, ctx.client_id, args[0].clone()) {
+		if self.client_sessions.set_name(ctx.client_id, args[0].clone()) {
 			RespValue::simple_string("OK")
 		} else {
 			RespValue::error("ERR client not found")
@@ -146,7 +145,7 @@ impl Cmd for ClientGetNameCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		match client::get_client_name(&self.client_sessions, ctx.client_id) {
+		match self.client_sessions.get_name(ctx.client_id) {
 			Some(name) => RespValue::bulk_string(name),
 			None => RespValue::null(),
 		}
@@ -177,7 +176,9 @@ impl Cmd for ClientListCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let lines = client::list_clients(&self.client_sessions)
+		let lines = self
+			.client_sessions
+			.list()
 			.into_iter()
 			.map(|(client_id, name)| {
 				let name = name

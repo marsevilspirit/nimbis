@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use dashmap::DashMap;
 use log::debug;
 use resp::RespEncoder;
 use resp::RespParseResult;
@@ -33,70 +33,51 @@ pub struct ClientSession {
 	pub name: Option<Bytes>,
 }
 
-#[derive(Clone)]
-pub struct ClientSessions(Arc<RwLock<HashMap<i64, ClientSession>>>);
+#[derive(Clone, Default)]
+pub struct ClientSessions(Arc<DashMap<i64, ClientSession>>);
 
 impl ClientSessions {
 	pub fn new() -> Self {
-		Self(Arc::new(RwLock::new(HashMap::new())))
+		Self(Arc::new(DashMap::new()))
 	}
-}
 
-impl Default for ClientSessions {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
-pub fn register_client(client_sessions: &ClientSessions, client_id: i64) {
-	if let Ok(mut guard) = client_sessions.0.write() {
-		guard.entry(client_id).or_insert_with(|| ClientSession {
+	pub fn register(&self, client_id: i64) {
+		self.0.entry(client_id).or_insert_with(|| ClientSession {
 			id: client_id,
 			name: None,
 		});
 	}
-}
 
-pub fn unregister_client(client_sessions: &ClientSessions, client_id: i64) {
-	if let Ok(mut guard) = client_sessions.0.write() {
-		guard.remove(&client_id);
-	}
-}
-
-pub fn set_client_name(client_sessions: &ClientSessions, client_id: i64, name: Bytes) -> bool {
-	if let Ok(mut guard) = client_sessions.0.write()
-		&& let Some(session) = guard.get_mut(&client_id)
-	{
-		session.name = Some(name);
-		return true;
+	pub fn unregister(&self, client_id: i64) {
+		self.0.remove(&client_id);
 	}
 
-	false
-}
+	pub fn set_name(&self, client_id: i64, name: Bytes) -> bool {
+		if let Some(mut session) = self.0.get_mut(&client_id) {
+			session.name = Some(name);
+			return true;
+		}
 
-pub fn get_client_name(client_sessions: &ClientSessions, client_id: i64) -> Option<Bytes> {
-	client_sessions.0.read().ok().and_then(|guard| {
-		guard
+		false
+	}
+
+	pub fn get_name(&self, client_id: i64) -> Option<Bytes> {
+		self
+			.0
 			.get(&client_id)
 			.and_then(|session| session.name.clone())
-	})
-}
+	}
 
-pub fn list_clients(client_sessions: &ClientSessions) -> Vec<(i64, Option<Bytes>)> {
-	let mut entries = client_sessions
-		.0
-		.read()
-		.ok()
-		.map(|guard| {
-			guard
-				.iter()
-				.map(|(client_id, session)| (*client_id, session.name.clone()))
-				.collect::<Vec<_>>()
-		})
-		.unwrap_or_default();
+	pub fn list(&self) -> Vec<(i64, Option<Bytes>)> {
+		let mut entries = self
+			.0
+			.iter()
+			.map(|entry| (*entry.key(), entry.value().name.clone()))
+			.collect::<Vec<_>>();
 
-	entries.sort_by_key(|(client_id, _)| *client_id);
-	entries
+		entries.sort_by_key(|(client_id, _)| *client_id);
+		entries
+	}
 }
 
 pub struct ClientConnection {
