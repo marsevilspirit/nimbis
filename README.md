@@ -47,6 +47,9 @@ cargo install rust-script
 
 # Install just
 cargo install just
+
+# Install cargo-nextest
+cargo install --locked cargo-nextest
 ```
 
 ### Common Commands
