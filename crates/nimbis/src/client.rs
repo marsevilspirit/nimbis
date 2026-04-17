@@ -34,26 +34,32 @@ pub struct ClientSession {
 }
 
 #[derive(Clone, Default)]
-pub struct ClientSessions(Arc<DashMap<i64, ClientSession>>);
+pub struct ClientSessions {
+	sessions: Arc<DashMap<i64, ClientSession>>,
+}
 
 impl ClientSessions {
 	pub fn new() -> Self {
-		Self(Arc::new(DashMap::new()))
+		Self {
+			sessions: Arc::new(DashMap::new()),
+		}
 	}
 
 	pub fn register(&self, client_id: i64) {
-		self.0.entry(client_id).or_insert_with(|| ClientSession {
-			id: client_id,
-			name: None,
-		});
+		self.sessions
+			.entry(client_id)
+			.or_insert_with(|| ClientSession {
+				id: client_id,
+				name: None,
+			});
 	}
 
 	pub fn unregister(&self, client_id: i64) {
-		self.0.remove(&client_id);
+		self.sessions.remove(&client_id);
 	}
 
 	pub fn set_name(&self, client_id: i64, name: Bytes) -> bool {
-		if let Some(mut session) = self.0.get_mut(&client_id) {
+		if let Some(mut session) = self.sessions.get_mut(&client_id) {
 			session.name = Some(name);
 			return true;
 		}
@@ -62,14 +68,14 @@ impl ClientSessions {
 	}
 
 	pub fn get_name(&self, client_id: i64) -> Option<Bytes> {
-		self.0
+		self.sessions
 			.get(&client_id)
 			.and_then(|session| session.name.clone())
 	}
 
 	pub fn list(&self) -> Vec<(i64, Option<Bytes>)> {
 		let mut entries = self
-			.0
+			.sessions
 			.iter()
 			.map(|entry| (*entry.key(), entry.value().name.clone()))
 			.collect::<Vec<_>>();
