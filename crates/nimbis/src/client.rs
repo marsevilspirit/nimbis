@@ -46,10 +46,12 @@ impl ClientSessions {
 	}
 
 	pub fn register(&self, client_id: i64) {
-		self.sessions.entry(client_id).or_insert_with(|| ClientSession {
-			id: client_id,
-			name: None,
-		});
+		self.sessions
+			.entry(client_id)
+			.or_insert_with(|| ClientSession {
+				id: client_id,
+				name: None,
+			});
 	}
 
 	pub fn unregister(&self, client_id: i64) {
