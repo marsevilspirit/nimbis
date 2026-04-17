@@ -42,7 +42,7 @@ cargo install --locked cargo-nextest
   2. `just build --release`
   3. `just test`
   4. `just e2e-test`
-- `just e2e-test` removes `nimbis_store` and runs Go/Ginkgo tests that expect server access on `127.0.0.1:6379`.
+- `just e2e-test` removes `nimbis_store`, starts the `nimbis` process, and runs Go/Ginkgo tests that connect to `localhost:6379`.
 
 ## Repository-specific guardrails
 - Keep `Cargo.toml` dependency entries sorted and prefer `workspace = true` where expected (`scripts/check_workspace_deps.rs` enforces this).
