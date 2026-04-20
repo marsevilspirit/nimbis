@@ -635,4 +635,25 @@ mod tests {
 		let decoded = ZSetMetaValue::decode(&encoded).unwrap();
 		assert_eq!(decoded, val);
 	}
+
+	#[test]
+	fn test_remaining_ttl() {
+		let mut val = HashMetaValue::new(1, 10);
+
+		// Case 1: No expiration
+		val.expire_time = 0;
+		assert_eq!(val.remaining_ttl(), None);
+
+		// Case 2: Expired
+		val.expire_time = (chrono::Utc::now().timestamp_millis() as u64).saturating_sub(1000);
+		assert_eq!(val.remaining_ttl(), Some(Duration::ZERO));
+
+		// Case 3: Future expiration
+		let future = chrono::Utc::now().timestamp_millis() as u64 + 10000;
+		val.expire_time = future;
+		let ttl = val.remaining_ttl().unwrap();
+		assert!(ttl > Duration::ZERO);
+		assert!(ttl <= Duration::from_millis(10000));
+		assert!(ttl > Duration::from_millis(9000));
+	}
 }
