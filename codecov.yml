@@ -6,3 +6,7 @@ coverage:
     patch:
       default:
         informational: true
+
+comment:
+  layout: "header, status, reach, files, diff"
+  require_changes: false
