@@ -72,3 +72,21 @@ Available recipes:
     e2e-test    # Run e2e tests
     test        # Run unit tests
 ```
+
+## Coverage
+
+Rust coverage is collected in GitHub Actions by the workflow in `.github/workflows/coverage.yml`.
+
+- Trigger: push and pull_request on `main`
+- Scope: Rust workspace tests only
+- Reports: `lcov.info` and `cobertura.xml` (also uploaded as workflow artifacts)
+
+### Codecov Setup
+
+For private repositories, add `CODECOV_TOKEN` in GitHub repository settings:
+
+1. Open repository settings in GitHub.
+2. Go to Secrets and variables -> Actions.
+3. Create a new repository secret named `CODECOV_TOKEN`.
+
+For public repositories, token usage depends on your Codecov setup.
