@@ -8,5 +8,5 @@ coverage:
         informational: true
 
 comment:
-  layout: "reach, files, diff"
+  layout: "header, status, reach, files, diff"
   require_changes: false
