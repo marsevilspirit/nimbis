@@ -50,6 +50,9 @@ cargo install just
 
 # Install cargo-nextest
 cargo install --locked cargo-nextest
+
+# Install cargo-llvm-cov
+cargo install cargo-llvm-cov
 ```
 
 ### Common Commands
@@ -75,11 +78,13 @@ Available recipes:
 
 ## Coverage
 
-Rust coverage is collected in GitHub Actions by the workflow in `.github/workflows/coverage.yml`.
+Rust coverage is collected in GitHub Actions through `just test` in `.github/workflows/ci.yml`.
 
 - Trigger: push and pull_request on `main`
 - Scope: Rust workspace tests only
-- Reports: `lcov.info` and `cobertura.xml` (also uploaded as workflow artifacts)
+- Runner: `cargo-llvm-cov` with `cargo-nextest`
+- Output: `codecov.json` from `just test`
+- CI upload: `codecov.json` to Codecov
 
 ### Codecov Setup
 
