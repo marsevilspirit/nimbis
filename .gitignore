@@ -5,3 +5,4 @@ config.toml
 
 /target
 /nimbis_store
+/codecov.json

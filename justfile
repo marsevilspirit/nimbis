@@ -8,10 +8,10 @@ default:
 build *args:
     cargo build {{args}}
 
-# Run unit tests
+# Run unit tests with coverage generation
 [group: 'test']
 test:
-    cargo nextest run --no-fail-fast
+    cargo llvm-cov nextest --workspace --codecov --output-path codecov.json
 
 # Run e2e tests
 [group: 'test']
