@@ -13,10 +13,10 @@ use crate::string::value::StringValue;
 pub trait MetaValue: Expirable + Sized {
 	/// Decode the value from bytes.
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError>;
-	/// Check if the given type code matches this meta value type.
-	fn is_type_match(type_code: u8) -> bool;
 	/// Encode the value to bytes.
 	fn encode(&self) -> Bytes;
+	/// Check if the given type code matches this meta value type.
+	fn is_type_match(type_code: u8) -> bool;
 	/// Return the expected data type for this meta value, if specific.
 	/// Used for better error messages on type mismatch.
 	fn data_type() -> Option<DataType> {
@@ -29,16 +29,16 @@ impl MetaValue for StringValue {
 		Self::decode(bytes)
 	}
 
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::String as u8
 	}
 
 	fn data_type() -> Option<DataType> {
 		Some(DataType::String)
-	}
-
-	fn encode(&self) -> Bytes {
-		self.encode()
 	}
 }
 
@@ -127,16 +127,16 @@ impl MetaValue for HashMetaValue {
 		Self::decode(bytes)
 	}
 
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::Hash as u8
 	}
 
 	fn data_type() -> Option<DataType> {
 		Some(DataType::Hash)
-	}
-
-	fn encode(&self) -> Bytes {
-		self.encode()
 	}
 }
 
@@ -214,16 +214,16 @@ impl MetaValue for ListMetaValue {
 		Self::decode(bytes)
 	}
 
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::List as u8
 	}
 
 	fn data_type() -> Option<DataType> {
 		Some(DataType::List)
-	}
-
-	fn encode(&self) -> Bytes {
-		self.encode()
 	}
 }
 
@@ -292,16 +292,16 @@ impl MetaValue for SetMetaValue {
 		Self::decode(bytes)
 	}
 
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::Set as u8
 	}
 
 	fn data_type() -> Option<DataType> {
 		Some(DataType::Set)
-	}
-
-	fn encode(&self) -> Bytes {
-		self.encode()
 	}
 }
 
@@ -370,16 +370,16 @@ impl MetaValue for ZSetMetaValue {
 		Self::decode(bytes)
 	}
 
+	fn encode(&self) -> Bytes {
+		self.encode()
+	}
+
 	fn is_type_match(type_code: u8) -> bool {
 		type_code == DataType::ZSet as u8
 	}
 
 	fn data_type() -> Option<DataType> {
 		Some(DataType::ZSet)
-	}
-
-	fn encode(&self) -> Bytes {
-		self.encode()
 	}
 }
 
@@ -495,12 +495,12 @@ impl MetaValue for AnyValue {
 		Self::decode(bytes)
 	}
 
-	fn is_type_match(_type_code: u8) -> bool {
-		true
-	}
-
 	fn encode(&self) -> Bytes {
 		self.encode()
+	}
+
+	fn is_type_match(_type_code: u8) -> bool {
+		true
 	}
 }
 
