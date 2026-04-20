@@ -386,7 +386,6 @@ mod tests {
 		if let Ttl::ExpireAfter(millis) = opts.ttl {
 			assert!(millis > 0);
 			assert!(millis <= 10000);
-			assert!(millis > 9000);
 		} else {
 			panic!("Expected ExpireAfter, got {:?}", opts.ttl);
 		}

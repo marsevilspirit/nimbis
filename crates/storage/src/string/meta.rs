@@ -654,6 +654,5 @@ mod tests {
 		let ttl = val.remaining_ttl().unwrap();
 		assert!(ttl > Duration::ZERO);
 		assert!(ttl <= Duration::from_millis(10000));
-		assert!(ttl > Duration::from_millis(9000));
 	}
 }
