@@ -375,12 +375,12 @@ mod tests {
 		assert_eq!(opts.ttl, Ttl::NoExpiry);
 
 		// Case 2: Expired
-		val.expire_time = (chrono::Utc::now().timestamp_millis() as u64).saturating_sub(1000);
+		val.expire_time = (chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
 		let opts = Storage::meta_put_opts(&val);
 		assert_eq!(opts.ttl, Ttl::ExpireAfter(0));
 
 		// Case 3: Future expiration
-		let future = chrono::Utc::now().timestamp_millis() as u64 + 10000;
+		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
 		val.expire_time = future;
 		let opts = Storage::meta_put_opts(&val);
 		if let Ttl::ExpireAfter(millis) = opts.ttl {

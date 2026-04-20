@@ -25,14 +25,18 @@ pub trait MetaValue: Sized {
 	fn set_expire_time(&mut self, timestamp: u64);
 	/// Get the remaining time until expiration.
 	fn remaining_ttl(&self) -> Option<Duration> {
-		if self.expire_time() == 0 {
+		let expire_time = self.expire_time();
+		if expire_time == 0 {
 			return None;
 		}
-		let now = chrono::Utc::now().timestamp_millis() as u64;
-		if now >= self.expire_time() {
+		let now = match u64::try_from(chrono::Utc::now().timestamp_millis()) {
+			Ok(now) => now,
+			Err(_) => return Some(Duration::from_millis(expire_time)),
+		};
+		if now >= expire_time {
 			return Some(Duration::ZERO);
 		}
-		Some(Duration::from_millis(self.expire_time() - now))
+		Some(Duration::from_millis(expire_time - now))
 	}
 	/// Return the expected data type for this meta value, if specific.
 	/// Used for better error messages on type mismatch.
@@ -645,11 +649,11 @@ mod tests {
 		assert_eq!(val.remaining_ttl(), None);
 
 		// Case 2: Expired
-		val.expire_time = (chrono::Utc::now().timestamp_millis() as u64).saturating_sub(1000);
+		val.expire_time = (chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
 		assert_eq!(val.remaining_ttl(), Some(Duration::ZERO));
 
 		// Case 3: Future expiration
-		let future = chrono::Utc::now().timestamp_millis() as u64 + 10000;
+		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
 		val.expire_time = future;
 		let ttl = val.remaining_ttl().unwrap();
 		assert!(ttl > Duration::ZERO);

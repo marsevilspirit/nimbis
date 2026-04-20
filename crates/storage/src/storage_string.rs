@@ -72,7 +72,7 @@ impl Storage {
 			None => return Ok(false),
 		};
 
-		let now = Utc::now().timestamp_millis() as u64;
+		let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
 		if expire_time > 0 && expire_time <= now {
 			let write_opts = WriteOptions {
 				await_durable: false,
