@@ -2,21 +2,37 @@ use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use std::time::Duration;
 
 use crate::data_type::DataType;
 use crate::error::DecoderError;
-use crate::expirable::Expirable;
 use crate::string::value::StringValue;
 
 /// Trait for values stored in the string database that carry TTL and type
 /// information.
-pub trait MetaValue: Expirable + Sized {
+pub trait MetaValue: Sized {
 	/// Decode the value from bytes.
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError>;
 	/// Check if the given type code matches this meta value type.
 	fn is_type_match(type_code: u8) -> bool;
 	/// Encode the value to bytes.
 	fn encode(&self) -> Bytes;
+	/// Get the expiration timestamp in milliseconds since Unix epoch.
+	/// Returns 0 if no expiration is set.
+	fn expire_time(&self) -> u64;
+	/// Set the expiration timestamp in milliseconds since Unix epoch.
+	fn set_expire_time(&mut self, timestamp: u64);
+	/// Get the remaining time until expiration.
+	fn remaining_ttl(&self) -> Option<Duration> {
+		if self.expire_time() == 0 {
+			return None;
+		}
+		let now = chrono::Utc::now().timestamp_millis() as u64;
+		if now >= self.expire_time() {
+			return Some(Duration::ZERO);
+		}
+		Some(Duration::from_millis(self.expire_time() - now))
+	}
 	/// Return the expected data type for this meta value, if specific.
 	/// Used for better error messages on type mismatch.
 	fn data_type() -> Option<DataType> {
@@ -40,6 +56,12 @@ impl MetaValue for StringValue {
 	fn encode(&self) -> Bytes {
 		self.encode()
 	}
+
+	fn expire_time(&self) -> u64 {
+		0
+	}
+
+	fn set_expire_time(&mut self, _timestamp: u64) {}
 }
 
 #[derive(Debug, PartialEq)]
@@ -112,16 +134,6 @@ impl HashMetaValue {
 	}
 }
 
-impl Expirable for HashMetaValue {
-	fn expire_time(&self) -> u64 {
-		self.expire_time
-	}
-
-	fn set_expire_time(&mut self, timestamp: u64) {
-		self.expire_time = timestamp;
-	}
-}
-
 impl MetaValue for HashMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -137,6 +149,14 @@ impl MetaValue for HashMetaValue {
 
 	fn encode(&self) -> Bytes {
 		self.encode()
+	}
+
+	fn expire_time(&self) -> u64 {
+		self.expire_time
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		self.expire_time = timestamp;
 	}
 }
 
@@ -199,16 +219,6 @@ impl ListMetaValue {
 	}
 }
 
-impl Expirable for ListMetaValue {
-	fn expire_time(&self) -> u64 {
-		self.expire_time
-	}
-
-	fn set_expire_time(&mut self, timestamp: u64) {
-		self.expire_time = timestamp;
-	}
-}
-
 impl MetaValue for ListMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -224,6 +234,14 @@ impl MetaValue for ListMetaValue {
 
 	fn encode(&self) -> Bytes {
 		self.encode()
+	}
+
+	fn expire_time(&self) -> u64 {
+		self.expire_time
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		self.expire_time = timestamp;
 	}
 }
 
@@ -277,16 +295,6 @@ impl SetMetaValue {
 	}
 }
 
-impl Expirable for SetMetaValue {
-	fn expire_time(&self) -> u64 {
-		self.expire_time
-	}
-
-	fn set_expire_time(&mut self, timestamp: u64) {
-		self.expire_time = timestamp;
-	}
-}
-
 impl MetaValue for SetMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -302,6 +310,14 @@ impl MetaValue for SetMetaValue {
 
 	fn encode(&self) -> Bytes {
 		self.encode()
+	}
+
+	fn expire_time(&self) -> u64 {
+		self.expire_time
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		self.expire_time = timestamp;
 	}
 }
 
@@ -355,16 +371,6 @@ impl ZSetMetaValue {
 	}
 }
 
-impl Expirable for ZSetMetaValue {
-	fn expire_time(&self) -> u64 {
-		self.expire_time
-	}
-
-	fn set_expire_time(&mut self, timestamp: u64) {
-		self.expire_time = timestamp;
-	}
-}
-
 impl MetaValue for ZSetMetaValue {
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
@@ -380,6 +386,14 @@ impl MetaValue for ZSetMetaValue {
 
 	fn encode(&self) -> Bytes {
 		self.encode()
+	}
+
+	fn expire_time(&self) -> u64 {
+		self.expire_time
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		self.expire_time = timestamp;
 	}
 }
 
@@ -438,28 +452,6 @@ impl AnyValue {
 	}
 }
 
-impl Expirable for AnyValue {
-	fn expire_time(&self) -> u64 {
-		match self {
-			Self::String(v) => v.expire_time(),
-			Self::Hash(v) => v.expire_time(),
-			Self::List(v) => v.expire_time(),
-			Self::Set(v) => v.expire_time(),
-			Self::ZSet(v) => v.expire_time(),
-		}
-	}
-
-	fn set_expire_time(&mut self, timestamp: u64) {
-		match self {
-			Self::String(v) => v.set_expire_time(timestamp),
-			Self::Hash(v) => v.set_expire_time(timestamp),
-			Self::List(v) => v.set_expire_time(timestamp),
-			Self::Set(v) => v.set_expire_time(timestamp),
-			Self::ZSet(v) => v.set_expire_time(timestamp),
-		}
-	}
-}
-
 impl From<StringValue> for AnyValue {
 	fn from(v: StringValue) -> Self {
 		Self::String(v)
@@ -501,6 +493,26 @@ impl MetaValue for AnyValue {
 
 	fn encode(&self) -> Bytes {
 		self.encode()
+	}
+
+	fn expire_time(&self) -> u64 {
+		match self {
+			Self::String(v) => v.expire_time(),
+			Self::Hash(v) => v.expire_time(),
+			Self::List(v) => v.expire_time(),
+			Self::Set(v) => v.expire_time(),
+			Self::ZSet(v) => v.expire_time(),
+		}
+	}
+
+	fn set_expire_time(&mut self, timestamp: u64) {
+		match self {
+			Self::String(v) => v.set_expire_time(timestamp),
+			Self::Hash(v) => v.set_expire_time(timestamp),
+			Self::List(v) => v.set_expire_time(timestamp),
+			Self::Set(v) => v.set_expire_time(timestamp),
+			Self::ZSet(v) => v.set_expire_time(timestamp),
+		}
 	}
 }
 

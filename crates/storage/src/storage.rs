@@ -196,7 +196,7 @@ impl Storage {
 		Ok(Some(meta_val))
 	}
 
-	pub(crate) fn meta_put_opts(meta: &impl crate::expirable::Expirable) -> PutOptions {
+	pub(crate) fn meta_put_opts(meta: &impl MetaValue) -> PutOptions {
 		let ttl = meta
 			.remaining_ttl()
 			.map(|d| d.as_millis() as u64)
