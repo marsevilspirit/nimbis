@@ -363,8 +363,9 @@ mod tests {
 
 	#[test]
 	fn test_meta_put_opts() {
-		use crate::string::meta::HashMetaValue;
 		use slatedb::config::Ttl;
+
+		use crate::string::meta::HashMetaValue;
 
 		let mut val = HashMetaValue::new(1, 10);
 
