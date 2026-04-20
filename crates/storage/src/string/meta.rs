@@ -1,8 +1,9 @@
+use std::time::Duration;
+
 use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
-use std::time::Duration;
 
 use crate::data_type::DataType;
 use crate::error::DecoderError;
