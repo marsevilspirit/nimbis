@@ -196,7 +196,7 @@ impl Storage {
 		Ok(Some(meta_val))
 	}
 
-	pub(crate) fn meta_put_opts(meta: &impl crate::expirable::Expirable) -> PutOptions {
+	pub(crate) fn meta_put_opts(meta: &impl MetaValue) -> PutOptions {
 		let ttl = meta
 			.remaining_ttl()
 			.map(|d| d.as_millis() as u64)
@@ -359,5 +359,35 @@ mod tests {
 			raw_count - reclaimed_count,
 			raw_count
 		);
+	}
+
+	#[test]
+	fn test_meta_put_opts() {
+		use slatedb::config::Ttl;
+
+		use crate::string::meta::HashMetaValue;
+
+		let mut val = HashMetaValue::new(1, 10);
+
+		// Case 1: No expiration
+		val.expire_time = 0;
+		let opts = Storage::meta_put_opts(&val);
+		assert_eq!(opts.ttl, Ttl::NoExpiry);
+
+		// Case 2: Expired
+		val.expire_time = (chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
+		let opts = Storage::meta_put_opts(&val);
+		assert_eq!(opts.ttl, Ttl::ExpireAfter(0));
+
+		// Case 3: Future expiration
+		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
+		val.expire_time = future;
+		let opts = Storage::meta_put_opts(&val);
+		if let Ttl::ExpireAfter(millis) = opts.ttl {
+			assert!(millis > 0);
+			assert!(millis <= 10000);
+		} else {
+			panic!("Expected ExpireAfter, got {:?}", opts.ttl);
+		}
 	}
 }

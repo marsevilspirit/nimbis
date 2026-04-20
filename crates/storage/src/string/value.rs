@@ -5,7 +5,6 @@ use bytes::BytesMut;
 
 use crate::data_type::DataType;
 use crate::error::DecoderError;
-use crate::expirable::Expirable;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct StringValue {
@@ -37,14 +36,6 @@ impl StringValue {
 		}
 		Ok(Self::new(Bytes::copy_from_slice(buf)))
 	}
-}
-
-impl Expirable for StringValue {
-	fn expire_time(&self) -> u64 {
-		0
-	}
-
-	fn set_expire_time(&mut self, _timestamp: u64) {}
 }
 
 impl From<Bytes> for StringValue {
