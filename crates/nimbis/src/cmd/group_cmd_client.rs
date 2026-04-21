@@ -20,16 +20,10 @@ impl Default for ClientGroupCmd {
 	fn default() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
-		sub_cmds.insert("ID".to_string(), Box::new(ClientIdCommand::default()));
-		sub_cmds.insert(
-			"SETNAME".to_string(),
-			Box::new(ClientSetNameCommand::default()),
-		);
-		sub_cmds.insert(
-			"GETNAME".to_string(),
-			Box::new(ClientGetNameCommand::default()),
-		);
-		sub_cmds.insert("LIST".to_string(), Box::new(ClientListCommand::default()));
+		sub_cmds.insert("ID".to_string(), Box::new(ClientIdCmd::default()));
+		sub_cmds.insert("SETNAME".to_string(), Box::new(ClientSetNameCmd::default()));
+		sub_cmds.insert("GETNAME".to_string(), Box::new(ClientGetNameCmd::default()));
+		sub_cmds.insert("LIST".to_string(), Box::new(ClientListCmd::default()));
 
 		Self {
 			meta: CmdMeta {
@@ -56,11 +50,11 @@ impl Cmd for ClientGroupCmd {
 	}
 }
 
-pub struct ClientIdCommand {
+pub struct ClientIdCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ClientIdCommand {
+impl Default for ClientIdCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -72,7 +66,7 @@ impl Default for ClientIdCommand {
 }
 
 #[async_trait]
-impl Cmd for ClientIdCommand {
+impl Cmd for ClientIdCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
@@ -82,11 +76,11 @@ impl Cmd for ClientIdCommand {
 	}
 }
 
-pub struct ClientSetNameCommand {
+pub struct ClientSetNameCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ClientSetNameCommand {
+impl Default for ClientSetNameCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -98,7 +92,7 @@ impl Default for ClientSetNameCommand {
 }
 
 #[async_trait]
-impl Cmd for ClientSetNameCommand {
+impl Cmd for ClientSetNameCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
@@ -112,11 +106,11 @@ impl Cmd for ClientSetNameCommand {
 	}
 }
 
-pub struct ClientGetNameCommand {
+pub struct ClientGetNameCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ClientGetNameCommand {
+impl Default for ClientGetNameCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -128,7 +122,7 @@ impl Default for ClientGetNameCommand {
 }
 
 #[async_trait]
-impl Cmd for ClientGetNameCommand {
+impl Cmd for ClientGetNameCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
@@ -141,11 +135,11 @@ impl Cmd for ClientGetNameCommand {
 	}
 }
 
-pub struct ClientListCommand {
+pub struct ClientListCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ClientListCommand {
+impl Default for ClientListCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -157,7 +151,7 @@ impl Default for ClientListCommand {
 }
 
 #[async_trait]
-impl Cmd for ClientListCommand {
+impl Cmd for ClientListCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
