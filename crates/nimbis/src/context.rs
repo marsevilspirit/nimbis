@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use crate::client::ClientSessions;
 
+#[derive(Debug)]
 pub struct GlobalContext {
 	pub client_sessions: Arc<ClientSessions>,
 }
@@ -16,7 +17,8 @@ impl GlobalContext {
 pub static GCTX: OnceLock<GlobalContext> = OnceLock::new();
 
 pub fn init_global_context(client_sessions: Arc<ClientSessions>) {
-	let _ = GCTX.set(GlobalContext::new(client_sessions));
+	GCTX.set(GlobalContext::new(client_sessions))
+		.expect("GlobalContext already initialized");
 }
 
 #[macro_export]
