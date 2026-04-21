@@ -10,12 +10,14 @@ use tokio::sync::mpsc;
 
 use crate::client::ClientSessions;
 use crate::cmd::CmdTable;
+use crate::context::init_global_context;
 use crate::server_config;
 use crate::worker::Worker;
 use crate::worker::WorkerMessage;
 
 pub struct Server {
 	workers: Vec<Worker>,
+	_client_sessions: Arc<ClientSessions>,
 }
 
 impl Server {
@@ -25,8 +27,9 @@ impl Server {
 		let data_path = &server_config!(data_path);
 		std::fs::create_dir_all(data_path)?;
 
-		let client_sessions = ClientSessions::new();
-		let cmd_table = Arc::new(CmdTable::new(client_sessions.clone()));
+		let client_sessions = Arc::new(ClientSessions::new());
+		init_global_context(client_sessions.clone());
+		let cmd_table = Arc::new(CmdTable::new());
 
 		// Determine number of workers from config
 		let workers_num = server_config!(worker_threads);
@@ -60,13 +63,15 @@ impl Server {
 				my_tx,
 				rx,
 				senders.clone(),
-				client_sessions.clone(),
 				storage, // This is now unique per worker
 				cmd_table.clone(),
 			));
 		}
 
-		Ok(Self { workers })
+		Ok(Self {
+			workers,
+			_client_sessions: client_sessions,
+		})
 	}
 
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

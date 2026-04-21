@@ -8,7 +8,7 @@ use storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use crate::client::ClientSessions;
+use crate::GCTX;
 
 /// Client group command implementation.
 pub struct ClientGroupCmd {
@@ -16,23 +16,14 @@ pub struct ClientGroupCmd {
 	sub_cmds: HashMap<String, Box<dyn Cmd>>,
 }
 
-impl ClientGroupCmd {
-	pub fn new(client_sessions: ClientSessions) -> Self {
+impl Default for ClientGroupCmd {
+	fn default() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
 		sub_cmds.insert("ID".to_string(), Box::new(ClientIdCommand::default()));
-		sub_cmds.insert(
-			"SETNAME".to_string(),
-			Box::new(ClientSetNameCommand::new(client_sessions.clone())),
-		);
-		sub_cmds.insert(
-			"GETNAME".to_string(),
-			Box::new(ClientGetNameCommand::new(client_sessions.clone())),
-		);
-		sub_cmds.insert(
-			"LIST".to_string(),
-			Box::new(ClientListCommand::new(client_sessions)),
-		);
+		sub_cmds.insert("SETNAME".to_string(), Box::new(ClientSetNameCommand::default()));
+		sub_cmds.insert("GETNAME".to_string(), Box::new(ClientGetNameCommand::default()));
+		sub_cmds.insert("LIST".to_string(), Box::new(ClientListCommand::default()));
 
 		Self {
 			meta: CmdMeta {
@@ -87,17 +78,15 @@ impl Cmd for ClientIdCommand {
 
 pub struct ClientSetNameCommand {
 	meta: CmdMeta,
-	client_sessions: ClientSessions,
 }
 
-impl ClientSetNameCommand {
-	fn new(client_sessions: ClientSessions) -> Self {
+impl Default for ClientSetNameCommand {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "SETNAME".to_string(),
 				arity: 2,
 			},
-			client_sessions,
 		}
 	}
 }
@@ -109,9 +98,7 @@ impl Cmd for ClientSetNameCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		if self
-			.client_sessions
-			.set_name(ctx.client_id, args[0].clone())
+		if GCTX!(client_sessions).set_name(ctx.client_id, args[0].clone())
 		{
 			RespValue::simple_string("OK")
 		} else {
@@ -122,17 +109,15 @@ impl Cmd for ClientSetNameCommand {
 
 pub struct ClientGetNameCommand {
 	meta: CmdMeta,
-	client_sessions: ClientSessions,
 }
 
-impl ClientGetNameCommand {
-	fn new(client_sessions: ClientSessions) -> Self {
+impl Default for ClientGetNameCommand {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "GETNAME".to_string(),
 				arity: 1,
 			},
-			client_sessions,
 		}
 	}
 }
@@ -144,7 +129,7 @@ impl Cmd for ClientGetNameCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		match self.client_sessions.get_name(ctx.client_id) {
+		match GCTX!(client_sessions).get_name(ctx.client_id) {
 			Some(name) => RespValue::bulk_string(name),
 			None => RespValue::null(),
 		}
@@ -153,17 +138,15 @@ impl Cmd for ClientGetNameCommand {
 
 pub struct ClientListCommand {
 	meta: CmdMeta,
-	client_sessions: ClientSessions,
 }
 
-impl ClientListCommand {
-	fn new(client_sessions: ClientSessions) -> Self {
+impl Default for ClientListCommand {
+	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
 				name: "LIST".to_string(),
 				arity: 1,
 			},
-			client_sessions,
 		}
 	}
 }
@@ -175,8 +158,7 @@ impl Cmd for ClientListCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let lines = self
-			.client_sessions
+		let lines = GCTX!(client_sessions)
 			.list()
 			.into_iter()
 			.map(|(client_id, name)| {
