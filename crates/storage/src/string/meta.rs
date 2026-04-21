@@ -649,7 +649,8 @@ mod tests {
 		assert_eq!(val.remaining_ttl(), None);
 
 		// Case 2: Expired
-		val.expire_time = (chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
+		val.expire_time =
+			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
 		assert_eq!(val.remaining_ttl(), Some(Duration::ZERO));
 
 		// Case 3: Future expiration
