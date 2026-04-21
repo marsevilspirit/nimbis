@@ -21,8 +21,8 @@ impl Default for ConfigGroupCmd {
 	fn default() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
-		sub_cmds.insert("GET".to_string(), Box::new(ConfigGetCommand::default()));
-		sub_cmds.insert("SET".to_string(), Box::new(ConfigSetCommand::default()));
+		sub_cmds.insert("GET".to_string(), Box::new(ConfigGetCmd::default()));
+		sub_cmds.insert("SET".to_string(), Box::new(ConfigSetCmd::default()));
 
 		Self {
 			meta: CmdMeta {
@@ -61,11 +61,11 @@ impl Cmd for ConfigGroupCmd {
 	}
 }
 
-pub struct ConfigGetCommand {
+pub struct ConfigGetCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ConfigGetCommand {
+impl Default for ConfigGetCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -77,7 +77,7 @@ impl Default for ConfigGetCommand {
 }
 
 #[async_trait]
-impl Cmd for ConfigGetCommand {
+impl Cmd for ConfigGetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
@@ -124,11 +124,11 @@ impl Cmd for ConfigGetCommand {
 	}
 }
 
-pub struct ConfigSetCommand {
+pub struct ConfigSetCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ConfigSetCommand {
+impl Default for ConfigSetCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
@@ -140,7 +140,7 @@ impl Default for ConfigSetCommand {
 }
 
 #[async_trait]
-impl Cmd for ConfigSetCommand {
+impl Cmd for ConfigSetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
