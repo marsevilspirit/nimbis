@@ -38,7 +38,6 @@ use super::ZCardCmd;
 use super::ZRangeCmd;
 use super::ZRemCmd;
 use super::ZScoreCmd;
-use crate::client::ClientSessions;
 
 pub struct CmdTable {
 	inner: HashMap<&'static str, Arc<dyn Cmd>>,
@@ -46,12 +45,12 @@ pub struct CmdTable {
 
 impl Default for CmdTable {
 	fn default() -> Self {
-		Self::new(Default::default())
+		Self::new()
 	}
 }
 
 impl CmdTable {
-	pub fn new(client_sessions: ClientSessions) -> Self {
+	pub fn new() -> Self {
 		let mut inner: HashMap<&'static str, Arc<dyn Cmd>> = HashMap::new();
 		// ping cmd
 		inner.insert("PING", Arc::new(PingCmd::default()));
@@ -94,7 +93,7 @@ impl CmdTable {
 		inner.insert("TTL", Arc::new(TtlCmd::default()));
 		// config type cmd
 		inner.insert("CONFIG", Arc::new(ConfigGroupCmd::default()));
-		inner.insert("CLIENT", Arc::new(ClientGroupCmd::new(client_sessions)));
+		inner.insert("CLIENT", Arc::new(ClientGroupCmd::default()));
 		// other type cmd
 		inner.insert("FLUSHDB", Arc::new(FlushDbCmd::default()));
 		Self { inner }

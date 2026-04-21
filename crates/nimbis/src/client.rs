@@ -33,7 +33,7 @@ pub struct ClientSession {
 	pub name: Option<Bytes>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ClientSessions {
 	sessions: Arc<DashMap<i64, ClientSession>>,
 }
