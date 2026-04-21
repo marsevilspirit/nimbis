@@ -21,8 +21,14 @@ impl Default for ClientGroupCmd {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
 		sub_cmds.insert("ID".to_string(), Box::new(ClientIdCommand::default()));
-		sub_cmds.insert("SETNAME".to_string(), Box::new(ClientSetNameCommand::default()));
-		sub_cmds.insert("GETNAME".to_string(), Box::new(ClientGetNameCommand::default()));
+		sub_cmds.insert(
+			"SETNAME".to_string(),
+			Box::new(ClientSetNameCommand::default()),
+		);
+		sub_cmds.insert(
+			"GETNAME".to_string(),
+			Box::new(ClientGetNameCommand::default()),
+		);
 		sub_cmds.insert("LIST".to_string(), Box::new(ClientListCommand::default()));
 
 		Self {
@@ -98,8 +104,7 @@ impl Cmd for ClientSetNameCommand {
 	}
 
 	async fn do_cmd(&self, _storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		if GCTX!(client_sessions).set_name(ctx.client_id, args[0].clone())
-		{
+		if GCTX!(client_sessions).set_name(ctx.client_id, args[0].clone()) {
 			RespValue::simple_string("OK")
 		} else {
 			RespValue::error("ERR client not found")
