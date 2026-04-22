@@ -17,7 +17,7 @@ test:
 [group: 'test']
 e2e-test: (build "--release")
     rm -rf nimbis_store
-    cd e2e-tests && go test -timeout 15m --ginkgo.v
+    cd tests && go test -timeout 15m --ginkgo.v
 
 # Check all crates
 [group: 'check']
