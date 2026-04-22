@@ -17,8 +17,7 @@ impl GlobalContext {
 pub static GCTX: OnceLock<GlobalContext> = OnceLock::new();
 
 pub fn init_global_context(client_sessions: Arc<ClientSessions>) {
-	GCTX.set(GlobalContext::new(client_sessions))
-		.expect("GlobalContext already initialized");
+	let _ = GCTX.set(GlobalContext::new(client_sessions));
 }
 
 #[macro_export]
