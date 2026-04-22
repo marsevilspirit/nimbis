@@ -115,13 +115,11 @@ async fn wait_until_ready(port: u16) -> TestResult<()> {
 	for _ in 0..30 {
 		if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)).await {
 			let ping = RespValue::array([RespValue::bulk_string("PING")]);
-			if stream.write_all(&ping.encode()?).await.is_ok() {
-				if let Ok(resp) = read_one_resp(&mut stream).await {
-					if matches!(resp, RespValue::SimpleString(ref s) if s == &Bytes::from_static(b"PONG"))
-					{
-						return Ok(());
-					}
-				}
+			if stream.write_all(&ping.encode()?).await.is_ok()
+				&& let Ok(resp) = read_one_resp(&mut stream).await
+				&& matches!(resp, RespValue::SimpleString(ref s) if s == &Bytes::from_static(b"PONG"))
+			{
+				return Ok(());
 			}
 		}
 
