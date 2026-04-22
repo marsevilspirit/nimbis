@@ -11,13 +11,13 @@ use super::CmdMeta;
 use crate::config::SERVER_CONF;
 use crate::config::ServerConfig;
 
-/// Config group command implementation
-pub struct ConfigGroupCmd {
+/// Config command implementation
+pub struct ConfigCmd {
 	meta: CmdMeta,
 	sub_cmds: HashMap<String, Box<dyn Cmd>>,
 }
 
-impl Default for ConfigGroupCmd {
+impl Default for ConfigCmd {
 	fn default() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
@@ -35,7 +35,7 @@ impl Default for ConfigGroupCmd {
 }
 
 #[async_trait]
-impl Cmd for ConfigGroupCmd {
+impl Cmd for ConfigCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
