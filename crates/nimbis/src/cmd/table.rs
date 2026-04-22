@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::AppendCmd;
-use super::ClientGroupCmd;
+use super::ClientCmd;
 use super::Cmd;
-use super::ConfigGroupCmd;
+use super::ConfigCmd;
 use super::DecrCmd;
 use super::DelCmd;
 use super::ExistsCmd;
@@ -92,8 +92,8 @@ impl CmdTable {
 		inner.insert("EXPIRE", Arc::new(ExpireCmd::default()));
 		inner.insert("TTL", Arc::new(TtlCmd::default()));
 		// config type cmd
-		inner.insert("CONFIG", Arc::new(ConfigGroupCmd::default()));
-		inner.insert("CLIENT", Arc::new(ClientGroupCmd::default()));
+		inner.insert("CONFIG", Arc::new(ConfigCmd::default()));
+		inner.insert("CLIENT", Arc::new(ClientCmd::default()));
 		// other type cmd
 		inner.insert("FLUSHDB", Arc::new(FlushDbCmd::default()));
 		Self { inner }

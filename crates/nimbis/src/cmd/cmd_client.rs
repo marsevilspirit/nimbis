@@ -10,13 +10,13 @@ use super::CmdContext;
 use super::CmdMeta;
 use crate::GCTX;
 
-/// Client group command implementation.
-pub struct ClientGroupCmd {
+/// Client command implementation.
+pub struct ClientCmd {
 	meta: CmdMeta,
 	sub_cmds: HashMap<String, Box<dyn Cmd>>,
 }
 
-impl Default for ClientGroupCmd {
+impl Default for ClientCmd {
 	fn default() -> Self {
 		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
 
@@ -36,7 +36,7 @@ impl Default for ClientGroupCmd {
 }
 
 #[async_trait]
-impl Cmd for ClientGroupCmd {
+impl Cmd for ClientCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}

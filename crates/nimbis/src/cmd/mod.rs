@@ -100,6 +100,8 @@ impl TryFrom<RespValue> for ParsedCmd {
 pub mod utils;
 
 mod cmd_append;
+mod cmd_client;
+mod cmd_config;
 mod cmd_decr;
 mod cmd_del;
 mod cmd_exists;
@@ -133,11 +135,11 @@ mod cmd_zcard;
 mod cmd_zrange;
 mod cmd_zrem;
 mod cmd_zscore;
-mod group_cmd_client;
-mod group_cmd_config;
 mod table;
 
 pub use cmd_append::AppendCmd;
+pub use cmd_client::ClientCmd;
+pub use cmd_config::ConfigCmd;
 pub use cmd_decr::DecrCmd;
 pub use cmd_del::DelCmd;
 pub use cmd_exists::ExistsCmd;
@@ -171,6 +173,4 @@ pub use cmd_zcard::ZCardCmd;
 pub use cmd_zrange::ZRangeCmd;
 pub use cmd_zrem::ZRemCmd;
 pub use cmd_zscore::ZScoreCmd;
-pub use group_cmd_client::ClientGroupCmd;
-pub use group_cmd_config::ConfigGroupCmd;
 pub use table::CmdTable;
