@@ -1,6 +1,6 @@
 # Go Integration Tests Documentation
 
-This document details the implementation approach, operating principles, and how to add new test cases for the Go integration tests located in the `e2e-tests` directory.
+This document details the implementation approach, operating principles, and how to add new test cases for the Go integration tests located in the `tests` directory.
 
 ## 1. Implementation Approach
 
@@ -19,7 +19,7 @@ The Test Suite is responsible for managing the lifecycle of the `nimbis` server 
 
 ## 2. Operating Principle
 
-`e2e-tests/util/server.go` encapsulates the core logic of service management.
+`tests/util/server.go` encapsulates the core logic of service management.
 
 ### Binary Discovery
 The test program attempts to find the `nimbis` executable in the following way:
@@ -34,10 +34,10 @@ The test program attempts to find the `nimbis` executable in the following way:
 
 ## 3. How to Add New Tests
 
-To add new tests in the `e2e-tests` directory, please follow these steps:
+To add new tests in the `tests` directory, please follow these steps:
 
 ### 1. Create Test File
-Create a new file ending with `_test.go` in the `e2e-tests` directory, for example `list_test.go`.
+Create a new file ending with `_test.go` in the `tests` directory, for example `list_test.go`.
 
 ### 2. Define Test Structure
 Use Ginkgo's `Describe`, `Context`, and `It` structures to organize your tests.
@@ -99,7 +99,7 @@ just e2e-test
 
 ## 4. Current Test Coverage
 
-The current integration tests cover the following functional areas of the Nimbis server. Each area is tested in a dedicated file within the `e2e-tests/` directory.
+The current integration tests cover the following functional areas of the Nimbis server. Each area is tested in a dedicated file within the `tests/` directory.
 
 ### 4.1 String Commands (`string_test.go`)
 - **GET / SET**: Verification of basic string storage and retrieval.
