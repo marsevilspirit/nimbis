@@ -19,17 +19,17 @@ async fn test_string_command() {
 		.expect("set response");
 	assert_eq!(set, RespValue::SimpleString(Bytes::from_static(b"OK")));
 
-	let get = nimbis
-		.get("it:string:key")
-		.await
-		.expect("get response");
+	let get = nimbis.get("it:string:key").await.expect("get response");
 	assert_eq!(get, RespValue::BulkString(Bytes::from_static(b"value-1")));
 
 	let set_overwrite = nimbis
 		.set("it:string:key", "value-2")
 		.await
 		.expect("overwrite response");
-	assert_eq!(set_overwrite, RespValue::SimpleString(Bytes::from_static(b"OK")));
+	assert_eq!(
+		set_overwrite,
+		RespValue::SimpleString(Bytes::from_static(b"OK"))
+	);
 
 	let get_overwrite = nimbis
 		.get("it:string:key")
