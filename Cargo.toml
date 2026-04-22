@@ -56,4 +56,5 @@ tracing-subscriber = { version = "0.3.23", features = [
 # Dev Dependencies
 criterion = { version = "0.8.1", features = ["html_reports"] }
 rstest = "0.26.1"
+serial_test = { version = "3.2.0", features = ["file_locks"] }
 ulid = "1.2.1"
