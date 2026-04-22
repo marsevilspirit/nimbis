@@ -11,13 +11,13 @@ build *args:
 # Run unit tests with coverage generation
 [group: 'test']
 test:
-    cargo llvm-cov nextest --workspace --codecov --output-path codecov.json
+    cargo llvm-cov nextest --all --codecov --output-path codecov.json
 
 # Run e2e tests
 [group: 'test']
 e2e-test: (build "--release")
     rm -rf nimbis_store
-    cd tests && go test -timeout 15m --ginkgo.v
+    cd e2e-tests && go test -timeout 15m --ginkgo.v
 
 # Check all crates
 [group: 'check']
