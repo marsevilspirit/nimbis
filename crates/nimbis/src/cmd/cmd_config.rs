@@ -14,15 +14,15 @@ use crate::config::ServerConfig;
 /// Config command implementation
 pub struct ConfigCmd {
 	meta: CmdMeta,
-	sub_cmds: HashMap<String, Box<dyn Cmd>>,
+	sub_cmds: HashMap<&'static str, Box<dyn Cmd>>,
 }
 
 impl Default for ConfigCmd {
 	fn default() -> Self {
-		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
+		let mut sub_cmds: HashMap<&'static str, Box<dyn Cmd>> = HashMap::new();
 
-		sub_cmds.insert("GET".to_string(), Box::new(ConfigGetCmd::default()));
-		sub_cmds.insert("SET".to_string(), Box::new(ConfigSetCmd::default()));
+		sub_cmds.insert("GET", Box::new(ConfigGetCmd::default()));
+		sub_cmds.insert("SET", Box::new(ConfigSetCmd::default()));
 
 		Self {
 			meta: CmdMeta {
@@ -51,7 +51,7 @@ impl Cmd for ConfigCmd {
 		let sub_cmd_name = String::from_utf8_lossy(&args[0]).to_uppercase();
 
 		// Find and execute the subcommand
-		match self.sub_cmds.get(&sub_cmd_name) {
+		match self.sub_cmds.get(sub_cmd_name.as_str()) {
 			Some(sub_cmd) => {
 				// Pass remaining arguments to the subcommand
 				sub_cmd.execute(storage, &args[1..], ctx).await
