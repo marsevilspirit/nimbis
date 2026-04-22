@@ -13,17 +13,17 @@ use crate::GCTX;
 /// Client command implementation.
 pub struct ClientCmd {
 	meta: CmdMeta,
-	sub_cmds: HashMap<String, Box<dyn Cmd>>,
+	sub_cmds: HashMap<&'static str, Box<dyn Cmd>>,
 }
 
 impl Default for ClientCmd {
 	fn default() -> Self {
-		let mut sub_cmds: HashMap<String, Box<dyn Cmd>> = HashMap::new();
+		let mut sub_cmds: HashMap<&'static str, Box<dyn Cmd>> = HashMap::new();
 
-		sub_cmds.insert("ID".to_string(), Box::new(ClientIdCmd::default()));
-		sub_cmds.insert("SETNAME".to_string(), Box::new(ClientSetNameCmd::default()));
-		sub_cmds.insert("GETNAME".to_string(), Box::new(ClientGetNameCmd::default()));
-		sub_cmds.insert("LIST".to_string(), Box::new(ClientListCmd::default()));
+		sub_cmds.insert("ID", Box::new(ClientIdCmd::default()));
+		sub_cmds.insert("SETNAME", Box::new(ClientSetNameCmd::default()));
+		sub_cmds.insert("GETNAME", Box::new(ClientGetNameCmd::default()));
+		sub_cmds.insert("LIST", Box::new(ClientListCmd::default()));
 
 		Self {
 			meta: CmdMeta {
@@ -43,7 +43,7 @@ impl Cmd for ClientCmd {
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
 		let sub_cmd_name = String::from_utf8_lossy(&args[0]).to_uppercase();
-		match self.sub_cmds.get(&sub_cmd_name) {
+		match self.sub_cmds.get(sub_cmd_name.as_str()) {
 			Some(sub_cmd) => sub_cmd.execute(storage, &args[1..], ctx).await,
 			None => RespValue::error(format!("ERR unknown CLIENT subcommand '{}'", sub_cmd_name)),
 		}
