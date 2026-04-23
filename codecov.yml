@@ -4,7 +4,7 @@ codecov:
   require_ci_to_pass: true
 comment:
   behavior: default
-  layout: reach,diff,flags,tree
+  layout: reach,diff,components,tree
   show_carryforward_flags: false
 coverage:
   precision: 2
@@ -22,4 +22,24 @@ coverage:
     project:
       default:
         informational: true
+component_management:
+  individual_components:
+  - component_id: unit
+    name: unit
+    paths:
+    - crates/*/src/**
+    statuses:
+    - type: project
+      informational: true
+    - type: patch
+      informational: true
+  - component_id: integration
+    name: integration
+    paths:
+    - crates/*/tests/**
+    statuses:
+    - type: project
+      informational: true
+    - type: patch
+      informational: true
 slack_app: true
