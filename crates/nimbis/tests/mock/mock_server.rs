@@ -1,0 +1,107 @@
+use std::time::Duration;
+
+use nimbis::config::SERVER_CONF;
+use nimbis::config::ServerConfig;
+use nimbis::server::Server;
+use tempfile::TempDir;
+use tempfile::tempdir;
+use tokio::runtime::Builder;
+use tokio::runtime::Runtime;
+
+use crate::mock::mock_client::MockNimbisClient;
+use crate::mock::utils::pick_free_port;
+
+pub struct MockNimbisServer {
+	host: String,
+	port: u16,
+	_data_dir: TempDir,
+	runtime: Option<Runtime>,
+}
+
+impl MockNimbisServer {
+	pub fn new() -> Self {
+		let port = pick_free_port().expect("pick free port");
+		let data_dir = tempdir().expect("create temp dir");
+		let data_path = data_dir.path().display().to_string();
+
+		let config = ServerConfig {
+			host: "127.0.0.1".to_string(),
+			port,
+			data_path: data_path.clone(),
+			save: "".to_string(),
+			appendonly: "no".to_string(),
+			log_level: "error".to_string(),
+			log_output: "terminal".to_string(),
+			log_rotation: "daily".to_string(),
+			worker_threads: 2,
+		};
+
+		SERVER_CONF.init(config.clone());
+		SERVER_CONF.update(config);
+
+		let runtime = Builder::new_multi_thread()
+			.enable_all()
+			.build()
+			.expect("build tokio runtime");
+		runtime.spawn(async move {
+			match Server::new().await {
+				Ok(server) => {
+					if let Err(e) = server.run().await {
+						log::error!("mock nimbis server exited: {}", e);
+					}
+				}
+				Err(e) => {
+					log::error!("mock nimbis server failed to start: {}", e);
+				}
+			}
+		});
+
+		wait_until_ready("127.0.0.1", port, &data_path);
+
+		Self {
+			host: "127.0.0.1".to_string(),
+			port,
+			_data_dir: data_dir,
+			runtime: Some(runtime),
+		}
+	}
+
+	pub fn get_client(&self) -> MockNimbisClient {
+		MockNimbisClient::connect(&self.host, self.port).expect("connect to nimbis")
+	}
+}
+
+impl Drop for MockNimbisServer {
+	fn drop(&mut self) {
+		if let Some(runtime) = self.runtime.take() {
+			runtime.shutdown_timeout(Duration::from_secs(1));
+		}
+	}
+}
+
+fn wait_until_ready(host: &str, port: u16, data_path: &str) {
+	// Keep startup failures quick while still allowing SlateDB to initialize.
+	let ready_timeout = Duration::from_secs(5);
+	let deadline = std::time::Instant::now() + ready_timeout;
+	let mut last_error = String::from("server was not probed");
+
+	while std::time::Instant::now() < deadline {
+		match MockNimbisClient::connect(host, port).map(|mut client| client.ping()) {
+			Ok(resp) if resp == "PONG" => return,
+			Ok(resp) => {
+				last_error = format!("unexpected ready response: {}", resp);
+			}
+			Err(e) => {
+				last_error = e.to_string();
+			}
+		}
+
+		// Poll often enough to keep the test suite snappy.
+		std::thread::sleep(Duration::from_millis(100));
+	}
+
+	panic!(
+		"nimbis did not become ready at {}:{} within {:?}; data_path={}; last_error={}",
+		host, port, ready_timeout, data_path, last_error
+	);
+}
