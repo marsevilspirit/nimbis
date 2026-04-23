@@ -12,9 +12,9 @@ use resp::RespEncoder;
 use resp::RespParseResult;
 use resp::RespParser;
 use resp::RespValue;
-use tokio::runtime::Runtime;
-use tokio::runtime::Builder;
 use tempfile::tempdir;
+use tokio::runtime::Builder;
+use tokio::runtime::Runtime;
 
 use super::utils::pick_free_port;
 
