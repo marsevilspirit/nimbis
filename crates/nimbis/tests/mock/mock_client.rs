@@ -1,74 +1,73 @@
 use std::io::Read;
 use std::io::Write;
+use std::net::Shutdown;
 use std::net::TcpStream;
 use std::time::Duration;
 
 use bytes::Bytes;
-use nimbis::config::SERVER_CONF;
-use nimbis::config::ServerConfig;
-use nimbis::server::Server;
 use resp::RespEncoder;
 use resp::RespParseResult;
 use resp::RespParser;
 use resp::RespValue;
 
-use super::utils::pick_free_port;
+use crate::mock::utils::resp_to_strings;
 
-pub struct MockNimbis {
+pub struct MockNimbisClient {
+	id: i64,
 	stream: TcpStream,
-	_runtime: tokio::runtime::Runtime,
+	parser: RespParser,
 }
 
-impl MockNimbis {
-	pub fn new() -> Self {
-		let port = pick_free_port().expect("pick free port");
-		let data_dir = tempfile::tempdir().expect("create temp dir");
-		let data_path = data_dir.path().display().to_string();
-		let _ = data_dir.keep();
-
-		let config = ServerConfig {
-			host: "127.0.0.1".to_string(),
-			port,
-			data_path,
-			save: "".to_string(),
-			appendonly: "no".to_string(),
-			log_level: "error".to_string(),
-			log_output: "terminal".to_string(),
-			log_rotation: "daily".to_string(),
-			worker_threads: 2,
-		};
-
-		SERVER_CONF.init(config.clone());
-		SERVER_CONF.update(config);
-
-		let runtime = tokio::runtime::Builder::new_multi_thread()
-			.enable_all()
-			.build()
-			.expect("build tokio runtime");
-		runtime.spawn(async move {
-			if let Ok(server) = Server::new().await {
-				let _ = server.run().await;
-			}
-		});
-
-		wait_until_ready(port);
-
-		let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to nimbis");
-		Self {
+impl MockNimbisClient {
+	pub fn connect(host: &str, port: u16) -> std::io::Result<Self> {
+		let stream = TcpStream::connect((host, port))?;
+		configure_stream(&stream)?;
+		let mut client = Self {
+			id: 0,
 			stream,
-			_runtime: runtime,
-		}
+			parser: RespParser::new(),
+		};
+		client.id = client.client_id();
+		Ok(client)
 	}
 
-	fn execute(&mut self, args: &[&str]) -> RespValue {
+	pub fn id(&self) -> i64 {
+		self.id
+	}
+
+	pub fn execute(&mut self, args: &[&str]) -> RespValue {
 		let req = RespValue::array(
 			args.iter()
 				.map(|arg| RespValue::bulk_string(Bytes::copy_from_slice(arg.as_bytes()))),
 		);
 		self.stream
 			.write_all(&req.encode().expect("encode request"))
-			.expect("write request");
-		read_one_resp(&mut self.stream)
+			.unwrap_or_else(|e| panic!("write request {:?}: {}", args, e));
+		self.read_response()
+			.unwrap_or_else(|e| panic!("read response for {:?}: {}", args, e))
+	}
+
+	fn read_response(&mut self) -> Result<RespValue, String> {
+		let mut buf = Vec::with_capacity(4096);
+		let mut read_chunk = [0u8; 1024];
+
+		loop {
+			let n = self
+				.stream
+				.read(&mut read_chunk)
+				.map_err(|e| e.to_string())?;
+			if n == 0 {
+				return Err("connection closed before full response".into());
+			}
+
+			buf.extend_from_slice(&read_chunk[..n]);
+			let mut bytes = bytes::BytesMut::from(buf.as_slice());
+			match self.parser.parse(&mut bytes) {
+				RespParseResult::Complete(v) => return Ok(v),
+				RespParseResult::Incomplete => {}
+				RespParseResult::Error(e) => return Err(format!("RESP parse error: {}", e)),
+			}
+		}
 	}
 
 	pub fn ping(&mut self) -> String {
@@ -303,61 +302,47 @@ impl MockNimbis {
 			.as_integer()
 			.expect("TTL should return integer")
 	}
-}
 
-fn resp_to_strings(resp: RespValue) -> Vec<String> {
-	match resp {
-		RespValue::Array(arr) => arr
-			.into_iter()
-			.map(|v| match v {
-				RespValue::Null => String::new(),
-				other => other.to_string_lossy().unwrap_or_default(),
-			})
-			.collect(),
-		RespValue::Null => vec![],
-		_ => panic!("expected array response, got: {:?}", resp),
+	// -- client commands --
+
+	pub fn client_id(&mut self) -> i64 {
+		self.execute(&["CLIENT", "ID"])
+			.as_integer()
+			.expect("CLIENT ID should return integer")
+	}
+
+	pub fn client_setname(&mut self, name: &str) -> String {
+		self.execute(&["CLIENT", "SETNAME", name])
+			.to_string_lossy()
+			.expect("unexpected CLIENT SETNAME response")
+	}
+
+	pub fn client_getname(&mut self) -> String {
+		match self.execute(&["CLIENT", "GETNAME"]) {
+			RespValue::Null => String::new(),
+			resp => resp
+				.to_string_lossy()
+				.expect("unexpected CLIENT GETNAME response"),
+		}
+	}
+
+	pub fn client_list(&mut self) -> String {
+		self.execute(&["CLIENT", "LIST"])
+			.to_string_lossy()
+			.expect("unexpected CLIENT LIST response")
 	}
 }
 
-fn wait_until_ready(port: u16) {
-	for _ in 0..30 {
-		if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
-			let ping = RespValue::array([RespValue::bulk_string("PING")]);
-			if stream.write_all(&ping.encode().unwrap()).is_ok()
-				&& let Ok(resp) = try_read_one_resp(&mut stream)
-				&& matches!(resp, RespValue::SimpleString(ref s) if s == &Bytes::from_static(b"PONG"))
-			{
-				return;
-			}
-		}
-
-		std::thread::sleep(Duration::from_millis(100));
-	}
-
-	panic!("nimbis did not become ready in time");
-}
-
-fn try_read_one_resp(stream: &mut TcpStream) -> Result<RespValue, String> {
-	let mut parser = RespParser::new();
-	let mut buf = Vec::with_capacity(4096);
-	let mut read_chunk = [0u8; 1024];
-
-	loop {
-		let n = stream.read(&mut read_chunk).map_err(|e| e.to_string())?;
-		if n == 0 {
-			return Err("connection closed before full response".into());
-		}
-
-		buf.extend_from_slice(&read_chunk[..n]);
-		let mut bytes = bytes::BytesMut::from(buf.as_slice());
-		match parser.parse(&mut bytes) {
-			RespParseResult::Complete(v) => return Ok(v),
-			RespParseResult::Incomplete => {}
-			RespParseResult::Error(e) => return Err(format!("RESP parse error: {}", e)),
-		}
+impl Drop for MockNimbisClient {
+	fn drop(&mut self) {
+		let _ = self.stream.shutdown(Shutdown::Both);
 	}
 }
 
-fn read_one_resp(stream: &mut TcpStream) -> RespValue {
-	try_read_one_resp(stream).expect("read RESP response")
+fn configure_stream(stream: &TcpStream) -> std::io::Result<()> {
+	// Bound client I/O so a broken server response cannot hang the test run.
+	stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+	stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+	stream.set_nodelay(true)?;
+	Ok(())
 }
