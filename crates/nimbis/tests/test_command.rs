@@ -1,12 +1,19 @@
 mod common;
 
-use common::mock::MockNimbis;
+use common::mock::MockNimbisClient;
+use common::mock::MockNimbisServer;
 use serial_test::serial;
+
+fn connect_client() -> (MockNimbisServer, MockNimbisClient) {
+	let server = MockNimbisServer::new();
+	let client = server.connect_client();
+	(server, client)
+}
 
 #[test]
 #[serial]
 fn test_string_command() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(nimbis.ping(), "PONG");
 	assert_eq!(nimbis.set("it:string:key", "value-1"), "OK");
@@ -18,7 +25,7 @@ fn test_string_command() {
 #[test]
 #[serial]
 fn test_del_and_exists() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.set("it:del:key", "hello");
 	assert!(nimbis.exists("it:del:key"));
@@ -31,7 +38,7 @@ fn test_del_and_exists() {
 #[test]
 #[serial]
 fn test_incr_decr() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(nimbis.incr("it:counter"), 1);
 	assert_eq!(nimbis.incr("it:counter"), 2);
@@ -45,7 +52,7 @@ fn test_incr_decr() {
 #[test]
 #[serial]
 fn test_append() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(nimbis.append("it:append:key", "hello"), 5);
 	assert_eq!(nimbis.append("it:append:key", " world"), 11);
@@ -55,7 +62,7 @@ fn test_append() {
 #[test]
 #[serial]
 fn test_hash_command() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(nimbis.hset("it:hash:user", "name", "alice"), 1);
 	assert_eq!(nimbis.hset("it:hash:user", "age", "30"), 1);
@@ -77,7 +84,7 @@ fn test_hash_command() {
 #[test]
 #[serial]
 fn test_hmget() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.hset("it:hmget:h", "f1", "v1");
 	nimbis.hset("it:hmget:h", "f2", "v2");
@@ -92,7 +99,7 @@ fn test_hmget() {
 #[test]
 #[serial]
 fn test_hgetall() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.hset("it:hgetall:h", "k1", "v1");
 	nimbis.hset("it:hgetall:h", "k2", "v2");
@@ -108,7 +115,7 @@ fn test_hgetall() {
 #[test]
 #[serial]
 fn test_list_lpush_rpush() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(nimbis.rpush("it:list:q", &["a", "b"]), 2);
 	assert_eq!(nimbis.lpush("it:list:q", &["z"]), 3);
@@ -122,7 +129,7 @@ fn test_list_lpush_rpush() {
 #[test]
 #[serial]
 fn test_list_lpop_rpop() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.rpush("it:list:pop", &["1", "2", "3"]);
 
@@ -136,7 +143,7 @@ fn test_list_lpop_rpop() {
 #[test]
 #[serial]
 fn test_lrange() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.rpush("it:list:range", &["a", "b", "c", "d", "e"]);
 
@@ -148,7 +155,7 @@ fn test_lrange() {
 #[test]
 #[serial]
 fn test_set_command() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(nimbis.sadd("it:set:s", &["a", "b", "c"]), 3);
 	assert_eq!(nimbis.sadd("it:set:s", &["a"]), 0); // duplicate
@@ -167,7 +174,7 @@ fn test_set_command() {
 #[test]
 #[serial]
 fn test_srem() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.sadd("it:set:rem", &["x", "y", "z"]);
 
@@ -180,7 +187,7 @@ fn test_srem() {
 #[test]
 #[serial]
 fn test_zset_command() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	assert_eq!(
 		nimbis.zadd(
@@ -202,7 +209,7 @@ fn test_zset_command() {
 #[test]
 #[serial]
 fn test_zrem() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.zadd("it:zset:rem", &[("1", "a"), ("2", "b"), ("3", "c")]);
 
@@ -217,7 +224,7 @@ fn test_zrem() {
 #[test]
 #[serial]
 fn test_expire_and_ttl() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.set("it:ttl:key", "temp");
 
@@ -239,7 +246,7 @@ fn test_expire_and_ttl() {
 #[test]
 #[serial]
 fn test_del_across_types() {
-	let mut nimbis = MockNimbis::new();
+	let (_server, mut nimbis) = connect_client();
 
 	nimbis.set("it:cross:str", "v");
 	nimbis.hset("it:cross:hash", "f", "v");
@@ -258,4 +265,21 @@ fn test_del_across_types() {
 	assert!(!nimbis.exists("it:cross:list"));
 	assert!(!nimbis.exists("it:cross:set"));
 	assert!(!nimbis.exists("it:cross:zset"));
+}
+
+#[test]
+#[serial]
+fn test_client_command() {
+	let (_server, mut nimbis) = connect_client();
+
+	let client_id = nimbis.client_id();
+	assert!(client_id > 0);
+
+	assert_eq!(nimbis.client_getname(), "");
+	assert_eq!(nimbis.client_setname("it-client"), "OK");
+	assert_eq!(nimbis.client_getname(), "it-client");
+
+	let client_list = nimbis.client_list();
+	assert!(client_list.contains(&format!("id={}", client_id)));
+	assert!(client_list.contains("name=it-client"));
 }

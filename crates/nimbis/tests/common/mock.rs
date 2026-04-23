@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::io::Write;
+use std::net::Shutdown;
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -11,18 +12,22 @@ use resp::RespEncoder;
 use resp::RespParseResult;
 use resp::RespParser;
 use resp::RespValue;
+use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
+use tempfile::tempdir;
 
 use super::utils::pick_free_port;
 
-pub struct MockNimbis {
-	stream: TcpStream,
-	_runtime: tokio::runtime::Runtime,
+pub struct MockNimbisServer {
+	host: String,
+	port: u16,
+	runtime: Option<Runtime>,
 }
 
-impl MockNimbis {
+impl MockNimbisServer {
 	pub fn new() -> Self {
 		let port = pick_free_port().expect("pick free port");
-		let data_dir = tempfile::tempdir().expect("create temp dir");
+		let data_dir = tempdir().expect("create temp dir");
 		let data_path = data_dir.path().display().to_string();
 		let _ = data_dir.keep();
 
@@ -41,7 +46,7 @@ impl MockNimbis {
 		SERVER_CONF.init(config.clone());
 		SERVER_CONF.update(config);
 
-		let runtime = tokio::runtime::Builder::new_multi_thread()
+		let runtime = Builder::new_multi_thread()
 			.enable_all()
 			.build()
 			.expect("build tokio runtime");
@@ -53,11 +58,34 @@ impl MockNimbis {
 
 		wait_until_ready(port);
 
-		let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to nimbis");
 		Self {
-			stream,
-			_runtime: runtime,
+			host: "127.0.0.1".to_string(),
+			port,
+			runtime: Some(runtime),
 		}
+	}
+
+	pub fn connect_client(&self) -> MockNimbisClient {
+		MockNimbisClient::connect(&self.host, self.port)
+	}
+}
+
+impl Drop for MockNimbisServer {
+	fn drop(&mut self) {
+		if let Some(runtime) = self.runtime.take() {
+			runtime.shutdown_timeout(Duration::from_secs(1));
+		}
+	}
+}
+
+pub struct MockNimbisClient {
+	stream: TcpStream,
+}
+
+impl MockNimbisClient {
+	pub fn connect(host: &str, port: u16) -> Self {
+		let stream = TcpStream::connect((host, port)).expect("connect to nimbis");
+		Self { stream }
 	}
 
 	fn execute(&mut self, args: &[&str]) -> RespValue {
@@ -302,6 +330,41 @@ impl MockNimbis {
 		self.execute(&["TTL", key])
 			.as_integer()
 			.expect("TTL should return integer")
+	}
+
+	// -- client commands --
+
+	pub fn client_id(&mut self) -> i64 {
+		self.execute(&["CLIENT", "ID"])
+			.as_integer()
+			.expect("CLIENT ID should return integer")
+	}
+
+	pub fn client_setname(&mut self, name: &str) -> String {
+		self.execute(&["CLIENT", "SETNAME", name])
+			.to_string_lossy()
+			.expect("unexpected CLIENT SETNAME response")
+	}
+
+	pub fn client_getname(&mut self) -> String {
+		match self.execute(&["CLIENT", "GETNAME"]) {
+			RespValue::Null => String::new(),
+			resp => resp
+				.to_string_lossy()
+				.expect("unexpected CLIENT GETNAME response"),
+		}
+	}
+
+	pub fn client_list(&mut self) -> String {
+		self.execute(&["CLIENT", "LIST"])
+			.to_string_lossy()
+			.expect("unexpected CLIENT LIST response")
+	}
+}
+
+impl Drop for MockNimbisClient {
+	fn drop(&mut self) {
+		let _ = self.stream.shutdown(Shutdown::Both);
 	}
 }
 
