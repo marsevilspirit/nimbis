@@ -112,6 +112,15 @@ impl Storage {
 		))
 	}
 
+	pub async fn close(&self) -> Result<(), StorageError> {
+		self.string_db.close().await?;
+		self.hash_db.close().await?;
+		self.list_db.close().await?;
+		self.set_db.close().await?;
+		self.zset_db.close().await?;
+		Ok(())
+	}
+
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential

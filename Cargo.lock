@@ -2833,6 +2833,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "criterion",
  "futures",
  "log",
  "object_store 0.13.1",
