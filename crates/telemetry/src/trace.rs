@@ -15,8 +15,7 @@ pub fn init() -> Result<(), TelemetryError> {
 		return Ok(());
 	}
 
-	fastrace::set_reporter(ConsoleReporter, Config::default())
-		.map_err(|e| TelemetryError::TraceInitFailed(e.to_string()))?;
+	fastrace::set_reporter(ConsoleReporter, Config::default());
 
 	let _ = TRACE_INITIALIZED.set(());
 	Ok(())
