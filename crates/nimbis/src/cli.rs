@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 /// Command-line arguments for the server
@@ -6,8 +8,8 @@ use clap::Parser;
 pub struct Cli {
 	/// Configuration file path (TOML, JSON, or YAML).
 	/// Defaults to conf/config.toml if it exists.
-	#[arg(short, long)]
-	pub config: Option<String>,
+	#[arg(short, long, value_hint = clap::ValueHint::FilePath)]
+	pub config: Option<PathBuf>,
 
 	/// Port to listen on
 	#[arg(short, long)]
