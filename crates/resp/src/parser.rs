@@ -686,11 +686,13 @@ mod tests {
 	fn test_parse_push_non_empty() {
 		let mut buf = BytesMut::from(&b">2\r\n+pubsub\r\n+message\r\n"[..]);
 		let value = parse(&mut buf).unwrap();
-		let expected = vec![
-			RespValue::simple_string("pubsub"),
-			RespValue::simple_string("message"),
-		];
-		assert_eq!(value, RespValue::Push(expected));
+		assert_eq!(
+			value,
+			RespValue::Push(vec![
+				RespValue::simple_string("pubsub"),
+				RespValue::simple_string("message"),
+			])
+		);
 		assert!(buf.is_empty(), "Buffer should be empty after parsing");
 	}
 
