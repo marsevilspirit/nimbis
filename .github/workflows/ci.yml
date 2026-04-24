@@ -61,7 +61,20 @@ jobs:
       run: just build --release
     
     - name: Run Unit Test
-      run: just test
+      if: matrix.os == 'ubuntu-latest'
+      shell: bash
+      run: |
+        mkdir -p target/llvm-cov-target
+        cat > target/llvm-cov-target/CACHEDIR.TAG <<'EOF'
+        Signature: 8a477f597d28d172789f06886806bc55
+        # This file is a cache directory tag created by nimbis CI.
+        EOF
+        cargo llvm-cov clean --workspace
+        just test
+
+    - name: Run Unit Test (non-coverage)
+      if: matrix.os != 'ubuntu-latest'
+      run: cargo nextest run --all
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
