@@ -93,3 +93,19 @@ fn resp_parser_parse_returns_error_for_invalid_type_marker() {
 		)))
 	));
 }
+
+#[test]
+fn parse_int_error_converts_to_invalid_integer() {
+	let int_err = "12x".parse::<i64>().expect_err("expected parse int error");
+	let err = ParseError::from(int_err);
+	assert!(matches!(err, ParseError::InvalidInteger(_)));
+}
+
+#[test]
+fn parse_float_error_converts_to_invalid_double() {
+	let float_err = "1.2.3"
+		.parse::<f64>()
+		.expect_err("expected parse float error");
+	let err = ParseError::from(float_err);
+	assert!(matches!(err, ParseError::InvalidDouble(_)));
+}
