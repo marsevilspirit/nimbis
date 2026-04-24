@@ -44,6 +44,9 @@ autolabeler:
   - label: feature
     title:
       - '/(feature|feat|add)/i'
+  - label: refactor
+    title:
+      - '/^(refactor)(\(.+\))?:/i'
   - label: test
     title:
       - '/^(test|tests)(\(.+\))?:/i'
