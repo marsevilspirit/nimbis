@@ -40,7 +40,7 @@ pub struct MyConfig {
     #[online_config(immutable)]
     pub id: i32,
     
-    // Field with callback - triggers on_log_level_change when updated
+    // Field with callback - validates the new log level when updated
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
 
@@ -59,7 +59,7 @@ pub struct MyConfig {
 impl MyConfig {
     // Callback method invoked when log_level is updated
     fn on_log_level_change(&mut self) -> Result<(), String> {
-        // Perform side effects, e.g., reload logging configuration
+        // Validate or perform side effects before the new config is committed
         println!("Log level changed to: {}", self.log_level);
         Ok(())
     }

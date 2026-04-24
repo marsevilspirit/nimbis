@@ -3,7 +3,6 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::io::{self};
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use chrono::DateTime;
 use chrono::Datelike;
@@ -53,26 +52,51 @@ impl LoggerGuard {
 	}
 }
 
-struct LoggerState {
-	reload_handle: ReloadHandle,
+pub struct LoggerManager {
+	reload_handle: Option<ReloadHandle>,
 	// Keep the background writer alive for file logging.
-	_guard: LoggerGuard,
+	_guard: Option<LoggerGuard>,
 }
 
-impl LoggerState {
+impl LoggerManager {
 	fn new(reload_handle: ReloadHandle, guard: LoggerGuard) -> Self {
 		Self {
-			reload_handle,
-			_guard: guard,
+			reload_handle: Some(reload_handle),
+			_guard: Some(guard),
 		}
 	}
 
-	fn reload_handle(&self) -> &ReloadHandle {
-		&self.reload_handle
+	pub fn disabled() -> Self {
+		Self {
+			reload_handle: None,
+			_guard: None,
+		}
+	}
+
+	/// Initialize the logger with the provided log level.
+	pub fn init(level: &str, output: LogOutput) -> Result<Self, TelemetryError> {
+		let env_filter = EnvFilter::new(level);
+
+		let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
+		let file_guard = output.init(filter_layer)?;
+
+		Ok(Self::new(reload_handle, file_guard))
+	}
+
+	/// Reload the log level dynamically.
+	pub fn reload_log_level(&self, level: &str) -> Result<(), TelemetryError> {
+		validate_log_level(level)?;
+
+		let Some(reload_handle) = self.reload_handle.as_ref() else {
+			return Ok(());
+		};
+
+		let new_filter = EnvFilter::new(level.to_lowercase());
+		reload_handle
+			.reload(new_filter)
+			.map_err(|e| TelemetryError::ReloadFailed(e.to_string()))
 	}
 }
-
-static LOGGER_STATE: OnceLock<LoggerState> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Terminal;
@@ -359,90 +383,15 @@ where
 		.map_err(|e| TelemetryError::InitFailed(e.to_string()))
 }
 
-/// Initialize the logger with the provided log level
-///
-/// This sets up a console logger with:
-/// - The log level from the `level` parameter
-/// - Structured output with timestamps in format: YYYY-MM-DD HH:MM:SS.micros
-/// - Target/module information
-///
-/// # Arguments
-///
-/// * `level` - The log level filter string (e.g., "info", "debug", "warn")
-/// * `output` - The output sink to use. When configured for file output with a
-///   path like `./nimbis_store/nimbis.log`, it writes to that exact path. On
-///   time-based rotation, it archives the file in `./nimbis_store/` using
-///   `nimbis` as the base name, the timestamp, and `log` as the suffix;
-///   `LogRotation::Never` skips archiving and keeps writing to `nimbis.log`.
-///
-/// # Example
-///
-/// ```no_run
-/// // let args = Cli::parse();
-/// let output = telemetry::logger::LogOutput::from_mode(
-///     "terminal",
-///     "./nimbis_store/nimbis.log",
-///     telemetry::logger::LogRotation::Daily,
-/// )?;
-/// telemetry::logger::init("info", output)?;
-/// log::info!("Server starting");
-/// # Ok::<(), telemetry::TelemetryError>(())
-/// ```
-pub fn init(level: &str, output: LogOutput) -> Result<(), TelemetryError> {
-	if LOGGER_STATE.get().is_some() {
-		return Err(TelemetryError::AlreadyInitialized);
-	}
-
-	// Initialize with provided level
-	let env_filter = EnvFilter::new(level);
-
-	let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
-	let file_guard = output.init(filter_layer)?;
-
-	LOGGER_STATE
-		.set(LoggerState::new(reload_handle, file_guard))
-		.map_err(|_| TelemetryError::AlreadyInitialized)?;
-	Ok(())
-}
-
-/// Reload the log level dynamically
-///
-/// # Arguments
-///
-/// * `level` - The new log level to set. Valid values: trace, debug, info,
-///   warn, error
-///
-/// # Example
-///
-/// ```no_run
-/// # use telemetry::logger::reload_log_level;
-/// reload_log_level("debug")?;
-/// # Ok::<(), telemetry::TelemetryError>(())
-/// ```
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The logger has not been initialized
-/// - The provided log level is invalid
-/// - The reload operation fails
-pub fn reload_log_level(level: &str) -> Result<(), TelemetryError> {
-	// Validate log level
+pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
 	const VALID_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
 	let level_lower = level.to_lowercase();
 
 	if !VALID_LEVELS.contains(&level_lower.as_str()) {
-		return Err(TelemetryError::InvalidLogLevel(level.to_string()));
+		Err(TelemetryError::InvalidLogLevel(level.to_string()))
+	} else {
+		Ok(())
 	}
-
-	let state = LOGGER_STATE.get().ok_or(TelemetryError::NotInitialized)?;
-
-	// Create new filter and reload
-	let new_filter = EnvFilter::new(&level_lower);
-	state
-		.reload_handle()
-		.reload(new_filter)
-		.map_err(|e| TelemetryError::ReloadFailed(e.to_string()))
 }
 
 #[cfg(test)]
@@ -499,11 +448,7 @@ mod tests {
 		assert!(matches!(result, Err(TelemetryError::InvalidLogRotation(_))));
 	}
 
-	/// Test that valid log levels pass validation but return NotInitialized
-	/// error
-	///
-	/// Note: We cannot test actual reload in unit tests since init() can only
-	/// be called once. These tests validate the level validation logic.
+	/// Test that valid log levels pass validation.
 	#[rstest]
 	#[case("trace")]
 	#[case("debug")]
@@ -515,14 +460,7 @@ mod tests {
 	#[case("INFO")]
 	#[case("DeBuG")] // Mixed case
 	fn test_valid_log_levels(#[case] level: &str) {
-		// We expect NotInitialized error since we haven't called init()
-		// but we verify that validation passes (no InvalidLogLevel error)
-		let result = reload_log_level(level);
-		assert!(
-			matches!(result, Err(TelemetryError::NotInitialized)),
-			"Expected NotInitialized for valid level: {}",
-			level
-		);
+		assert!(validate_log_level(level).is_ok());
 	}
 
 	/// Test that invalid log levels are rejected
@@ -533,7 +471,7 @@ mod tests {
 	#[case("warning")] // Common mistake (should be "warn")
 	#[case("critical")] // Common mistake (not a standard Rust log level)
 	fn test_invalid_log_levels(#[case] level: &str) {
-		let result = reload_log_level(level);
+		let result = validate_log_level(level);
 		assert!(
 			matches!(result, Err(TelemetryError::InvalidLogLevel(_))),
 			"Expected InvalidLogLevel for: {}",

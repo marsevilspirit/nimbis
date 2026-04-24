@@ -97,7 +97,10 @@ pub struct ServerConfig {
 
 impl ServerConfig {
 	fn on_log_level_change(&self) -> Result<(), String> {
-		telemetry::logger::reload_log_level(&self.log_level).map_err(|e| e.to_string())
+		TELEMETRY_MANAGER
+			.load()
+			.reload_log_level(&self.log_level)
+			.map_err(|e| e.to_string())
 	}
 }
 
@@ -154,6 +157,36 @@ impl Default for GlobalConfig {
 
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 
+pub struct GlobalTelemetryManager {
+	inner: OnceLock<Arc<telemetry::manager::TelemetryManager>>,
+}
+
+impl GlobalTelemetryManager {
+	pub const fn new() -> Self {
+		Self {
+			inner: OnceLock::new(),
+		}
+	}
+
+	pub fn init(&self, telemetry_manager: Arc<telemetry::manager::TelemetryManager>) {
+		let _ = self.inner.set(telemetry_manager);
+	}
+
+	pub fn load(&self) -> &Arc<telemetry::manager::TelemetryManager> {
+		self.inner
+			.get()
+			.expect("Telemetry manager is not initialized")
+	}
+}
+
+impl Default for GlobalTelemetryManager {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+pub static TELEMETRY_MANAGER: GlobalTelemetryManager = GlobalTelemetryManager::new();
+
 /// Helper macro to access server configuration fields
 ///
 /// Usage:
@@ -166,7 +199,7 @@ macro_rules! server_config {
 	};
 }
 
-pub fn setup(args: Cli) -> Result<telemetry::manager::TelemetryManager, ConfigError> {
+pub fn setup(args: Cli) -> Result<Arc<telemetry::manager::TelemetryManager>, ConfigError> {
 	let default_config = "conf/config.toml";
 	let mut config = match args.config.as_deref() {
 		Some(p) => load_from_file(p)?,
@@ -197,11 +230,12 @@ pub fn setup(args: Cli) -> Result<telemetry::manager::TelemetryManager, ConfigEr
 		})?;
 	}
 
-	let telemetry_manager = telemetry::manager::TelemetryManager::init(
+	let telemetry_manager = Arc::new(telemetry::manager::TelemetryManager::init(
 		&config.log_level,
 		log_output,
 		config.trace_enabled,
-	)?;
+	)?);
+	TELEMETRY_MANAGER.init(telemetry_manager.clone());
 	SERVER_CONF.init(config);
 	Ok(telemetry_manager)
 }

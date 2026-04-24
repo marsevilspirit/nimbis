@@ -9,6 +9,10 @@ pub struct TraceManager {
 }
 
 impl TraceManager {
+	pub fn disabled() -> Self {
+		Self { enabled: false }
+	}
+
 	/// Initializes fastrace collector for nimbis when enabled.
 	pub fn init(enabled: bool) -> Result<Self, TelemetryError> {
 		if enabled {

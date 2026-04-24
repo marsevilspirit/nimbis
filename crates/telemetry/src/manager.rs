@@ -4,6 +4,7 @@ use crate::trace;
 
 /// Unified telemetry entrypoint for log + trace initialization.
 pub struct TelemetryManager {
+	logger: logger::LoggerManager,
 	trace: trace::TraceManager,
 }
 
@@ -14,9 +15,21 @@ impl TelemetryManager {
 		output: logger::LogOutput,
 		trace_enabled: bool,
 	) -> Result<Self, TelemetryError> {
-		logger::init(level, output)?;
+		let logger = logger::LoggerManager::init(level, output)?;
 		let trace = trace::TraceManager::init(trace_enabled)?;
-		Ok(Self { trace })
+		Ok(Self { logger, trace })
+	}
+
+	pub fn disabled() -> Self {
+		Self {
+			logger: logger::LoggerManager::disabled(),
+			trace: trace::TraceManager::disabled(),
+		}
+	}
+
+	/// Reload the active logger filter.
+	pub fn reload_log_level(&self, level: &str) -> Result<(), TelemetryError> {
+		self.logger.reload_log_level(level)
 	}
 
 	/// Flush pending telemetry records before process shutdown.
