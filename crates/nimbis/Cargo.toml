@@ -18,7 +18,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 dashmap = { workspace = true }
-fastrace = { workspace = true }
+fastrace = { workspace = true, features = ["enable"] }
 log = { workspace = true }
 num_cpus = { workspace = true }
 serde = { workspace = true }

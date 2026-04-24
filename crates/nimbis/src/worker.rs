@@ -3,6 +3,9 @@ use std::sync::Arc;
 use std::thread;
 
 use bytes::Bytes;
+use fastrace::future::FutureExt;
+use fastrace::prelude::Span;
+use fastrace::prelude::SpanContext;
 use fastrace::trace;
 use log::debug;
 use log::warn;
@@ -101,8 +104,21 @@ impl Worker {
 		}
 	}
 
-	#[trace]
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
+		let root_span = Span::root("nimbis.cmd", SpanContext::random()).with_properties(|| {
+			[
+				("cmd", req.cmd_name.clone()),
+				("client_id", req.ctx.client_id.to_string()),
+			]
+		});
+
+		Self::handle_cmd_request_inner(req, cmd_table, storage)
+			.in_span(root_span)
+			.await;
+	}
+
+	#[trace]
+	async fn handle_cmd_request_inner(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
 		let response = match cmd_table.get_cmd(&req.cmd_name) {
 			Some(cmd) => cmd.execute(storage, &req.args, &req.ctx).await,
 			None => RespValue::error(format!(
