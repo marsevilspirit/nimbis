@@ -11,7 +11,7 @@ use rstest::rstest;
 fn unexpected_eof_for_incomplete_frames(#[case] input: &[u8]) {
 	let mut buf = BytesMut::from(input);
 	let result = parse(&mut buf);
-	assert!(matches!(result, Err(ParseError::UnexpectedEOF)));
+	assert_eq!(result, Err(ParseError::UnexpectedEOF));
 }
 
 #[rstest]
@@ -20,10 +20,7 @@ fn unexpected_eof_for_incomplete_frames(#[case] input: &[u8]) {
 fn invalid_type_marker_reports_marker_char(#[case] input: &[u8], #[case] expected_marker: char) {
 	let mut buf = BytesMut::from(input);
 	let result = parse(&mut buf);
-	assert!(matches!(
-		result,
-		Err(ParseError::InvalidTypeMarker(marker)) if marker == expected_marker
-	));
+	assert_eq!(result, Err(ParseError::InvalidTypeMarker(expected_marker)));
 }
 
 #[rstest]
@@ -36,48 +33,54 @@ fn invalid_format_cases_include_useful_message(
 ) {
 	let mut buf = BytesMut::from(input);
 	let result = parse(&mut buf);
-	assert!(matches!(
-		result,
-		Err(ParseError::InvalidFormat(msg)) if msg.contains(expected_msg_part)
-	));
+	match result {
+		Err(ParseError::InvalidFormat(msg)) => assert!(msg.contains(expected_msg_part)),
+		other => panic!("expected InvalidFormat containing '{expected_msg_part}', got {other:?}"),
+	}
 }
 
 #[test]
 fn invalid_integer_detected() {
 	let mut buf = BytesMut::from(&b":12x\r\n"[..]);
 	let result = parse(&mut buf);
-	assert!(matches!(result, Err(ParseError::InvalidInteger(_))));
+	assert_eq!(
+		result,
+		Err(ParseError::InvalidInteger("invalid digit: x".into()))
+	);
 }
 
 #[test]
 fn invalid_bulk_string_length_detected() {
 	let mut buf = BytesMut::from(&b"$-2\r\n"[..]);
 	let result = parse(&mut buf);
-	assert!(matches!(
-		result,
-		Err(ParseError::InvalidBulkStringLength(-2))
-	));
+	assert_eq!(result, Err(ParseError::InvalidBulkStringLength(-2)));
 }
 
 #[test]
 fn invalid_array_length_detected() {
 	let mut buf = BytesMut::from(&b"*-2\r\n"[..]);
 	let result = parse(&mut buf);
-	assert!(matches!(result, Err(ParseError::InvalidArrayLength(-2))));
+	assert_eq!(result, Err(ParseError::InvalidArrayLength(-2)));
 }
 
 #[test]
 fn utf8_error_for_invalid_double_payload() {
 	let mut buf = BytesMut::from(&b",\xFF\r\n"[..]);
 	let result = parse(&mut buf);
-	assert!(matches!(result, Err(ParseError::Utf8Error(_))));
+	match result {
+		Err(ParseError::Utf8Error(msg)) => assert!(!msg.is_empty()),
+		other => panic!("expected Utf8Error, got {other:?}"),
+	}
 }
 
 #[test]
 fn invalid_double_detected() {
 	let mut buf = BytesMut::from(&b",1.2.3\r\n"[..]);
 	let result = parse(&mut buf);
-	assert!(matches!(result, Err(ParseError::InvalidDouble(_))));
+	match result {
+		Err(ParseError::InvalidDouble(msg)) => assert!(!msg.is_empty()),
+		other => panic!("expected InvalidDouble, got {other:?}"),
+	}
 }
 
 #[test]
@@ -97,7 +100,10 @@ fn resp_parser_parse_returns_error_for_invalid_type_marker() {
 fn parse_int_error_converts_to_invalid_integer() {
 	let int_err = "12x".parse::<i64>().expect_err("expected parse int error");
 	let err = ParseError::from(int_err);
-	assert!(matches!(err, ParseError::InvalidInteger(_)));
+	assert_eq!(
+		err,
+		ParseError::InvalidInteger("invalid digit found in string".into())
+	);
 }
 
 #[test]
@@ -106,5 +112,8 @@ fn parse_float_error_converts_to_invalid_double() {
 		.parse::<f64>()
 		.expect_err("expected parse float error");
 	let err = ParseError::from(float_err);
-	assert!(matches!(err, ParseError::InvalidDouble(_)));
+	assert_eq!(
+		err,
+		ParseError::InvalidDouble("invalid float literal".into())
+	);
 }
