@@ -4,8 +4,8 @@ use crate::trace;
 
 /// Unified telemetry entrypoint for log + trace initialization.
 pub struct TelemetryManager {
-	logger: logger::LoggerManager,
-	trace: trace::TraceManager,
+	logger: logger::Logger,
+	trace: trace::Tracer,
 }
 
 impl TelemetryManager {
@@ -15,15 +15,15 @@ impl TelemetryManager {
 		output: logger::LogOutput,
 		trace_enabled: bool,
 	) -> Result<Self, TelemetryError> {
-		let logger = logger::LoggerManager::init(level, output)?;
-		let trace = trace::TraceManager::init(trace_enabled)?;
+		let logger = logger::Logger::init(level, output)?;
+		let trace = trace::Tracer::init(trace_enabled)?;
 		Ok(Self { logger, trace })
 	}
 
 	pub fn disabled() -> Self {
 		Self {
-			logger: logger::LoggerManager::disabled(),
-			trace: trace::TraceManager::disabled(),
+			logger: logger::Logger::disabled(),
+			trace: trace::Tracer::disabled(),
 		}
 	}
 

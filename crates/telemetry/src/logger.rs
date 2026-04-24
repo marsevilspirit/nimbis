@@ -52,13 +52,13 @@ impl LoggerGuard {
 	}
 }
 
-pub struct LoggerManager {
+pub struct Logger {
 	reload_handle: Option<ReloadHandle>,
 	// Keep the background writer alive for file logging.
 	_guard: Option<LoggerGuard>,
 }
 
-impl LoggerManager {
+impl Logger {
 	fn new(reload_handle: ReloadHandle, guard: LoggerGuard) -> Self {
 		Self {
 			reload_handle: Some(reload_handle),

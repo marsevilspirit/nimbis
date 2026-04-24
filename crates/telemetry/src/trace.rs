@@ -4,11 +4,11 @@ use fastrace::collector::ConsoleReporter;
 use crate::TelemetryError;
 
 /// Owns fastrace collection state for the telemetry manager.
-pub struct TraceManager {
+pub struct Tracer {
 	enabled: bool,
 }
 
-impl TraceManager {
+impl Tracer {
 	pub fn disabled() -> Self {
 		Self { enabled: false }
 	}
