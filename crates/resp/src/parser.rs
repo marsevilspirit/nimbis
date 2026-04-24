@@ -658,6 +658,54 @@ mod tests {
 		}
 	}
 
+	#[test]
+	fn test_parse_map_non_empty() {
+		let mut buf = BytesMut::from(&b"%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+
+		if let RespValue::Map(map) = value {
+			assert_eq!(map.len(), 2);
+			assert_eq!(
+				map.get(&RespValue::SimpleString(Bytes::from("first"))),
+				Some(&RespValue::Integer(1))
+			);
+			assert_eq!(
+				map.get(&RespValue::SimpleString(Bytes::from("second"))),
+				Some(&RespValue::Integer(2))
+			);
+		} else {
+			panic!("Expected Map, got {:?}", value);
+		}
+	}
+
+	#[test]
+	fn test_parse_set_non_empty() {
+		let mut buf = BytesMut::from(&b"~2\r\n+orange\r\n+apple\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+
+		if let RespValue::Set(set) = value {
+			assert_eq!(set.len(), 2);
+			assert!(set.contains(&RespValue::SimpleString(Bytes::from("orange"))));
+			assert!(set.contains(&RespValue::SimpleString(Bytes::from("apple"))));
+		} else {
+			panic!("Expected Set, got {:?}", value);
+		}
+	}
+
+	#[test]
+	fn test_parse_push_non_empty() {
+		let mut buf = BytesMut::from(&b">2\r\n+pubsub\r\n+message\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+
+		if let RespValue::Push(arr) = value {
+			assert_eq!(arr.len(), 2);
+			assert_eq!(arr[0], RespValue::SimpleString(Bytes::from("pubsub")));
+			assert_eq!(arr[1], RespValue::SimpleString(Bytes::from("message")));
+		} else {
+			panic!("Expected Push, got {:?}", value);
+		}
+	}
+
 	use rstest::rstest;
 
 	#[rstest]
