@@ -50,6 +50,10 @@ pub struct MyConfig {
 
     #[online_config(immutable)]
     pub log_rotation: String,
+
+    // Immutable startup-only fastrace collection switch
+    #[online_config(immutable)]
+    pub trace_enabled: bool,
 }
 
 impl MyConfig {
@@ -156,6 +160,9 @@ pub struct ServerConfig {
     pub log_rotation: String,
 
     #[online_config(immutable)]
+    pub trace_enabled: bool,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -193,6 +200,15 @@ When `log_output = "file"`, the immutable `log_rotation` field controls time-bas
 For the rotating modes, Nimbis uses a custom rolling file implementation that manages log files directly. Logs are created in `{data_path}/` with `nimbis` as the filename prefix and `.log` as the suffix. When rotation is enabled, the appender adds timestamp-based suffixes to archived log files according to the selected rotation policy.
 
 Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the same reason: rotation is part of bootstrap-only logger setup.
+
+### 4.3 Startup-only Trace Collection
+
+The immutable `trace_enabled` field controls whether Nimbis initializes the fastrace collector during startup:
+
+- `false`: do not start trace collection. This is the default.
+- `true`: start fastrace collection and report spans to the console reporter.
+
+Runtime commands such as `CONFIG SET trace_enabled true` are rejected because fastrace collector setup is part of bootstrap-only telemetry initialization.
 
 ## 5. Build-time Configuration
 

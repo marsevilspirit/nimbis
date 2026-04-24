@@ -7,9 +7,15 @@ pub struct TelemetryManager;
 
 impl TelemetryManager {
 	/// Initialize logging and fastrace collector.
-	pub fn init(level: &str, output: logger::LogOutput) -> Result<(), TelemetryError> {
+	pub fn init(
+		level: &str,
+		output: logger::LogOutput,
+		trace_enabled: bool,
+	) -> Result<(), TelemetryError> {
 		logger::init(level, output)?;
-		trace::init()?;
+		if trace_enabled {
+			trace::init()?;
+		}
 		Ok(())
 	}
 }

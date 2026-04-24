@@ -19,6 +19,9 @@ log_output = "terminal"
 # log growth while keeping files under {data_path}/ with the same base name.
 log_rotation = "daily"
 
+# Enable fastrace collection and console reporting
+trace_enabled = false
+
 # Number of worker threads (default: number of CPU cores)
 # worker_threads = 8
 

@@ -89,6 +89,8 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub log_rotation: String,
 	#[online_config(immutable)]
+	pub trace_enabled: bool,
+	#[online_config(immutable)]
 	pub worker_threads: usize,
 }
 
@@ -109,6 +111,7 @@ impl Default for ServerConfig {
 			log_level: "info".into(),
 			log_output: "terminal".into(),
 			log_rotation: "daily".into(),
+			trace_enabled: false,
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -193,7 +196,11 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		})?;
 	}
 
-	telemetry::manager::TelemetryManager::init(&config.log_level, log_output)?;
+	telemetry::manager::TelemetryManager::init(
+		&config.log_level,
+		log_output,
+		config.trace_enabled,
+	)?;
 	SERVER_CONF.init(config);
 	Ok(())
 }
@@ -278,6 +285,7 @@ appendonly = "yes"
 log_level = "debug"
 log_output = "file"
 log_rotation = "hourly"
+trace_enabled = true
 worker_threads = 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -288,6 +296,7 @@ worker_threads = 4
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
+		assert!(config.trace_enabled);
 		assert_eq!(config.worker_threads, 4);
 	}
 
@@ -305,6 +314,7 @@ worker_threads = 4
   "log_level": "debug",
 	"log_output": "file",
 	"log_rotation": "hourly",
+  "trace_enabled": true,
   "worker_threads": 4
 }
 "#;
@@ -316,6 +326,7 @@ worker_threads = 4
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
+		assert!(config.trace_enabled);
 	}
 
 	#[test]
@@ -331,6 +342,7 @@ appendonly: "yes"
 log_level: "debug"
 log_output: "file"
 log_rotation: "hourly"
+trace_enabled: true
 worker_threads: 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -341,6 +353,7 @@ worker_threads: 4
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
+		assert!(config.trace_enabled);
 	}
 
 	#[test]
@@ -351,6 +364,11 @@ worker_threads: 4
 	#[test]
 	fn test_default_log_rotation() {
 		assert_eq!(ServerConfig::default().log_rotation, "daily");
+	}
+
+	#[test]
+	fn test_default_trace_enabled() {
+		assert!(!ServerConfig::default().trace_enabled);
 	}
 
 	#[test]

@@ -33,6 +33,7 @@ impl MockNimbisServer {
 			log_level: "error".to_string(),
 			log_output: "terminal".to_string(),
 			log_rotation: "daily".to_string(),
+			trace_enabled: false,
 			worker_threads: 2,
 		};
 
