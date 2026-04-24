@@ -1,5 +1,8 @@
 use bytes::BytesMut;
-use resp::{parse, ParseError, RespParseResult, RespParser};
+use resp::ParseError;
+use resp::RespParseResult;
+use resp::RespParser;
+use resp::parse;
 
 fn assert_parse_err(input: &[u8], matcher: impl FnOnce(ParseError)) {
 	let mut buf = BytesMut::from(input);
@@ -91,6 +94,8 @@ fn resp_parser_parse_returns_error_for_invalid_type_marker() {
 	let result = parser.parse(&mut buf);
 	assert!(matches!(
 		result,
-		RespParseResult::Error(resp::RespError::Parse(ParseError::InvalidTypeMarker('\x01')))
+		RespParseResult::Error(resp::RespError::Parse(ParseError::InvalidTypeMarker(
+			'\x01'
+		)))
 	));
 }
