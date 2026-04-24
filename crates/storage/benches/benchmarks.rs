@@ -51,7 +51,7 @@ impl BenchStore {
 		rt.block_on(storage.close())
 			.expect("failed to close storage");
 		drop(storage);
-		let _ = std::fs::remove_dir_all(&path);
+		std::fs::remove_dir_all(&path).expect("failed to remove benchmark directory");
 	}
 }
 
@@ -222,7 +222,7 @@ fn bench_storage_open(c: &mut Criterion) {
 				total += start.elapsed();
 				rt.block_on(storage.close()).expect("close should succeed");
 				drop(storage);
-				let _ = std::fs::remove_dir_all(&path);
+				std::fs::remove_dir_all(&path).expect("failed to remove benchmark directory");
 			}
 			total
 		})
