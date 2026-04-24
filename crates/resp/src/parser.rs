@@ -658,6 +658,44 @@ mod tests {
 		}
 	}
 
+	#[test]
+	fn test_parse_map_non_empty() {
+		let mut buf = BytesMut::from(&b"%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+		let expected = HashMap::from([
+			(RespValue::simple_string("first"), RespValue::integer(1)),
+			(RespValue::simple_string("second"), RespValue::integer(2)),
+		]);
+		assert_eq!(value, RespValue::Map(expected));
+		assert!(buf.is_empty(), "Buffer should be empty after parsing");
+	}
+
+	#[test]
+	fn test_parse_set_non_empty() {
+		let mut buf = BytesMut::from(&b"~2\r\n+orange\r\n+apple\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+		let expected = HashSet::from([
+			RespValue::simple_string("orange"),
+			RespValue::simple_string("apple"),
+		]);
+		assert_eq!(value, RespValue::Set(expected));
+		assert!(buf.is_empty(), "Buffer should be empty after parsing");
+	}
+
+	#[test]
+	fn test_parse_push_non_empty() {
+		let mut buf = BytesMut::from(&b">2\r\n+pubsub\r\n+message\r\n"[..]);
+		let value = parse(&mut buf).unwrap();
+		assert_eq!(
+			value,
+			RespValue::Push(vec![
+				RespValue::simple_string("pubsub"),
+				RespValue::simple_string("message"),
+			])
+		);
+		assert!(buf.is_empty(), "Buffer should be empty after parsing");
+	}
+
 	use rstest::rstest;
 
 	#[rstest]
