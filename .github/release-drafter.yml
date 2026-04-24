@@ -18,7 +18,7 @@ categories:
       - chore
       - refactor
       - ci
-      - docs
+      - documentation
       - dependencies
 
 exclude-labels:
@@ -30,22 +30,23 @@ template: |
   $CHANGES
 
 autolabeler:
+  - label: documentation
+    files:
+      - '*.md'
+    title:
+      - '/(docs|doc:|\[doc\]|typos|comment|documentation)/i'
+  - label: bug
+    title:
+      - '/(fix|race|bug|missing|correct)/i'
+  - label: dependencies
+    title:
+      - '/(bump|dependencies)/i'
+  - label: feature
+    title:
+      - '/(feature|feat|add)/i'
   - label: ci
     files:
       - '.github/**'
-  - label: docs
-    files:
-      - 'docs/**'
-      - '**/*.md'
-  - label: dependencies
-    files:
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '**/Cargo.toml'
-      - 'go.mod'
-      - 'go.sum'
-      - '**/go.mod'
-      - '**/go.sum'
 
 version-resolver:
   major:
@@ -62,7 +63,7 @@ version-resolver:
       - bug
       - chore
       - refactor
-      - docs
+      - documentation
       - ci
       - dependencies
   default: patch
