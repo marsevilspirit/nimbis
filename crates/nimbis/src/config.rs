@@ -7,7 +7,9 @@
 //! # Example
 //!
 //! ```no_run
-//! use nimbis::config::{Cli, Parser, SERVER_CONF, setup};
+//! use nimbis::cli::Cli;
+//! use clap::Parser;
+//! use nimbis::config::{SERVER_CONF, setup};
 //!
 //! // In a real app, this would be called in main.rs
 //! let args = Cli::parse();
@@ -25,11 +27,12 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
-pub use clap::Parser;
 pub use macros::OnlineConfig;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
+
+use crate::cli::Cli;
 
 /// Configuration-related errors
 #[derive(Error, Debug)]
@@ -63,32 +66,6 @@ pub enum ConfigError {
 
 	#[error(transparent)]
 	Telemetry(#[from] telemetry::TelemetryError),
-}
-
-/// Command-line arguments for the server
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-pub struct Cli {
-	/// Configuration file path (TOML, JSON, or YAML).
-	/// Defaults to conf/config.toml if it exists.
-	#[arg(short, long)]
-	pub config: Option<String>,
-
-	/// Port to listen on
-	#[arg(short, long)]
-	pub port: Option<u16>,
-
-	/// Host to bind to
-	#[arg(long)]
-	pub host: Option<String>,
-
-	/// Log level (trace, debug, info, warn, error)
-	#[arg(short, long)]
-	pub log_level: Option<String>,
-
-	/// Number of worker threads (default: number of CPU cores)
-	#[arg(long)]
-	pub worker_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, OnlineConfig, Deserialize, Serialize)]

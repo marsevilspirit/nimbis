@@ -1,5 +1,5 @@
-use nimbis::config::Cli;
-use nimbis::config::Parser;
+use clap::Parser;
+use nimbis::cli::Cli;
 use nimbis::logo;
 use nimbis::server::Server;
 
