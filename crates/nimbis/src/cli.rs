@@ -16,11 +16,11 @@ pub struct Cli {
 	pub port: Option<u16>,
 
 	/// Host to bind to
-	#[arg(long)]
+	#[arg(long, value_hint = clap::ValueHint::Hostname)]
 	pub host: Option<String>,
 
 	/// Log level (trace, debug, info, warn, error)
-	#[arg(short, long)]
+	#[arg(short, long, value_parser = ["trace", "debug", "info", "warn", "error"])]
 	pub log_level: Option<String>,
 
 	/// Number of worker threads (default: number of CPU cores)
