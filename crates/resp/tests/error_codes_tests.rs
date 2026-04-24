@@ -5,29 +5,25 @@ use resp::RespParser;
 use resp::parse;
 use rstest::rstest;
 
-fn assert_parse_err(input: &[u8], matcher: impl FnOnce(ParseError)) {
-	let mut buf = BytesMut::from(input);
-	let err = parse(&mut buf).expect_err("expected parse to fail");
-	matcher(err);
-}
-
 #[rstest]
 #[case(b"+OK".as_slice())]
 #[case(b"$5\r\nabc".as_slice())]
 fn unexpected_eof_for_incomplete_frames(#[case] input: &[u8]) {
-	assert_parse_err(input, |err| {
-		assert!(matches!(err, ParseError::UnexpectedEOF));
-	});
+	let mut buf = BytesMut::from(input);
+	let result = parse(&mut buf);
+	assert!(matches!(result, Err(ParseError::UnexpectedEOF)));
 }
 
 #[rstest]
 #[case(b"\x01PING\r\n", '\x01')]
 #[case(b"\x7FPING\r\n", '\x7f')]
 fn invalid_type_marker_reports_marker_char(#[case] input: &[u8], #[case] expected_marker: char) {
-	assert_parse_err(input, |err| match err {
-		ParseError::InvalidTypeMarker(marker) => assert_eq!(marker, expected_marker),
-		other => panic!("expected InvalidTypeMarker, got {other:?}"),
-	});
+	let mut buf = BytesMut::from(input);
+	let result = parse(&mut buf);
+	assert!(matches!(
+		result,
+		Err(ParseError::InvalidTypeMarker(marker)) if marker == expected_marker
+	));
 }
 
 #[rstest]
@@ -38,47 +34,50 @@ fn invalid_format_cases_include_useful_message(
 	#[case] input: &[u8],
 	#[case] expected_msg_part: &str,
 ) {
-	assert_parse_err(input, |err| match err {
-		ParseError::InvalidFormat(msg) => assert!(msg.contains(expected_msg_part)),
-		other => panic!("expected InvalidFormat, got {other:?}"),
-	});
+	let mut buf = BytesMut::from(input);
+	let result = parse(&mut buf);
+	assert!(matches!(
+		result,
+		Err(ParseError::InvalidFormat(msg)) if msg.contains(expected_msg_part)
+	));
 }
 
 #[test]
 fn invalid_integer_detected() {
-	assert_parse_err(b":12x\r\n", |err| {
-		assert!(matches!(err, ParseError::InvalidInteger(_)));
-	});
+	let mut buf = BytesMut::from(&b":12x\r\n"[..]);
+	let result = parse(&mut buf);
+	assert!(matches!(result, Err(ParseError::InvalidInteger(_))));
 }
 
 #[test]
 fn invalid_bulk_string_length_detected() {
-	assert_parse_err(b"$-2\r\n", |err| {
-		assert_eq!(err, ParseError::InvalidBulkStringLength(-2));
-	});
+	let mut buf = BytesMut::from(&b"$-2\r\n"[..]);
+	let result = parse(&mut buf);
+	assert!(matches!(
+		result,
+		Err(ParseError::InvalidBulkStringLength(-2))
+	));
 }
 
 #[test]
 fn invalid_array_length_detected() {
-	assert_parse_err(b"*-2\r\n", |err| {
-		assert_eq!(err, ParseError::InvalidArrayLength(-2));
-	});
+	let mut buf = BytesMut::from(&b"*-2\r\n"[..]);
+	let result = parse(&mut buf);
+	assert!(matches!(result, Err(ParseError::InvalidArrayLength(-2))));
 }
 
 #[test]
 fn utf8_error_for_invalid_double_payload() {
-	assert_parse_err(b",\xFF\r\n", |err| match err {
-		ParseError::Utf8Error(_) => {}
-		ParseError::InvalidFormat(msg) => assert!(msg.to_lowercase().contains("utf-8")),
-		other => panic!("expected Utf8-related parse error, got {other:?}"),
-	});
+	let mut buf = BytesMut::from(&b",\xFF\r\n"[..]);
+	let result = parse(&mut buf);
+	assert!(matches!(result, Err(ParseError::Utf8Error(_))));
 }
 
 #[test]
 fn invalid_double_detected() {
-	assert_parse_err(b",1.2.3\r\n", |err| {
-		assert!(matches!(err, ParseError::InvalidDouble(_)));
-	});
+	let mut buf = BytesMut::from(&b",1.2.3\r\n"[..]);
+	let result = parse(&mut buf);
+	assert!(matches!(result, Err(ParseError::InvalidDouble(_))));
 }
 
 #[test]
