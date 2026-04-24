@@ -113,11 +113,13 @@ impl Storage {
 	}
 
 	pub async fn close(&self) -> Result<(), StorageError> {
+		tokio::try_join!(
+			self.hash_db.close(),
+			self.list_db.close(),
+			self.set_db.close(),
+			self.zset_db.close(),
+		)?;
 		self.string_db.close().await?;
-		self.hash_db.close().await?;
-		self.list_db.close().await?;
-		self.set_db.close().await?;
-		self.zset_db.close().await?;
 		Ok(())
 	}
 
