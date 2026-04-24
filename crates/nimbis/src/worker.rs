@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::thread;
 
 use bytes::Bytes;
+use fastrace::trace;
 use log::debug;
 use log::warn;
 use resp::RespValue;
@@ -100,6 +101,7 @@ impl Worker {
 		}
 	}
 
+	#[trace]
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
 		let response = match cmd_table.get_cmd(&req.cmd_name) {
 			Some(cmd) => cmd.execute(storage, &req.args, &req.ctx).await,

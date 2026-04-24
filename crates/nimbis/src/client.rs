@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use bytes::Bytes;
 use bytes::BytesMut;
 use dashmap::DashMap;
+use fastrace::trace;
 use log::debug;
 use resp::RespEncoder;
 use resp::RespParseResult;
@@ -104,6 +105,7 @@ impl ClientConnection {
 		}
 	}
 
+	#[trace]
 	pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let mut buffer = BytesMut::with_capacity(4096);
 		debug!("Client connection started");

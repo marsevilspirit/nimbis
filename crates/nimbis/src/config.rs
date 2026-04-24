@@ -216,7 +216,7 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		})?;
 	}
 
-	telemetry::logger::init(&config.log_level, log_output)?;
+	telemetry::manager::TelemetryManager::init(&config.log_level, log_output)?;
 	SERVER_CONF.init(config);
 	Ok(())
 }

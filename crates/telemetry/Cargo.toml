@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 
 chrono = { workspace = true }
+fastrace = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
