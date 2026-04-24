@@ -22,7 +22,5 @@ jobs:
         uses: release-drafter/release-drafter@v7
         with:
           config-name: release-drafter.yml
-          disable-autolabeler: ${{ github.event_name == 'push' }}
-          disable-releaser: ${{ github.event_name == 'pull_request_target' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
