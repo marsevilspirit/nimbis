@@ -80,8 +80,9 @@ impl Drop for MockNimbisServer {
 }
 
 fn wait_until_ready(host: &str, port: u16, data_path: &str) {
-	// Keep startup failures quick while still allowing SlateDB to initialize.
-	let ready_timeout = Duration::from_secs(5);
+	// Keep startup failures quick while still allowing slower CI hosts
+	// enough time to initialize SlateDB.
+	let ready_timeout = Duration::from_secs(15);
 	let deadline = std::time::Instant::now() + ready_timeout;
 	let mut last_error = String::from("server was not probed");
 
