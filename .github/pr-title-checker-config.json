@@ -4,20 +4,7 @@
     "color": "EEEEEE"
   },
   "CHECKS": {
-    "prefixes": [
-      "feat: ",
-      "fix: ",
-      "docs: ",
-      "style: ",
-      "refactor: ",
-      "perf: ",
-      "test: ",
-      "build: ",
-      "ci: ",
-      "chore: ",
-      "revert: "
-    ],
-    "regexp": "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([^)]+\\))?: .+",
+    "regexp": "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([^)]+\\))?!?: .+",
     "regexpFlags": "",
     "ignoreLabels": [
       "dependencies",
