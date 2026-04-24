@@ -60,6 +60,9 @@ jobs:
     - name: Build Release
       run: just build --release
     
+    - name: Remove llvm-cov target dir
+      run: rm -rf target/llvm-cov-target
+
     - name: Run Unit Test
       run: just test
 
