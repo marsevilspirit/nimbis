@@ -3,6 +3,7 @@ use resp::ParseError;
 use resp::RespParseResult;
 use resp::RespParser;
 use resp::parse;
+use rstest::rstest;
 
 fn assert_parse_err(input: &[u8], matcher: impl FnOnce(ParseError)) {
 	let mut buf = BytesMut::from(input);
@@ -10,42 +11,35 @@ fn assert_parse_err(input: &[u8], matcher: impl FnOnce(ParseError)) {
 	matcher(err);
 }
 
-#[test]
-fn unexpected_eof_for_incomplete_frames() {
-	for input in [b"+OK".as_slice(), b"$5\r\nabc".as_slice()] {
-		assert_parse_err(input, |err| {
-			assert!(matches!(err, ParseError::UnexpectedEOF));
-		});
-	}
+#[rstest]
+#[case(b"+OK".as_slice())]
+#[case(b"$5\r\nabc".as_slice())]
+fn unexpected_eof_for_incomplete_frames(#[case] input: &[u8]) {
+	assert_parse_err(input, |err| {
+		assert!(matches!(err, ParseError::UnexpectedEOF));
+	});
 }
 
-#[test]
-fn invalid_type_marker_reports_marker_char() {
-	assert_parse_err(b"\x01PING\r\n", |err| match err {
-		ParseError::InvalidTypeMarker(marker) => assert_eq!(marker, '\x01'),
-		other => panic!("expected InvalidTypeMarker, got {other:?}"),
-	});
-
-	assert_parse_err(b"\x7FPING\r\n", |err| match err {
-		ParseError::InvalidTypeMarker(marker) => assert_eq!(marker, '\x7f'),
+#[rstest]
+#[case(b"\x01PING\r\n", '\x01')]
+#[case(b"\x7FPING\r\n", '\x7f')]
+fn invalid_type_marker_reports_marker_char(#[case] input: &[u8], #[case] expected_marker: char) {
+	assert_parse_err(input, |err| match err {
+		ParseError::InvalidTypeMarker(marker) => assert_eq!(marker, expected_marker),
 		other => panic!("expected InvalidTypeMarker, got {other:?}"),
 	});
 }
 
-#[test]
-fn invalid_format_cases_include_useful_message() {
-	assert_parse_err(b"$3\r\nabc\rx", |err| match err {
-		ParseError::InvalidFormat(msg) => assert!(msg.contains("Missing CRLF")),
-		other => panic!("expected InvalidFormat, got {other:?}"),
-	});
-
-	assert_parse_err(b"#x\r\n", |err| match err {
-		ParseError::InvalidFormat(msg) => assert!(msg.contains("Boolean")),
-		other => panic!("expected InvalidFormat, got {other:?}"),
-	});
-
-	assert_parse_err(b"=4\r\ntext\r\n", |err| match err {
-		ParseError::InvalidFormat(msg) => assert!(msg.contains("Verbatim string")),
+#[rstest]
+#[case(b"$3\r\nabc\rx", "Missing CRLF")]
+#[case(b"#x\r\n", "Boolean")]
+#[case(b"=4\r\ntext\r\n", "Verbatim string")]
+fn invalid_format_cases_include_useful_message(
+	#[case] input: &[u8],
+	#[case] expected_msg_part: &str,
+) {
+	assert_parse_err(input, |err| match err {
+		ParseError::InvalidFormat(msg) => assert!(msg.contains(expected_msg_part)),
 		other => panic!("expected InvalidFormat, got {other:?}"),
 	});
 }
