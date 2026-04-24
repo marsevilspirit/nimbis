@@ -662,48 +662,36 @@ mod tests {
 	fn test_parse_map_non_empty() {
 		let mut buf = BytesMut::from(&b"%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n"[..]);
 		let value = parse(&mut buf).unwrap();
-
-		if let RespValue::Map(map) = value {
-			assert_eq!(map.len(), 2);
-			assert_eq!(
-				map.get(&RespValue::SimpleString(Bytes::from("first"))),
-				Some(&RespValue::Integer(1))
-			);
-			assert_eq!(
-				map.get(&RespValue::SimpleString(Bytes::from("second"))),
-				Some(&RespValue::Integer(2))
-			);
-		} else {
-			panic!("Expected Map, got {:?}", value);
-		}
+		let expected = HashMap::from([
+			(RespValue::simple_string("first"), RespValue::integer(1)),
+			(RespValue::simple_string("second"), RespValue::integer(2)),
+		]);
+		assert_eq!(value, RespValue::Map(expected));
+		assert!(buf.is_empty(), "Buffer should be empty after parsing");
 	}
 
 	#[test]
 	fn test_parse_set_non_empty() {
 		let mut buf = BytesMut::from(&b"~2\r\n+orange\r\n+apple\r\n"[..]);
 		let value = parse(&mut buf).unwrap();
-
-		if let RespValue::Set(set) = value {
-			assert_eq!(set.len(), 2);
-			assert!(set.contains(&RespValue::SimpleString(Bytes::from("orange"))));
-			assert!(set.contains(&RespValue::SimpleString(Bytes::from("apple"))));
-		} else {
-			panic!("Expected Set, got {:?}", value);
-		}
+		let expected = HashSet::from([
+			RespValue::simple_string("orange"),
+			RespValue::simple_string("apple"),
+		]);
+		assert_eq!(value, RespValue::Set(expected));
+		assert!(buf.is_empty(), "Buffer should be empty after parsing");
 	}
 
 	#[test]
 	fn test_parse_push_non_empty() {
 		let mut buf = BytesMut::from(&b">2\r\n+pubsub\r\n+message\r\n"[..]);
 		let value = parse(&mut buf).unwrap();
-
-		if let RespValue::Push(arr) = value {
-			assert_eq!(arr.len(), 2);
-			assert_eq!(arr[0], RespValue::SimpleString(Bytes::from("pubsub")));
-			assert_eq!(arr[1], RespValue::SimpleString(Bytes::from("message")));
-		} else {
-			panic!("Expected Push, got {:?}", value);
-		}
+		let expected = vec![
+			RespValue::simple_string("pubsub"),
+			RespValue::simple_string("message"),
+		];
+		assert_eq!(value, RespValue::Push(expected));
+		assert!(buf.is_empty(), "Buffer should be empty after parsing");
 	}
 
 	use rstest::rstest;
