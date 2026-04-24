@@ -1,22 +1,27 @@
-use std::sync::OnceLock;
-
 use fastrace::collector::Config;
 use fastrace::collector::ConsoleReporter;
 
 use crate::TelemetryError;
 
-static TRACE_INITIALIZED: OnceLock<()> = OnceLock::new();
+/// Owns fastrace collection state for the telemetry manager.
+pub struct TraceManager {
+	enabled: bool,
+}
 
-/// Initializes fastrace collector for nimbis.
-///
-/// This method is idempotent and can be called multiple times safely.
-pub fn init() -> Result<(), TelemetryError> {
-	if TRACE_INITIALIZED.get().is_some() {
-		return Ok(());
+impl TraceManager {
+	/// Initializes fastrace collector for nimbis when enabled.
+	pub fn init(enabled: bool) -> Result<Self, TelemetryError> {
+		if enabled {
+			fastrace::set_reporter(ConsoleReporter, Config::default());
+		}
+
+		Ok(Self { enabled })
 	}
 
-	fastrace::set_reporter(ConsoleReporter, Config::default());
-
-	let _ = TRACE_INITIALIZED.set(());
-	Ok(())
+	/// Flushes pending fastrace records if tracing was initialized.
+	pub fn flush(&self) {
+		if self.enabled {
+			fastrace::flush();
+		}
+	}
 }

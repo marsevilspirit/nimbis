@@ -13,11 +13,12 @@
 //!
 //! // In a real app, this would be called in main.rs
 //! let args = Cli::parse();
-//! setup(args);
+//! let _telemetry_manager = setup(args)?;
 //!
 //! // Access configuration
 //! let config = SERVER_CONF.load();
 //! println!("Server address: {}:{}", config.host, config.port);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 use std::path::Path;
@@ -165,7 +166,7 @@ macro_rules! server_config {
 	};
 }
 
-pub fn setup(args: Cli) -> Result<(), ConfigError> {
+pub fn setup(args: Cli) -> Result<telemetry::manager::TelemetryManager, ConfigError> {
 	let default_config = "conf/config.toml";
 	let mut config = match args.config.as_deref() {
 		Some(p) => load_from_file(p)?,
@@ -196,13 +197,13 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		})?;
 	}
 
-	telemetry::manager::TelemetryManager::init(
+	let telemetry_manager = telemetry::manager::TelemetryManager::init(
 		&config.log_level,
 		log_output,
 		config.trace_enabled,
 	)?;
 	SERVER_CONF.init(config);
-	Ok(())
+	Ok(telemetry_manager)
 }
 
 fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
