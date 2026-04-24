@@ -72,6 +72,7 @@ Available recipes:
     run *args   # Run nimbis-server
 
     [test]
+    bench       # Run storage benchmark target
     e2e-test    # Run e2e tests
     test        # Run unit tests
 ```

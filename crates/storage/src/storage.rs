@@ -112,6 +112,17 @@ impl Storage {
 		))
 	}
 
+	pub async fn close(&self) -> Result<(), StorageError> {
+		tokio::try_join!(
+			self.hash_db.close(),
+			self.list_db.close(),
+			self.set_db.close(),
+			self.zset_db.close(),
+		)?;
+		self.string_db.close().await?;
+		Ok(())
+	}
+
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
