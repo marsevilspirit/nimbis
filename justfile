@@ -11,7 +11,7 @@ build *args:
 # Run unit tests with coverage generation
 [group: 'test']
 test:
-    cargo llvm-cov nextest --all --codecov --output-path codecov.json
+    cargo llvm-cov nextest --all --no-clean --codecov --output-path codecov.json
 
 # Run e2e tests
 [group: 'test']
