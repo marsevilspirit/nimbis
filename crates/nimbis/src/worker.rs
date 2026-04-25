@@ -105,7 +105,13 @@ impl Worker {
 	}
 
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
-		let root_span = Span::root("nimbis.cmd", SpanContext::random()).with_properties(|| {
+		let is_sampled = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.unwrap_or_default()
+			.subsec_nanos()
+			% 100 == 0;
+		let span_context = SpanContext::random().sampled(is_sampled);
+		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[
 				("cmd", req.cmd_name.clone()),
 				("client_id", req.ctx.client_id.to_string()),

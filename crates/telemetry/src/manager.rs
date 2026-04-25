@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::OnceLock;
+
 use crate::TelemetryError;
 use crate::logger;
 use crate::trace;
@@ -10,13 +13,15 @@ pub struct TelemetryManager {
 
 impl TelemetryManager {
 	/// Initialize logging and fastrace collector.
+	#[fastrace::trace]
 	pub fn init(
 		level: &str,
 		output: logger::LogOutput,
 		trace_enabled: bool,
+		trace_endpoint: String,
 	) -> Result<Self, TelemetryError> {
 		let logger = logger::Logger::init(level, output)?;
-		let trace = trace::Tracer::init(trace_enabled)?;
+		let trace = trace::Tracer::init(trace_enabled, trace_endpoint)?;
 		Ok(Self { logger, trace })
 	}
 
@@ -37,3 +42,33 @@ impl TelemetryManager {
 		self.trace.flush();
 	}
 }
+
+pub struct GlobalTelemetryManager {
+	inner: OnceLock<Arc<TelemetryManager>>,
+}
+
+impl GlobalTelemetryManager {
+	pub const fn new() -> Self {
+		Self {
+			inner: OnceLock::new(),
+		}
+	}
+
+	pub fn init(&self, telemetry_manager: Arc<TelemetryManager>) {
+		let _ = self.inner.set(telemetry_manager);
+	}
+
+	pub fn load(&self) -> &Arc<TelemetryManager> {
+		self.inner
+			.get()
+			.expect("Telemetry manager is not initialized")
+	}
+}
+
+impl Default for GlobalTelemetryManager {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+pub static TELEMETRY_MANAGER: GlobalTelemetryManager = GlobalTelemetryManager::new();

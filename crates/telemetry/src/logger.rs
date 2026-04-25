@@ -77,8 +77,15 @@ impl Logger {
 	pub fn init(level: &str, output: LogOutput) -> Result<Self, TelemetryError> {
 		let env_filter = EnvFilter::new(level);
 
+		let is_file = output.is_file();
 		let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
 		let file_guard = output.init(filter_layer)?;
+
+		log::info!(
+			"Logger initialized successfully (level: {}, output: {})",
+			level,
+			if is_file { "file" } else { "terminal" }
+		);
 
 		Ok(Self::new(reload_handle, file_guard))
 	}

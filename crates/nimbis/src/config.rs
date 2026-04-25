@@ -31,6 +31,7 @@ use arc_swap::ArcSwap;
 pub use macros::OnlineConfig;
 use serde::Deserialize;
 use serde::Serialize;
+use telemetry::manager::TELEMETRY_MANAGER;
 use thiserror::Error;
 
 use crate::cli::Cli;
@@ -92,6 +93,8 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub trace_enabled: bool,
 	#[online_config(immutable)]
+	pub trace_endpoint: String,
+	#[online_config(immutable)]
 	pub worker_threads: usize,
 }
 
@@ -116,6 +119,7 @@ impl Default for ServerConfig {
 			log_output: "terminal".into(),
 			log_rotation: "daily".into(),
 			trace_enabled: false,
+			trace_endpoint: "".into(),
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -157,36 +161,6 @@ impl Default for GlobalConfig {
 
 pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 
-pub struct GlobalTelemetryManager {
-	inner: OnceLock<Arc<telemetry::manager::TelemetryManager>>,
-}
-
-impl GlobalTelemetryManager {
-	pub const fn new() -> Self {
-		Self {
-			inner: OnceLock::new(),
-		}
-	}
-
-	pub fn init(&self, telemetry_manager: Arc<telemetry::manager::TelemetryManager>) {
-		let _ = self.inner.set(telemetry_manager);
-	}
-
-	pub fn load(&self) -> &Arc<telemetry::manager::TelemetryManager> {
-		self.inner
-			.get()
-			.expect("Telemetry manager is not initialized")
-	}
-}
-
-impl Default for GlobalTelemetryManager {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
-pub static TELEMETRY_MANAGER: GlobalTelemetryManager = GlobalTelemetryManager::new();
-
 /// Helper macro to access server configuration fields
 ///
 /// Usage:
@@ -199,7 +173,7 @@ macro_rules! server_config {
 	};
 }
 
-pub fn setup(args: Cli) -> Result<Arc<telemetry::manager::TelemetryManager>, ConfigError> {
+pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	let default_config = "conf/config.toml";
 	let mut config = match args.config.as_deref() {
 		Some(p) => load_from_file(p)?,
@@ -234,10 +208,11 @@ pub fn setup(args: Cli) -> Result<Arc<telemetry::manager::TelemetryManager>, Con
 		&config.log_level,
 		log_output,
 		config.trace_enabled,
+		config.trace_endpoint.clone(),
 	)?);
-	TELEMETRY_MANAGER.init(telemetry_manager.clone());
+	TELEMETRY_MANAGER.init(telemetry_manager);
 	SERVER_CONF.init(config);
-	Ok(telemetry_manager)
+	Ok(())
 }
 
 fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {

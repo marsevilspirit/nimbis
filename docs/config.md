@@ -163,6 +163,9 @@ pub struct ServerConfig {
     pub trace_enabled: bool,
 
     #[online_config(immutable)]
+    pub trace_endpoint: String,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -206,7 +209,11 @@ Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the s
 The immutable `trace_enabled` field controls whether Nimbis initializes the fastrace collector during startup:
 
 - `false`: do not start trace collection. This is the default.
-- `true`: start fastrace collection and report spans to the console reporter.
+- `true`: start fastrace collection.
+
+When `trace_enabled = true`, the `trace_endpoint` field configures where traces are exported:
+- If empty (default), traces are only reported to the console.
+- If set to an OpenTelemetry endpoint (e.g. `http://localhost:4317`), traces are exported to that endpoint via gRPC.
 
 Runtime commands such as `CONFIG SET trace_enabled true` are rejected because fastrace collector setup is part of bootstrap-only telemetry initialization.
 

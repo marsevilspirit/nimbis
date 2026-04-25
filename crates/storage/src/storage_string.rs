@@ -13,6 +13,7 @@ use crate::string::value::StringValue;
 use crate::utils::is_expired;
 
 impl Storage {
+	#[fastrace::trace]
 	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
 		match self.get_meta::<AnyValue>(&key).await? {
 			Some(AnyValue::String(val)) => Ok(Some(val.value)),
@@ -21,6 +22,7 @@ impl Storage {
 		}
 	}
 
+	#[fastrace::trace]
 	pub async fn set(&self, key: Bytes, value: Bytes) -> Result<(), StorageError> {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
@@ -35,6 +37,7 @@ impl Storage {
 		Ok(())
 	}
 
+	#[fastrace::trace]
 	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
 		let user_key = key;
 		let key = StringKey::new(user_key.clone());
@@ -57,6 +60,7 @@ impl Storage {
 		Ok(true)
 	}
 
+	#[fastrace::trace]
 	pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, StorageError> {
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
@@ -101,6 +105,7 @@ impl Storage {
 		Ok(true)
 	}
 
+	#[fastrace::trace]
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
 		let encoded_key = StringKey::new(key).encode();
 		let kv = match self.string_db.get_key_value(encoded_key.clone()).await? {
@@ -126,10 +131,12 @@ impl Storage {
 		Ok(Some(ttl))
 	}
 
+	#[fastrace::trace]
 	pub async fn exists(&self, key: Bytes) -> Result<bool, StorageError> {
 		Ok(self.get_meta::<AnyValue>(&key).await?.is_some())
 	}
 
+	#[fastrace::trace]
 	pub async fn incr(&self, key: Bytes) -> Result<i64, StorageError> {
 		let current_val = self.get(key.clone()).await?;
 
@@ -156,6 +163,7 @@ impl Storage {
 		Ok(int_val)
 	}
 
+	#[fastrace::trace]
 	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
 		let current_val = self.get(key.clone()).await?;
 
@@ -182,6 +190,7 @@ impl Storage {
 		Ok(int_val)
 	}
 
+	#[fastrace::trace]
 	pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, StorageError> {
 		let current_val = self.get(key.clone()).await?;
 

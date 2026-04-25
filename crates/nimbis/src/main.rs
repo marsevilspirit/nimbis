@@ -2,18 +2,16 @@ use clap::Parser;
 use nimbis::cli::Cli;
 use nimbis::logo;
 use nimbis::server::Server;
+use telemetry::manager::TELEMETRY_MANAGER;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	let args = Cli::parse();
 
-	let telemetry_manager = match nimbis::config::setup(args) {
-		Ok(manager) => manager,
-		Err(e) => {
-			log::error!("Failed to load configuration: {}", e);
-			std::process::exit(1);
-		}
-	};
+	if let Err(e) = nimbis::config::setup(args) {
+		log::error!("Failed to load configuration: {}", e);
+		std::process::exit(1);
+	}
 
 	logo::show_logo();
 
@@ -30,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	}
 	.await;
 
-	telemetry_manager.flush();
+	TELEMETRY_MANAGER.load().flush();
 	result?;
 
 	Ok(())

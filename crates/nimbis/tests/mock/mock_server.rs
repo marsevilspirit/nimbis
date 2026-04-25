@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use nimbis::config::SERVER_CONF;
 use nimbis::config::ServerConfig;
-use nimbis::config::TELEMETRY_MANAGER;
 use nimbis::server::Server;
+use telemetry::manager::TELEMETRY_MANAGER;
 use telemetry::manager::TelemetryManager;
 use tempfile::TempDir;
 use tempfile::tempdir;
@@ -37,6 +37,7 @@ impl MockNimbisServer {
 			log_output: "terminal".to_string(),
 			log_rotation: "daily".to_string(),
 			trace_enabled: false,
+			trace_endpoint: "".to_string(),
 			worker_threads: 2,
 		};
 
