@@ -380,7 +380,7 @@ where
 			fmt::layer()
 				.with_ansi(use_ansi)
 				.with_timer(CustomTimeFormat)
-				.with_target(false)
+				.with_target(true)
 				.with_thread_ids(true)
 				.with_line_number(false)
 				.with_file(false)
