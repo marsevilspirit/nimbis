@@ -19,6 +19,11 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 rstest = { workspace = true }
 tokio = { workspace = true }
 ulid = { workspace = true }
+
+[[bench]]
+name = "benchmarks"
+harness = false

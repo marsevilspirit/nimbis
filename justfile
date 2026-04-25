@@ -19,6 +19,11 @@ e2e-test: (build "--release")
     rm -rf nimbis_store
     cd tests && go test -timeout 15m --ginkgo.v
 
+# Run storage benchmarks
+[group: 'test']
+bench:
+    cargo bench -p storage --bench benchmarks
+
 # Check all crates
 [group: 'check']
 check: check-workspace check-code-fmt check-numbered-comments
