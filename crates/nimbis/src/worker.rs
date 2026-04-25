@@ -105,11 +105,13 @@ impl Worker {
 	}
 
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
+		// Apply a 0.01% sampling rate for tracing to prevent massive gRPC payload and
+		// reduce overhead.
 		let is_sampled = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
 			.unwrap_or_default()
 			.subsec_nanos()
-			.is_multiple_of(1000);
+			.is_multiple_of(10000);
 		let span_context = SpanContext::random().sampled(is_sampled);
 		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[

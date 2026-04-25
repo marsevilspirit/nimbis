@@ -66,6 +66,9 @@ pub enum ConfigError {
 		path: String,
 	},
 
+	#[error("trace_endpoint must be set when trace_enabled is true")]
+	TraceEndpointRequired,
+
 	#[error(transparent)]
 	Telemetry(#[from] telemetry::TelemetryError),
 }
@@ -104,6 +107,14 @@ impl ServerConfig {
 			.load()
 			.reload_log_level(&self.log_level)
 			.map_err(|e| e.to_string())
+	}
+
+	fn validate(&self) -> Result<(), ConfigError> {
+		if self.trace_enabled && self.trace_endpoint.trim().is_empty() {
+			return Err(ConfigError::TraceEndpointRequired);
+		}
+
+		Ok(())
 	}
 }
 
@@ -195,6 +206,8 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		config.worker_threads = t;
 	}
 
+	config.validate()?;
+
 	let log_output = resolve_log_output(&config)?;
 
 	if log_output.is_file() {
@@ -250,12 +263,16 @@ fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> 
 		.and_then(|ext| ext.to_str())
 		.ok_or(ConfigError::NoExtension)?;
 
-	match extension.to_lowercase().as_str() {
-		"toml" => Ok(toml::from_str(&content)?),
-		"json" => Ok(serde_json::from_str(&content)?),
-		"yaml" | "yml" => Ok(serde_yaml::from_str(&content)?),
-		_ => Err(ConfigError::UnsupportedFormat(extension.to_string())),
-	}
+	let config: ServerConfig = match extension.to_lowercase().as_str() {
+		"toml" => toml::from_str(&content)?,
+		"json" => serde_json::from_str(&content)?,
+		"yaml" | "yml" => serde_yaml::from_str(&content)?,
+		_ => return Err(ConfigError::UnsupportedFormat(extension.to_string())),
+	};
+
+	config.validate()?;
+
+	Ok(config)
 }
 
 #[cfg(test)]
@@ -296,6 +313,7 @@ log_level = "debug"
 log_output = "file"
 log_rotation = "hourly"
 trace_enabled = true
+trace_endpoint = "http://localhost:4317"
 worker_threads = 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -322,9 +340,10 @@ worker_threads = 4
   "save": "900 1",
   "appendonly": "yes",
   "log_level": "debug",
-	"log_output": "file",
-	"log_rotation": "hourly",
+  "log_output": "file",
+  "log_rotation": "hourly",
   "trace_enabled": true,
+  "trace_endpoint": "http://localhost:4317",
   "worker_threads": 4
 }
 "#;
@@ -353,6 +372,7 @@ log_level: "debug"
 log_output: "file"
 log_rotation: "hourly"
 trace_enabled: true
+trace_endpoint: "http://localhost:4317"
 worker_threads: 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -379,6 +399,20 @@ worker_threads: 4
 	#[test]
 	fn test_default_trace_enabled() {
 		assert!(!ServerConfig::default().trace_enabled);
+	}
+
+	#[test]
+	fn test_trace_endpoint_required_when_trace_enabled() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+trace_enabled = true
+trace_endpoint = ""
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let err = load_from_file(&file_path).unwrap_err();
+		assert!(matches!(err, ConfigError::TraceEndpointRequired));
 	}
 
 	#[test]

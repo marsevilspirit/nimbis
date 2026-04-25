@@ -19,11 +19,11 @@ log_output = "terminal"
 # log growth while keeping files under {data_path}/ with the same base name.
 log_rotation = "daily"
 
-# Enable fastrace collection and console reporting
+# Enable fastrace collection and OpenTelemetry export
 trace_enabled = false
 
 # OpenTelemetry endpoint for exporting traces (e.g., http://localhost:4317)
-# Leave empty to disable OpenTelemetry export
+# Required when trace_enabled = true
 trace_endpoint = ""
 
 # Number of worker threads (default: number of CPU cores)
