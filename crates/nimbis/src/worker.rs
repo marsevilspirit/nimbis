@@ -109,7 +109,7 @@ impl Worker {
 			.duration_since(std::time::UNIX_EPOCH)
 			.unwrap_or_default()
 			.subsec_nanos()
-			.is_multiple_of(100);
+			.is_multiple_of(1000);
 		let span_context = SpanContext::random().sampled(is_sampled);
 		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[
