@@ -54,6 +54,10 @@ pub struct MyConfig {
     // Immutable startup-only fastrace collection switch
     #[online_config(immutable)]
     pub trace_enabled: bool,
+
+    // Immutable OpenTelemetry endpoint used when trace collection is enabled
+    #[online_config(immutable)]
+    pub trace_endpoint: String,
 }
 
 impl MyConfig {
@@ -211,11 +215,11 @@ The immutable `trace_enabled` field controls whether Nimbis initializes the fast
 - `false`: do not start trace collection. This is the default.
 - `true`: start fastrace collection.
 
-When `trace_enabled = true`, the `trace_endpoint` field configures where traces are exported:
-- If empty (default), traces are only reported to the console.
-- If set to an OpenTelemetry endpoint (e.g. `http://localhost:4317`), traces are exported to that endpoint via gRPC.
+When `trace_enabled = true`, the immutable `trace_endpoint` field is required and must be a valid `http` or `https` URL with a host, such as `http://localhost:4317`. Traces are exported to that OpenTelemetry endpoint via gRPC.
 
-Runtime commands such as `CONFIG SET trace_enabled true` are rejected because fastrace collector setup is part of bootstrap-only telemetry initialization.
+When `trace_enabled = false`, `trace_endpoint` may be left empty. This is the default configuration and disables trace export entirely.
+
+Runtime commands such as `CONFIG SET trace_enabled true` or `CONFIG SET trace_endpoint http://localhost:4317` are rejected because fastrace collector setup is part of bootstrap-only telemetry initialization.
 
 ## 5. Build-time Configuration
 

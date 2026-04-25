@@ -75,7 +75,9 @@ var _ = Describe("CONFIG Commands", func() {
 		It("should get all fields with * wildcard", func() {
 			result, err := rdb.ConfigGet(ctx, "*").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(HaveLen(11)) // host, port, data_path, save, appendonly, log_level, log_output, log_rotation, trace_enabled, trace_endpoint, worker_threads
+			// host, port, data_path, save, appendonly, log_level, log_output,
+			// log_rotation, trace_enabled, trace_endpoint, worker_threads
+			Expect(result).To(HaveLen(11))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
 			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))

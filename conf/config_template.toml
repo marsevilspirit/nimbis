@@ -22,8 +22,8 @@ log_rotation = "daily"
 # Enable fastrace collection and OpenTelemetry export
 trace_enabled = false
 
-# OpenTelemetry endpoint for exporting traces (e.g., http://localhost:4317)
-# Required when trace_enabled = true
+# OpenTelemetry endpoint for exporting traces.
+# Required when trace_enabled = true, and must be an http or https URL with a host.
 trace_endpoint = ""
 
 # Number of worker threads (default: number of CPU cores)
