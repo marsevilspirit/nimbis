@@ -26,7 +26,7 @@ impl Tracer {
 	/// endpoint.
 	pub fn init(enabled: bool, endpoint: String) -> Result<Self, TelemetryError> {
 		if enabled {
-			if endpoint.trim().is_empty() {
+			if endpoint.is_empty() {
 				return Err(TelemetryError::TraceInitFailed(
 					"trace_endpoint must be set when trace collection is enabled".into(),
 				));

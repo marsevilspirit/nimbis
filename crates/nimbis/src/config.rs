@@ -255,9 +255,11 @@ fn resolve_log_output(config: &ServerConfig) -> Result<telemetry::logger::LogOut
 }
 
 fn validate_trace_endpoint(endpoint: &str) -> Result<(), ConfigError> {
-	let endpoint = endpoint.trim();
 	if endpoint.is_empty() {
 		return Err(ConfigError::TraceEndpointRequired);
+	}
+	if endpoint.trim() != endpoint {
+		return Err(ConfigError::InvalidTraceEndpoint(endpoint.to_string()));
 	}
 
 	let url = url::Url::parse(endpoint)
@@ -440,6 +442,8 @@ trace_endpoint = ""
 	#[case("grpc://localhost:4317")]
 	#[case("http://")]
 	#[case("http://localhost:invalid")]
+	#[case(" http://localhost:4317")]
+	#[case("http://localhost:4317 ")]
 	fn test_trace_endpoint_must_be_valid_url(#[case] endpoint: &str) {
 		let config = ServerConfig {
 			trace_enabled: true,
@@ -462,6 +466,20 @@ trace_endpoint = ""
 		};
 
 		assert!(config.validate().is_ok());
+	}
+
+	#[test]
+	fn test_trace_endpoint_rejects_surrounding_whitespace() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+trace_enabled = true
+trace_endpoint = " http://localhost:4317 "
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let err = load_from_file(&file_path).unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidTraceEndpoint(_)));
 	}
 
 	#[test]
