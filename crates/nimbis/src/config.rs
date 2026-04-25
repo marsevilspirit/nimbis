@@ -69,6 +69,9 @@ pub enum ConfigError {
 	#[error("trace_endpoint must be set when trace_enabled is true")]
 	TraceEndpointRequired,
 
+	#[error("Invalid trace_endpoint: {0}. Expected an http or https URL with a host")]
+	InvalidTraceEndpoint(String),
+
 	#[error(transparent)]
 	Telemetry(#[from] telemetry::TelemetryError),
 }
@@ -110,8 +113,8 @@ impl ServerConfig {
 	}
 
 	fn validate(&self) -> Result<(), ConfigError> {
-		if self.trace_enabled && self.trace_endpoint.trim().is_empty() {
-			return Err(ConfigError::TraceEndpointRequired);
+		if self.trace_enabled {
+			validate_trace_endpoint(&self.trace_endpoint)?;
 		}
 
 		Ok(())
@@ -251,6 +254,21 @@ fn resolve_log_output(config: &ServerConfig) -> Result<telemetry::logger::LogOut
 	}
 }
 
+fn validate_trace_endpoint(endpoint: &str) -> Result<(), ConfigError> {
+	let endpoint = endpoint.trim();
+	if endpoint.is_empty() {
+		return Err(ConfigError::TraceEndpointRequired);
+	}
+
+	let url = url::Url::parse(endpoint)
+		.map_err(|_| ConfigError::InvalidTraceEndpoint(endpoint.to_string()))?;
+	if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+		return Err(ConfigError::InvalidTraceEndpoint(endpoint.to_string()));
+	}
+
+	Ok(())
+}
+
 fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> {
 	let path_ref = path.as_ref();
 	let content = std::fs::read_to_string(path_ref).map_err(|source| ConfigError::Io {
@@ -277,6 +295,8 @@ fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> 
 
 #[cfg(test)]
 mod tests {
+	use rstest::rstest;
+
 	use super::*;
 
 	#[test]
@@ -413,6 +433,35 @@ trace_endpoint = ""
 
 		let err = load_from_file(&file_path).unwrap_err();
 		assert!(matches!(err, ConfigError::TraceEndpointRequired));
+	}
+
+	#[rstest]
+	#[case("localhost:4317")]
+	#[case("grpc://localhost:4317")]
+	#[case("http://")]
+	#[case("http://localhost:invalid")]
+	fn test_trace_endpoint_must_be_valid_url(#[case] endpoint: &str) {
+		let config = ServerConfig {
+			trace_enabled: true,
+			trace_endpoint: endpoint.into(),
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidTraceEndpoint(_)));
+	}
+
+	#[rstest]
+	#[case("http://localhost:4317")]
+	#[case("https://collector.example.com:4317")]
+	fn test_trace_endpoint_accepts_http_and_https_urls(#[case] endpoint: &str) {
+		let config = ServerConfig {
+			trace_enabled: true,
+			trace_endpoint: endpoint.into(),
+			..ServerConfig::default()
+		};
+
+		assert!(config.validate().is_ok());
 	}
 
 	#[test]

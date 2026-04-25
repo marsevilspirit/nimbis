@@ -57,6 +57,7 @@ tracing-subscriber = { version = "0.3.23", features = [
     "registry",
     "std",
 ] }
+url = "2.5.8"
 
 # Dev Dependencies
 criterion = { version = "0.8.1", features = ["html_reports"] }
