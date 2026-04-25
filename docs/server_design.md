@@ -61,22 +61,25 @@ use nimbis::config::{Cli, Parser};
 use nimbis::logo;
 
 let args = Cli::parse();
-if let Err(e) = nimbis::config::setup(args) {
-    log::error!("Failed to load configuration: {}", e);
-    std::process::exit(1);
-}
+let telemetry_manager = match nimbis::config::setup(args) {
+    Ok(manager) => manager,
+    Err(e) => {
+        log::error!("Failed to load configuration: {}", e);
+        std::process::exit(1);
+    }
+};
 
 logo::show_logo(); // Displays ASCII logo and detailed build information
 ```
 
-The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access.
+The configuration is stored in a thread-safe global state (`SERVER_CONF`) using `OnceLock` and `ArcSwap` for lock-free concurrent access. The returned telemetry manager owns telemetry lifecycle state, including logger reload state and trace flushing before shutdown.
 
 **Dynamic Configuration**: The server supports runtime configuration updates via the `CONFIG SET` command. For example, the log level can be changed dynamically:
 ```
 CONFIG SET log_level debug
 ```
 
-This triggers a callback (`on_log_level_change`) on the configuration object. The `telemetry` crate uses the `server_config!` macro (exported at the crate root of `nimbis`) to access the current log level and updates itself via the `reload` handle. See [Config Design](config.md) for details on the configuration system.
+This triggers the configuration object's callback, which uses the telemetry manager registered during startup to update the logger reload handle. See [Config Design](config.md) for details on the configuration system.
 
 #### Step 2: Server Creation (`new`)
 When `Server::new()` is called:

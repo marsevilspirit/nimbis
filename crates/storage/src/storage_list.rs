@@ -11,10 +11,12 @@ use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
 
 impl Storage {
+	#[fastrace::trace]
 	pub async fn lpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
 		self.list_push(key, elements, true).await
 	}
 
+	#[fastrace::trace]
 	pub async fn rpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
 		self.list_push(key, elements, false).await
 	}
@@ -89,10 +91,12 @@ impl Storage {
 		Ok(meta_val.len)
 	}
 
+	#[fastrace::trace]
 	pub async fn lpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, StorageError> {
 		self.list_pop(key, count, true).await
 	}
 
+	#[fastrace::trace]
 	pub async fn rpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, StorageError> {
 		self.list_pop(key, count, false).await
 	}
@@ -176,6 +180,7 @@ impl Storage {
 		Ok(results)
 	}
 
+	#[fastrace::trace]
 	pub async fn llen(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? {
 			Ok(meta_val.len)
@@ -184,6 +189,7 @@ impl Storage {
 		}
 	}
 
+	#[fastrace::trace]
 	pub async fn lrange(
 		&self,
 		key: Bytes,

@@ -1,8 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use nimbis::config::SERVER_CONF;
 use nimbis::config::ServerConfig;
 use nimbis::server::Server;
+use telemetry::manager::TELEMETRY_MANAGER;
+use telemetry::manager::TelemetryManager;
 use tempfile::TempDir;
 use tempfile::tempdir;
 use tokio::runtime::Builder;
@@ -33,6 +36,8 @@ impl MockNimbisServer {
 			log_level: "error".to_string(),
 			log_output: "terminal".to_string(),
 			log_rotation: "daily".to_string(),
+			trace_enabled: false,
+			trace_endpoint: "".to_string(),
 			worker_threads: 2,
 		};
 
@@ -43,6 +48,7 @@ impl MockNimbisServer {
 			.enable_all()
 			.build()
 			.expect("build tokio runtime");
+		TELEMETRY_MANAGER.init(Arc::new(TelemetryManager::disabled()));
 		runtime.spawn(async move {
 			match Server::new().await {
 				Ok(server) => {

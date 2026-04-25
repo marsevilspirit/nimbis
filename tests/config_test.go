@@ -59,6 +59,13 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveKeyWithValue("log_rotation", "daily"))
 		})
 
+		It("should get the trace enabled flag", func() {
+			result, err := rdb.ConfigGet(ctx, "trace_enabled").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(HaveLen(1))
+			Expect(result).To(HaveKeyWithValue("trace_enabled", "false"))
+		})
+
 		It("should return error for non-existent field", func() {
 			_, err := rdb.ConfigGet(ctx, "non_existent_field").Result()
 			Expect(err).To(HaveOccurred())
@@ -68,7 +75,9 @@ var _ = Describe("CONFIG Commands", func() {
 		It("should get all fields with * wildcard", func() {
 			result, err := rdb.ConfigGet(ctx, "*").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(HaveLen(9)) // host, port, data_path, save, appendonly, log_level, log_output, log_rotation, worker_threads
+			// host, port, data_path, save, appendonly, log_level, log_output,
+			// log_rotation, trace_enabled, trace_endpoint, worker_threads
+			Expect(result).To(HaveLen(11))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
 			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
@@ -77,6 +86,8 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))
 			Expect(result).To(HaveKeyWithValue("log_output", "terminal"))
 			Expect(result).To(HaveKeyWithValue("log_rotation", "daily"))
+			Expect(result).To(HaveKeyWithValue("trace_enabled", "false"))
+			Expect(result).To(HaveKeyWithValue("trace_endpoint", ""))
 			Expect(result).To(HaveKeyWithValue("worker_threads", strconv.Itoa(runtime.NumCPU())))
 		})
 
@@ -156,6 +167,16 @@ var _ = Describe("CONFIG Commands", func() {
 			result, err := rdb.ConfigGet(ctx, "log_rotation").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result["log_rotation"]).To(Equal("daily"))
+		})
+
+		It("should fail to set immutable field 'trace_enabled'", func() {
+			err := rdb.ConfigSet(ctx, "trace_enabled", "true").Err()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Field 'trace_enabled' is immutable"))
+
+			result, err := rdb.ConfigGet(ctx, "trace_enabled").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result["trace_enabled"]).To(Equal("false"))
 		})
 
 		It("should fail to set non-existent field", func() {

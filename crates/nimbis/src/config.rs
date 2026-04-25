@@ -13,11 +13,12 @@
 //!
 //! // In a real app, this would be called in main.rs
 //! let args = Cli::parse();
-//! setup(args);
+//! let _telemetry_manager = setup(args)?;
 //!
 //! // Access configuration
 //! let config = SERVER_CONF.load();
 //! println!("Server address: {}:{}", config.host, config.port);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 use std::path::Path;
@@ -30,6 +31,7 @@ use arc_swap::ArcSwap;
 pub use macros::OnlineConfig;
 use serde::Deserialize;
 use serde::Serialize;
+use telemetry::manager::TELEMETRY_MANAGER;
 use thiserror::Error;
 
 use crate::cli::Cli;
@@ -64,6 +66,12 @@ pub enum ConfigError {
 		path: String,
 	},
 
+	#[error("trace_endpoint must be set when trace_enabled is true")]
+	TraceEndpointRequired,
+
+	#[error("Invalid trace_endpoint: {0}. Expected an http or https URL with a host")]
+	InvalidTraceEndpoint(String),
+
 	#[error(transparent)]
 	Telemetry(#[from] telemetry::TelemetryError),
 }
@@ -89,12 +97,27 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub log_rotation: String,
 	#[online_config(immutable)]
+	pub trace_enabled: bool,
+	#[online_config(immutable)]
+	pub trace_endpoint: String,
+	#[online_config(immutable)]
 	pub worker_threads: usize,
 }
 
 impl ServerConfig {
 	fn on_log_level_change(&self) -> Result<(), String> {
-		telemetry::logger::reload_log_level(&self.log_level).map_err(|e| e.to_string())
+		TELEMETRY_MANAGER
+			.load()
+			.reload_log_level(&self.log_level)
+			.map_err(|e| e.to_string())
+	}
+
+	fn validate(&self) -> Result<(), ConfigError> {
+		if self.trace_enabled {
+			validate_trace_endpoint(&self.trace_endpoint)?;
+		}
+
+		Ok(())
 	}
 }
 
@@ -109,6 +132,8 @@ impl Default for ServerConfig {
 			log_level: "info".into(),
 			log_output: "terminal".into(),
 			log_rotation: "daily".into(),
+			trace_enabled: false,
+			trace_endpoint: "".into(),
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -184,6 +209,8 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		config.worker_threads = t;
 	}
 
+	config.validate()?;
+
 	let log_output = resolve_log_output(&config)?;
 
 	if log_output.is_file() {
@@ -193,7 +220,13 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		})?;
 	}
 
-	telemetry::logger::init(&config.log_level, log_output)?;
+	let telemetry_manager = Arc::new(telemetry::manager::TelemetryManager::init(
+		&config.log_level,
+		log_output,
+		config.trace_enabled,
+		config.trace_endpoint.clone(),
+	)?);
+	TELEMETRY_MANAGER.init(telemetry_manager);
 	SERVER_CONF.init(config);
 	Ok(())
 }
@@ -221,6 +254,23 @@ fn resolve_log_output(config: &ServerConfig) -> Result<telemetry::logger::LogOut
 	}
 }
 
+fn validate_trace_endpoint(endpoint: &str) -> Result<(), ConfigError> {
+	if endpoint.is_empty() {
+		return Err(ConfigError::TraceEndpointRequired);
+	}
+	if endpoint.trim() != endpoint {
+		return Err(ConfigError::InvalidTraceEndpoint(endpoint.to_string()));
+	}
+
+	let url = url::Url::parse(endpoint)
+		.map_err(|_| ConfigError::InvalidTraceEndpoint(endpoint.to_string()))?;
+	if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+		return Err(ConfigError::InvalidTraceEndpoint(endpoint.to_string()));
+	}
+
+	Ok(())
+}
+
 fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> {
 	let path_ref = path.as_ref();
 	let content = std::fs::read_to_string(path_ref).map_err(|source| ConfigError::Io {
@@ -233,16 +283,22 @@ fn load_from_file<P: AsRef<Path>>(path: P) -> Result<ServerConfig, ConfigError> 
 		.and_then(|ext| ext.to_str())
 		.ok_or(ConfigError::NoExtension)?;
 
-	match extension.to_lowercase().as_str() {
-		"toml" => Ok(toml::from_str(&content)?),
-		"json" => Ok(serde_json::from_str(&content)?),
-		"yaml" | "yml" => Ok(serde_yaml::from_str(&content)?),
-		_ => Err(ConfigError::UnsupportedFormat(extension.to_string())),
-	}
+	let config: ServerConfig = match extension.to_lowercase().as_str() {
+		"toml" => toml::from_str(&content)?,
+		"json" => serde_json::from_str(&content)?,
+		"yaml" | "yml" => serde_yaml::from_str(&content)?,
+		_ => return Err(ConfigError::UnsupportedFormat(extension.to_string())),
+	};
+
+	config.validate()?;
+
+	Ok(config)
 }
 
 #[cfg(test)]
 mod tests {
+	use rstest::rstest;
+
 	use super::*;
 
 	#[test]
@@ -278,6 +334,8 @@ appendonly = "yes"
 log_level = "debug"
 log_output = "file"
 log_rotation = "hourly"
+trace_enabled = true
+trace_endpoint = "http://localhost:4317"
 worker_threads = 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -288,6 +346,7 @@ worker_threads = 4
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
+		assert!(config.trace_enabled);
 		assert_eq!(config.worker_threads, 4);
 	}
 
@@ -303,8 +362,10 @@ worker_threads = 4
   "save": "900 1",
   "appendonly": "yes",
   "log_level": "debug",
-	"log_output": "file",
-	"log_rotation": "hourly",
+  "log_output": "file",
+  "log_rotation": "hourly",
+  "trace_enabled": true,
+  "trace_endpoint": "http://localhost:4317",
   "worker_threads": 4
 }
 "#;
@@ -316,6 +377,7 @@ worker_threads = 4
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
+		assert!(config.trace_enabled);
 	}
 
 	#[test]
@@ -331,6 +393,8 @@ appendonly: "yes"
 log_level: "debug"
 log_output: "file"
 log_rotation: "hourly"
+trace_enabled: true
+trace_endpoint: "http://localhost:4317"
 worker_threads: 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -341,6 +405,7 @@ worker_threads: 4
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
+		assert!(config.trace_enabled);
 	}
 
 	#[test]
@@ -351,6 +416,70 @@ worker_threads: 4
 	#[test]
 	fn test_default_log_rotation() {
 		assert_eq!(ServerConfig::default().log_rotation, "daily");
+	}
+
+	#[test]
+	fn test_default_trace_enabled() {
+		assert!(!ServerConfig::default().trace_enabled);
+	}
+
+	#[test]
+	fn test_trace_endpoint_required_when_trace_enabled() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+trace_enabled = true
+trace_endpoint = ""
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let err = load_from_file(&file_path).unwrap_err();
+		assert!(matches!(err, ConfigError::TraceEndpointRequired));
+	}
+
+	#[rstest]
+	#[case("localhost:4317")]
+	#[case("grpc://localhost:4317")]
+	#[case("http://")]
+	#[case("http://localhost:invalid")]
+	#[case(" http://localhost:4317")]
+	#[case("http://localhost:4317 ")]
+	fn test_trace_endpoint_must_be_valid_url(#[case] endpoint: &str) {
+		let config = ServerConfig {
+			trace_enabled: true,
+			trace_endpoint: endpoint.into(),
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidTraceEndpoint(_)));
+	}
+
+	#[rstest]
+	#[case("http://localhost:4317")]
+	#[case("https://collector.example.com:4317")]
+	fn test_trace_endpoint_accepts_http_and_https_urls(#[case] endpoint: &str) {
+		let config = ServerConfig {
+			trace_enabled: true,
+			trace_endpoint: endpoint.into(),
+			..ServerConfig::default()
+		};
+
+		assert!(config.validate().is_ok());
+	}
+
+	#[test]
+	fn test_trace_endpoint_rejects_surrounding_whitespace() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+trace_enabled = true
+trace_endpoint = " http://localhost:4317 "
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let err = load_from_file(&file_path).unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidTraceEndpoint(_)));
 	}
 
 	#[test]

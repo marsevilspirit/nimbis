@@ -1,4 +1,6 @@
 pub mod logger;
+pub mod manager;
+pub mod trace;
 use thiserror::Error;
 
 /// Errors that can occur in the telemetry module
@@ -31,4 +33,8 @@ pub enum TelemetryError {
 	/// Failed to initialize the logger sink
 	#[error("Failed to initialize logger: {0}")]
 	InitFailed(String),
+
+	/// Failed to initialize fastrace collector
+	#[error("Failed to initialize trace collector: {0}")]
+	TraceInitFailed(String),
 }

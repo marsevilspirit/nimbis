@@ -40,7 +40,7 @@ pub struct MyConfig {
     #[online_config(immutable)]
     pub id: i32,
     
-    // Field with callback - triggers on_log_level_change when updated
+    // Field with callback - validates the new log level when updated
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
 
@@ -50,12 +50,20 @@ pub struct MyConfig {
 
     #[online_config(immutable)]
     pub log_rotation: String,
+
+    // Immutable startup-only fastrace collection switch
+    #[online_config(immutable)]
+    pub trace_enabled: bool,
+
+    // Immutable OpenTelemetry endpoint used when trace collection is enabled
+    #[online_config(immutable)]
+    pub trace_endpoint: String,
 }
 
 impl MyConfig {
     // Callback method invoked when log_level is updated
     fn on_log_level_change(&mut self) -> Result<(), String> {
-        // Perform side effects, e.g., reload logging configuration
+        // Validate or perform side effects before the new config is committed
         println!("Log level changed to: {}", self.log_level);
         Ok(())
     }
@@ -156,6 +164,12 @@ pub struct ServerConfig {
     pub log_rotation: String,
 
     #[online_config(immutable)]
+    pub trace_enabled: bool,
+
+    #[online_config(immutable)]
+    pub trace_endpoint: String,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -193,6 +207,19 @@ When `log_output = "file"`, the immutable `log_rotation` field controls time-bas
 For the rotating modes, Nimbis uses a custom rolling file implementation that manages log files directly. Logs are created in `{data_path}/` with `nimbis` as the filename prefix and `.log` as the suffix. When rotation is enabled, the appender adds timestamp-based suffixes to archived log files according to the selected rotation policy.
 
 Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the same reason: rotation is part of bootstrap-only logger setup.
+
+### 4.3 Startup-only Trace Collection
+
+The immutable `trace_enabled` field controls whether Nimbis initializes the fastrace collector during startup:
+
+- `false`: do not start trace collection. This is the default.
+- `true`: start fastrace collection.
+
+When `trace_enabled = true`, the immutable `trace_endpoint` field is required and must be a valid `http` or `https` URL with a host, such as `http://localhost:4317`. Traces are exported to that OpenTelemetry endpoint via gRPC.
+
+When `trace_enabled = false`, `trace_endpoint` may be left empty. This is the default configuration and disables trace export entirely.
+
+Runtime commands such as `CONFIG SET trace_enabled true` or `CONFIG SET trace_endpoint http://localhost:4317` are rejected because fastrace collector setup is part of bootstrap-only telemetry initialization.
 
 ## 5. Build-time Configuration
 

@@ -3,6 +3,10 @@ use std::sync::Arc;
 use std::thread;
 
 use bytes::Bytes;
+use fastrace::future::FutureExt;
+use fastrace::prelude::Span;
+use fastrace::prelude::SpanContext;
+use fastrace::trace;
 use log::debug;
 use log::warn;
 use resp::RespValue;
@@ -101,6 +105,28 @@ impl Worker {
 	}
 
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
+		// Apply a 0.01% sampling rate for tracing to prevent massive gRPC payload and
+		// reduce overhead.
+		let is_sampled = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.unwrap_or_default()
+			.subsec_nanos()
+			.is_multiple_of(10000);
+		let span_context = SpanContext::random().sampled(is_sampled);
+		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
+			[
+				("cmd", req.cmd_name.clone()),
+				("client_id", req.ctx.client_id.to_string()),
+			]
+		});
+
+		Self::handle_cmd_request_inner(req, cmd_table, storage)
+			.in_span(root_span)
+			.await;
+	}
+
+	#[trace]
+	async fn handle_cmd_request_inner(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
 		let response = match cmd_table.get_cmd(&req.cmd_name) {
 			Some(cmd) => cmd.execute(storage, &req.args, &req.ctx).await,
 			None => RespValue::error(format!(

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use fastrace::trace;
 use log::debug;
 use log::error;
 use log::info;
@@ -22,6 +23,7 @@ pub struct Server {
 
 impl Server {
 	// Create a new server instance
+	#[trace]
 	pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 		// Ensure data directory exists
 		let data_path = &server_config!(data_path);
@@ -74,6 +76,7 @@ impl Server {
 		})
 	}
 
+	#[trace]
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let addr = format!("{}:{}", &server_config!(host), server_config!(port));
 		let listener = TcpListener::bind(&addr).await?;

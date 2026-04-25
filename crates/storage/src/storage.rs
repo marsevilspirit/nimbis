@@ -42,6 +42,7 @@ impl Storage {
 		}
 	}
 
+	#[fastrace::trace]
 	pub async fn open(
 		path: impl AsRef<Path>,
 		shard_id: Option<usize>,
@@ -123,6 +124,7 @@ impl Storage {
 		Ok(())
 	}
 
+	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential

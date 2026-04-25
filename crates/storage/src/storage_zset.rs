@@ -13,6 +13,7 @@ use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
 impl Storage {
+	#[fastrace::trace]
 	pub async fn zadd(
 		&self,
 		key: Bytes,
@@ -155,6 +156,7 @@ impl Storage {
 		Ok(added_count)
 	}
 
+	#[fastrace::trace]
 	pub async fn zrange(
 		&self,
 		key: Bytes,
@@ -223,6 +225,7 @@ impl Storage {
 		}
 	}
 
+	#[fastrace::trace]
 	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
 		let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? else {
 			return Ok(None);
@@ -240,6 +243,7 @@ impl Storage {
 		}
 	}
 
+	#[fastrace::trace]
 	pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
@@ -313,6 +317,7 @@ impl Storage {
 		Ok(removed_count)
 	}
 
+	#[fastrace::trace]
 	pub async fn zcard(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			Ok(meta_val.len)

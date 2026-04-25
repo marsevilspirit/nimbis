@@ -11,6 +11,7 @@ use crate::string::meta::SetMetaValue;
 use crate::utils::user_key_prefix;
 
 impl Storage {
+	#[fastrace::trace]
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
@@ -82,6 +83,7 @@ impl Storage {
 		Ok(added_count)
 	}
 
+	#[fastrace::trace]
 	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, StorageError> {
 		let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? else {
 			return Ok(Vec::new());
@@ -123,6 +125,7 @@ impl Storage {
 		Ok(members)
 	}
 
+	#[fastrace::trace]
 	pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, StorageError> {
 		let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? else {
 			return Ok(false);
@@ -137,6 +140,7 @@ impl Storage {
 		Ok(found)
 	}
 
+	#[fastrace::trace]
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
@@ -185,6 +189,7 @@ impl Storage {
 		Ok(removed_count)
 	}
 
+	#[fastrace::trace]
 	pub async fn scard(&self, key: Bytes) -> Result<u64, StorageError> {
 		if let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? {
 			Ok(meta_val.len)

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use fastrace::trace;
 use log::debug;
 use log::error;
 use resp::RespEncoder;
@@ -31,6 +32,7 @@ fn hash_key(key: &[u8]) -> u64 {
 }
 
 /// Helper to aggregate FLUSHDB responses from all workers
+#[trace]
 async fn aggregate_flushdb_responses(
 	flush_rxs: Vec<oneshot::Receiver<RespValue>>,
 	final_tx: oneshot::Sender<RespValue>,
@@ -126,6 +128,7 @@ impl CommandDispatcher {
 	}
 
 	/// Send all batches to respective workers
+	#[trace]
 	pub async fn dispatch_batches(
 		&mut self,
 	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -149,6 +152,7 @@ impl CommandDispatcher {
 	}
 
 	/// Wait for all responses in order and write to socket
+	#[trace]
 	pub async fn await_responses(
 		&mut self,
 		socket: &mut TcpStream,
