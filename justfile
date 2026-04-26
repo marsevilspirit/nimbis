@@ -22,7 +22,7 @@ e2e-test: (build "--release")
 # Run storage benchmarks
 [group: 'test']
 bench:
-    cargo bench -p storage --bench benchmarks
+    cargo bench -p nimbis-storage --bench benchmarks
 
 # Check all crates
 [group: 'check']

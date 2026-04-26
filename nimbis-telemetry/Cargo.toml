@@ -1,0 +1,25 @@
+[package]
+name = "nimbis-telemetry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+chrono = { workspace = true }
+fastrace = { workspace = true }
+fastrace-opentelemetry = { workspace = true }
+log = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+
+rstest = { workspace = true }

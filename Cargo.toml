@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/resp",
-    "crates/nimbis",
-    "crates/telemetry",
-    "crates/storage",
-    "crates/macros",
+    "nimbis-resp",
+    "nimbis",
+    "nimbis-telemetry",
+    "nimbis-storage",
+    "nimbis-macros",
     "xtask",
 ]
 
@@ -18,10 +18,10 @@ repository = "https://github.com/marsevilspirit/nimbis"
 
 [workspace.dependencies]
 # Local Dependencies
-macros = { path = "crates/macros" }
-resp = { path = "crates/resp" }
-storage = { path = "crates/storage" }
-telemetry = { path = "crates/telemetry" }
+nimbis-macros = { path = "nimbis-macros" }
+nimbis-resp = { path = "nimbis-resp" }
+nimbis-storage = { path = "nimbis-storage" }
+nimbis-telemetry = { path = "nimbis-telemetry" }
 
 # Dependencies
 arc-swap = "1.8.1"

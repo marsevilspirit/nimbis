@@ -1600,15 +1600,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "rstest",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "madsim"
 version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1745,21 +1736,79 @@ dependencies = [
  "dashmap",
  "fastrace",
  "log",
- "macros",
+ "nimbis-macros",
+ "nimbis-resp",
+ "nimbis-storage",
+ "nimbis-telemetry",
  "num_cpus",
- "resp",
  "rstest",
  "serde",
  "serde_json",
  "serde_yaml",
  "serial_test",
- "storage",
- "telemetry",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 1.0.3+spec-1.1.0",
  "url",
+]
+
+[[package]]
+name = "nimbis-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "rstest",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "nimbis-resp"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "criterion",
+ "memchr",
+ "rstest",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "nimbis-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "criterion",
+ "fastrace",
+ "futures",
+ "log",
+ "object_store 0.13.1",
+ "rstest",
+ "slatedb",
+ "thiserror 2.0.18",
+ "tokio",
+ "ulid",
+]
+
+[[package]]
+name = "nimbis-telemetry"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "fastrace",
+ "fastrace-opentelemetry",
+ "log",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "rstest",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2544,18 +2593,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "resp"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "criterion",
- "memchr",
- "rstest",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3033,25 +3070,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "criterion",
- "fastrace",
- "futures",
- "log",
- "object_store 0.13.1",
- "rstest",
- "slatedb",
- "thiserror 2.0.18",
- "tokio",
- "ulid",
-]
-
-[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3123,24 +3141,6 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-io-kit",
  "windows",
-]
-
-[[package]]
-name = "telemetry"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "fastrace",
- "fastrace-opentelemetry",
- "log",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "rstest",
- "thiserror 2.0.18",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
 ]
 
 [[package]]

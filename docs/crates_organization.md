@@ -7,7 +7,7 @@ Nimbis is organized as a Cargo workspace with multiple focused crates:
 ### `macros`
 Procedural macros for the configuration system.
 
-**Location**: `crates/macros/`
+**Location**: `nimbis-macros/`
 
 **Key Components**:
 - `OnlineConfig` derive macro
@@ -16,7 +16,7 @@ Procedural macros for the configuration system.
 ### `resp`
 RESP (REdis Serialization Protocol) parser and implementation.
 
-**Location**: `crates/resp/`
+**Location**: `nimbis-resp/`
 
 **Key Components**:
 - RESP parser
@@ -28,7 +28,7 @@ RESP (REdis Serialization Protocol) parser and implementation.
 ### `storage`
 Persistent storage layer using SlateDB.
 
-**Location**: `crates/storage/`
+**Location**: `nimbis-storage/`
 
 **Key Components**:
 - `Storage` struct with 5 isolated SlateDB instances (`string_db`, `hash_db`, `list_db`, `set_db`, `zset_db`)
@@ -41,7 +41,7 @@ Persistent storage layer using SlateDB.
 ### `telemetry`
 Logging and observability infrastructure.
 
-**Location**: `crates/telemetry/`
+**Location**: `nimbis-telemetry/`
 
 **Key Components**:
 - Logger initialization
@@ -50,7 +50,7 @@ Logging and observability infrastructure.
 ### `nimbis` (Main Crate)
 The main executable, integrating all crates, implementing the command system and managing configuration.
 
-**Location**: `crates/nimbis/`
+**Location**: `nimbis/`
 
 **Key Components**:
 - **Configuration Management** (`src/config.rs`): Global `SERVER_CONF`, `server_config!` macro, and dynamic update logic.
@@ -81,10 +81,10 @@ nimbis
 
 To add a new command to Nimbis:
 
-1. Create a new file in `crates/nimbis/src/cmd/cmd_your_command.rs`
+1. Create a new file in `nimbis/src/cmd/cmd_your_command.rs`
 2. Implement the `Cmd` trait
-3. Export it in `crates/nimbis/src/cmd/mod.rs`
-4. Register it in `crates/nimbis/src/cmd/table.rs`
+3. Export it in `nimbis/src/cmd/mod.rs`
+4. Register it in `nimbis/src/cmd/table.rs`
 
 See [Commands](commands.md) for detailed instructions on implementing new commands.
 
