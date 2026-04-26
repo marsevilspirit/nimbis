@@ -83,7 +83,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nimbis-resp = { path = "crates/nimbis-resp" } # Or specify version/git url
+nimbis-resp = { path = "nimbis-resp" } # Or specify version/git url
 bytes = "1.5"
 ```
 
@@ -93,7 +93,7 @@ For TCP servers, use `RespParser` to handle streaming data, allowing for partial
 
 ```rust
 use bytes::BytesMut;
-use resp::{RespParser, RespParseResult, RespValue};
+use nimbis_resp::{RespParser, RespParseResult, RespValue};
 
 fn main() {
     let mut parser = RespParser::new();
@@ -127,15 +127,15 @@ fn main() {
 
 ### 2.3 One-off Parsing
 
-For simple cases where you have a full buffer, you can use the `resp::parse` helper:
+For simple cases where you have a full buffer, you can use the `nimbis_resp::parse` helper:
 
 ```rust
 use bytes::BytesMut;
-use resp::RespValue;
+use nimbis_resp::RespValue;
 
 fn main() {
     let mut buf = BytesMut::from(&b"+OK\r\n"[..]);
-    let value = resp::parse(&mut buf).unwrap();
+    let value = nimbis_resp::parse(&mut buf).unwrap();
     
     assert_eq!(value.as_str(), Some("OK"));
 }
@@ -146,7 +146,7 @@ fn main() {
 You can construct `RespValue` directly using variants or use convenience constructors:
 
 ```rust
-use resp::RespValue;
+use nimbis_resp::RespValue;
 use bytes::Bytes;
 
 fn main() {
@@ -174,7 +174,7 @@ fn main() {
 ### 2.5 Handling Complex Types (Arrays & Maps)
 
 ```rust
-use resp::RespValue;
+use nimbis_resp::RespValue;
 
 fn handle_response(val: RespValue) {
     match val {

@@ -39,7 +39,7 @@ For more details on persistent storage, see [Storage Design](storage_design.md).
 
 ## 2. Server Implementation Details
 
-The core logic resides in `crates/nimbis/src/server.rs`.
+The core logic resides in `nimbis/src/server.rs`.
 
 ### 2.1 The `Server` Struct
 The `Server` struct manages the lifespan of the workers:
@@ -52,7 +52,7 @@ pub struct Server {
 ### 2.2 Lifecycle
 
 #### Step 0: Build-time environment setup
-The `crates/nimbis/build.rs` script runs during compilation to generate environment variables (`NIMBIS_GIT_HASH`, `NIMBIS_BUILD_DATE`, etc.) that are later embedded into the binary using the `env!` macro.
+The `nimbis/build.rs` script runs during compilation to generate environment variables (`NIMBIS_GIT_HASH`, `NIMBIS_BUILD_DATE`, etc.) that are later embedded into the binary using the `env!` macro.
 
 #### Step 1: Configuration Initialization and Logo
 Before creating the server, the main application initializes the configuration and displays the startup banner:
@@ -365,10 +365,10 @@ All mutable state is shared via `Arc`:
 
 | File                          | Purpose                  |
 | ----------------------------- | ------------------------ |
-| `crates/nimbis/src/worker.rs` | Worker implementation    |
-| `crates/nimbis/src/server.rs` | Server/acceptor loop     |
-| `crates/resp/src/`            | RESP protocol parser     |
-| `crates/storage/src/`         | Persistent storage layer |
+| `nimbis/src/worker.rs` | Worker implementation    |
+| `nimbis/src/server.rs` | Server/acceptor loop     |
+| `nimbis-resp/src/`            | RESP protocol parser     |
+| `nimbis-storage/src/`         | Persistent storage layer |
 
 ---
 

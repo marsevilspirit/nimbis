@@ -31,8 +31,8 @@ Verifies workspace integrity by checking that:
 3. `Cargo.toml` files do not use tabs
 
 The check scans `Cargo.toml` files in the repository, including the root
-manifest, crates under `crates/`, and `xtask/Cargo.toml`. Local path
-dependencies are skipped.
+manifest, workspace crates at the repository root, and `xtask/Cargo.toml`.
+Local path dependencies are skipped.
 
 ### `check-code-fmt`
 
