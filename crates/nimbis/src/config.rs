@@ -113,6 +113,8 @@ impl ServerConfig {
 	}
 
 	fn validate(&self) -> Result<(), ConfigError> {
+		telemetry::logger::validate_log_level(&self.log_level)?;
+
 		if self.trace_enabled {
 			validate_trace_endpoint(&self.trace_endpoint)?;
 		}
@@ -480,6 +482,37 @@ trace_endpoint = " http://localhost:4317 "
 
 		let err = load_from_file(&file_path).unwrap_err();
 		assert!(matches!(err, ConfigError::InvalidTraceEndpoint(_)));
+	}
+
+	#[test]
+	fn test_log_level_accepts_env_filter_expression() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+log_level = "nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info"
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let config = load_from_file(&file_path).unwrap();
+		assert_eq!(
+			config.log_level,
+			"nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info"
+		);
+	}
+
+	#[test]
+	fn test_log_level_rejects_invalid_env_filter_expression() {
+		let dir = tempfile::tempdir().unwrap();
+		let file_path = dir.path().join("config.toml");
+		let content = r#"
+log_level = "nimbis=verbose"
+"#;
+		std::fs::write(&file_path, content).unwrap();
+
+		let err = load_from_file(&file_path).unwrap_err();
+		assert!(
+			matches!(err, ConfigError::Telemetry(telemetry::TelemetryError::InvalidLogLevel(v)) if v == "nimbis=verbose")
+		);
 	}
 
 	#[test]
