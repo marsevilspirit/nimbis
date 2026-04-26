@@ -15,13 +15,12 @@
 - Required CLIs used by repo tasks:
   - `just`
   - `cargo-nextest`
-  - `rust-script`
   - Go toolchain (for `tests/`)
 
 Install quickly (if missing):
 
 ```bash
-cargo install just rust-script
+cargo install just
 cargo install --locked cargo-nextest
 ```
 
@@ -45,9 +44,9 @@ cargo install --locked cargo-nextest
 - `just e2e-test` removes `nimbis_store`, starts the `nimbis` process, and runs Go/Ginkgo tests that connect to `localhost:6379`.
 
 ## Repository-specific guardrails
-- Keep `Cargo.toml` dependency entries sorted and prefer `workspace = true` where expected (`scripts/check_workspace_deps.rs` enforces this).
-- Keep formatting and structural conventions clean (`scripts/check_code_fmt.rs`).
-- Do not add numbered step comments in code (`scripts/check_numbered_comments.rs`).
+- Keep `Cargo.toml` dependency entries sorted and prefer `workspace = true` where expected (`cargo xtask check-workspace` enforces this).
+- Keep formatting and structural conventions clean (`cargo xtask check-code-fmt`).
+- Do not add numbered step comments in code (`cargo xtask check-numbered-comments`).
 - For command implementation work, update all three places:
   1. `crates/nimbis/src/cmd/cmd_*.rs`
   2. `crates/nimbis/src/cmd/mod.rs`
@@ -64,7 +63,7 @@ cargo install --locked cargo-nextest
 ## Errors encountered during onboarding and workarounds
 1. **Error:** `just: command not found` when running validation.
    - **Workaround:** install required tools first:
-     - `cargo install just rust-script`
+     - `cargo install just`
      - `cargo install --locked cargo-nextest`
 
 2. **Error:** installing `cargo-nextest` without lockfile failed with:

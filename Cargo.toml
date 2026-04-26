@@ -6,6 +6,7 @@ members = [
     "crates/telemetry",
     "crates/storage",
     "crates/macros",
+    "xtask",
 ]
 
 [workspace.package]
@@ -40,6 +41,7 @@ opentelemetry = "0.31.0"
 opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
 quote = "1.0.45"
+regex = "1.12.2"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.141"
 serde_yaml = "0.9.34"
@@ -49,6 +51,7 @@ tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = { version = "1.51.1", features = ["full"] }
 toml = "1.0.1"
+toml_edit = "0.23.7"
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.23", features = [
@@ -58,6 +61,7 @@ tracing-subscriber = { version = "0.3.23", features = [
     "std",
 ] }
 url = "2.5.8"
+walkdir = "2.5.0"
 
 # Dev Dependencies
 criterion = { version = "0.8.1", features = ["html_reports"] }

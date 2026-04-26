@@ -44,9 +44,6 @@ jobs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Install rust-script
-      run: cargo install rust-script
-
     - name: Setup Go
       uses: actions/setup-go@v6
       with:
