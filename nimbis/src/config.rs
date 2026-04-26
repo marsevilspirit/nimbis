@@ -29,7 +29,13 @@ use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
 pub use nimbis_macros::OnlineConfig;
+use nimbis_telemetry::TelemetryError;
+use nimbis_telemetry::logger::File as LogFile;
+use nimbis_telemetry::logger::LogOutput;
+use nimbis_telemetry::logger::LogRotation;
+use nimbis_telemetry::logger::Terminal;
 use nimbis_telemetry::manager::TELEMETRY_MANAGER;
+use nimbis_telemetry::manager::TelemetryManager;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
@@ -73,7 +79,7 @@ pub enum ConfigError {
 	InvalidTraceEndpoint(String),
 
 	#[error(transparent)]
-	Telemetry(#[from] nimbis_telemetry::TelemetryError),
+	Telemetry(#[from] TelemetryError),
 }
 
 #[derive(Debug, Clone, OnlineConfig, Deserialize, Serialize)]
@@ -220,7 +226,7 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 		})?;
 	}
 
-	let telemetry_manager = Arc::new(nimbis_telemetry::manager::TelemetryManager::init(
+	let telemetry_manager = Arc::new(TelemetryManager::init(
 		&config.log_level,
 		log_output,
 		config.trace_enabled,
@@ -235,24 +241,18 @@ fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
 	Path::new(&config.data_path).join("nimbis.log")
 }
 
-fn resolve_log_output(
-	config: &ServerConfig,
-) -> Result<nimbis_telemetry::logger::LogOutput, ConfigError> {
+fn resolve_log_output(config: &ServerConfig) -> Result<LogOutput, ConfigError> {
 	let log_file_path = resolve_log_file_path(config);
 
 	match config.log_output.trim().to_ascii_lowercase().as_str() {
-		"terminal" => Ok(nimbis_telemetry::logger::LogOutput::Terminal(
-			nimbis_telemetry::logger::Terminal,
-		)),
+		"terminal" => Ok(LogOutput::Terminal(Terminal)),
 		"file" => {
-			let rotation = nimbis_telemetry::logger::LogRotation::from_mode(&config.log_rotation)?;
-			Ok(nimbis_telemetry::logger::LogOutput::File(
-				nimbis_telemetry::logger::File::new(log_file_path, rotation),
-			))
+			let rotation = LogRotation::from_mode(&config.log_rotation)?;
+			Ok(LogOutput::File(LogFile::new(log_file_path, rotation)))
 		}
-		_ => Err(ConfigError::from(
-			nimbis_telemetry::TelemetryError::InvalidLogOutput(config.log_output.clone()),
-		)),
+		_ => Err(ConfigError::from(TelemetryError::InvalidLogOutput(
+			config.log_output.clone(),
+		))),
 	}
 }
 
@@ -497,10 +497,7 @@ trace_endpoint = " http://localhost:4317 "
 	#[test]
 	fn test_resolve_terminal_log_output() {
 		let output = resolve_log_output(&ServerConfig::default()).unwrap();
-		assert!(matches!(
-			output,
-			nimbis_telemetry::logger::LogOutput::Terminal(_)
-		));
+		assert!(matches!(output, LogOutput::Terminal(_)));
 	}
 
 	#[test]
@@ -513,10 +510,7 @@ trace_endpoint = " http://localhost:4317 "
 		};
 
 		let output = resolve_log_output(&config).unwrap();
-		assert!(matches!(
-			output,
-			nimbis_telemetry::logger::LogOutput::File(_)
-		));
+		assert!(matches!(output, LogOutput::File(_)));
 		assert!(output.is_file());
 	}
 
@@ -529,9 +523,6 @@ trace_endpoint = " http://localhost:4317 "
 		};
 
 		let output = resolve_log_output(&config).unwrap();
-		assert!(matches!(
-			output,
-			nimbis_telemetry::logger::LogOutput::Terminal(_)
-		));
+		assert!(matches!(output, LogOutput::Terminal(_)));
 	}
 }
