@@ -119,7 +119,7 @@ impl ServerConfig {
 	}
 
 	fn validate(&self) -> Result<(), ConfigError> {
-		telemetry::logger::validate_log_level(&self.log_level)?;
+		nimbis_telemetry::logger::validate_log_level(&self.log_level)?;
 
 		if self.trace_enabled {
 			validate_trace_endpoint(&self.trace_endpoint)?;
@@ -513,7 +513,7 @@ log_level = "nimbis=verbose"
 
 		let err = load_from_file(&file_path).unwrap_err();
 		assert!(
-			matches!(err, ConfigError::Telemetry(telemetry::TelemetryError::InvalidLogLevel(v)) if v == "nimbis=verbose")
+			matches!(err, ConfigError::Telemetry(TelemetryError::InvalidLogLevel(v)) if v == "nimbis=verbose")
 		);
 	}
 
