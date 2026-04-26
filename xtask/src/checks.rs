@@ -457,7 +457,8 @@ regex = "1"
 		let issues = workspace_issues(&dir);
 
 		assert!(issues.iter().any(|issue| {
-			issue.contains("crates/demo/Cargo.toml:[dependencies] 'regex' uses hardcoded version")
+			issue.contains("[dependencies] 'regex' uses hardcoded version")
+				&& issue.contains("should use workspace = true")
 		}));
 
 		std::fs::remove_dir_all(dir).unwrap();
@@ -498,7 +499,7 @@ regex = "1"
 		assert!(
 			issues
 				.iter()
-				.any(|issue| issue.contains("xtask/Cargo.toml:[dependencies] 'regex'"))
+				.any(|issue| issue.contains("[dependencies] 'regex' uses hardcoded version"))
 		);
 
 		std::fs::remove_dir_all(dir).unwrap();
