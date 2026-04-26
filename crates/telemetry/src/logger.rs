@@ -394,6 +394,15 @@ where
 }
 
 pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
+	if !level.contains('=') && !level.contains(',') {
+		const VALID_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
+		let level_lower = level.to_lowercase();
+		if !VALID_LEVELS.contains(&level_lower.as_str()) {
+			return Err(TelemetryError::InvalidLogLevel(level.to_string()));
+		}
+		return Ok(());
+	}
+
 	EnvFilter::try_new(level)
 		.map(|_| ())
 		.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))
@@ -478,9 +487,13 @@ mod tests {
 	#[case("bar")]
 	#[case("warning")] // Common mistake (should be "warn")
 	#[case("critical")] // Common mistake (not a standard Rust log level)
+	#[case("=")]
+	#[case("=info")]
+	#[case("nimbis=debug,=warn")]
+	#[case("nimbis=debug=info")]
+	#[case("nimbis=[debug]")]
 	#[case("nimbis=verbose")]
 	#[case("nimbis==debug")]
-	#[case("nimbis=debug,")]
 	fn test_invalid_log_levels(#[case] level: &str) {
 		let result = validate_log_level(level);
 		assert!(
