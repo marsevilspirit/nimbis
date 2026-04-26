@@ -93,7 +93,7 @@ pub fn workspace_issues(root: &Path) -> Vec<String> {
 		for section in sections {
 			if let Some(item) = doc.get(section) {
 				if let Some(table) = item.as_table() {
-					check_dependencies(&path, section, table, &mut issues);
+					check_dependencies(&path, section, table, &content, &mut issues);
 				} else if let Some(table) = item.as_inline_table() {
 					let names: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
 					check_order(&path, section, &names, &mut issues);
@@ -101,10 +101,13 @@ pub fn workspace_issues(root: &Path) -> Vec<String> {
 			}
 		}
 
-		if let Some(workspace) = doc.get("workspace").and_then(|v| v.as_table())
-			&& let Some(deps) = workspace.get("dependencies").and_then(|v| v.as_table())
+		if let Some(deps) = doc
+			.get("workspace")
+			.and_then(|v| v.as_table())
+			.and_then(|workspace| workspace.get("dependencies"))
+			.and_then(|deps| deps.as_table())
 		{
-			check_dependencies(&path, "workspace.dependencies", deps, &mut issues);
+			check_dependencies(&path, "workspace.dependencies", deps, &content, &mut issues);
 		}
 	}
 
@@ -173,7 +176,13 @@ pub fn numbered_comment_issues(root: &Path) -> Vec<String> {
 	issues
 }
 
-fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Vec<String>) {
+fn check_dependencies(
+	path: &Path,
+	section: &str,
+	table: &Table,
+	content: &str,
+	issues: &mut Vec<String>,
+) {
 	let is_workspace_root = section == "workspace.dependencies";
 
 	if !is_workspace_root {
@@ -186,7 +195,6 @@ fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Ve
 		}
 	}
 
-	let content = fs::read_to_string(path).unwrap_or_default();
 	let section_header = if is_workspace_root {
 		"[workspace.dependencies]".to_string()
 	} else {
@@ -200,15 +208,15 @@ fn check_dependencies(path: &Path, section: &str, table: &Table, issues: &mut Ve
 
 		let mut current_block = Vec::new();
 		for line in active_content.lines() {
-			let line = line.trim();
-			if line.is_empty() {
+			let trimmed = line.trim();
+			if trimmed.is_empty() {
 				if !current_block.is_empty() {
 					check_order(path, section, &current_block, issues);
 					current_block.clear();
 				}
 				continue;
 			}
-			if line.starts_with('#') {
+			if trimmed.starts_with('#') || line.starts_with(|c: char| c.is_whitespace()) {
 				continue;
 			}
 			if let Some(eq_idx) = line.find('=') {
@@ -310,7 +318,7 @@ fn check_workspace_usage(
 }
 
 fn check_impl_spacing(content: &str, path: &Path, issues: &mut Vec<String>) {
-	let re_impl = Regex::new(r"(?m)^[ \t]*\}\n[ \t]*(?:#\[.*\]\n[ \t]*)*impl").unwrap();
+	let re_impl = Regex::new(r"(?m)^[ \t]*\}\r?\n[ \t]*(?:#\[.*\]\r?\n[ \t]*)*impl").unwrap();
 
 	for mat in re_impl.find_iter(content) {
 		let start = mat.start();
@@ -427,6 +435,20 @@ mod tests {
 	}
 
 	#[test]
+	fn code_fmt_check_flags_adjacent_impl_blocks_with_crlf() {
+		let mut issues = Vec::new();
+		let content = format!("impl Foo {{\r\n{}\r\n{} Bar {{\r\n}}\r\n", "}", "impl");
+		check_impl_spacing(&content, Path::new("sample.rs"), &mut issues);
+
+		assert_eq!(
+			issues,
+			vec![
+				"sample.rs:2 - Add a blank line between the closing brace '}' and the next 'impl' block."
+			]
+		);
+	}
+
+	#[test]
 	fn workspace_check_flags_hardcoded_dependency_versions() {
 		let dir =
 			std::env::temp_dir().join(format!("nimbis-xtask-workspace-{}", std::process::id()));
@@ -500,6 +522,54 @@ regex = "1"
 			issues
 				.iter()
 				.any(|issue| issue.contains("[dependencies] 'regex' uses hardcoded version"))
+		);
+
+		std::fs::remove_dir_all(dir).unwrap();
+	}
+
+	#[test]
+	fn workspace_check_ignores_multiline_dependency_inner_keys_for_ordering() {
+		let dir = std::env::temp_dir().join(format!(
+			"nimbis-xtask-workspace-multiline-{}",
+			std::process::id()
+		));
+		std::fs::create_dir_all(dir.join("crates/demo")).unwrap();
+		std::fs::write(
+			dir.join("Cargo.toml"),
+			r#"[workspace]
+members = ["crates/demo"]
+
+[workspace.dependencies]
+regex = "1.0.0"
+serde = "1.0.0"
+"#,
+		)
+		.unwrap();
+		std::fs::write(
+			dir.join("crates/demo/Cargo.toml"),
+			r#"[package]
+name = "demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = {
+    workspace = true,
+    features = ["std"],
+}
+serde = { workspace = true }
+"#,
+		)
+		.unwrap();
+
+		let issues = workspace_issues(&dir);
+
+		assert!(
+			!issues
+				.iter()
+				.any(|issue| issue
+					.contains("dependencies within a block are not in alphabetical order")),
+			"{issues:?}"
 		);
 
 		std::fs::remove_dir_all(dir).unwrap();
