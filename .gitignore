@@ -2,6 +2,8 @@
 .claude/
 CLAUDE.md
 config.toml
+!.cargo/
+!.cargo/config.toml
 
 /target
 /nimbis_store
