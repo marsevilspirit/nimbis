@@ -1,7 +1,7 @@
 .vscode/
 .claude/
 CLAUDE.md
-config.toml
+/conf/config.toml
 
 /target
 /nimbis_store

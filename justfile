@@ -30,31 +30,29 @@ check: check-workspace check-code-fmt check-numbered-comments
     cargo check --workspace
     cargo fmt -- --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
-    rustfmt --check scripts/*.rs
 
 # Check workspace dependencies
 [private]
 [group: 'check']
 check-workspace:
-    rust-script scripts/check_workspace_deps.rs
+    cargo xtask check-workspace
 
 # Check code format
 [private]
 [group: 'check']
 check-code-fmt:
-    rust-script scripts/check_code_fmt.rs
+    cargo xtask check-code-fmt
 
 # Check numbered step comments
 [private]
 [group: 'check']
 check-numbered-comments:
-    rust-script scripts/check_numbered_comments.rs
+    cargo xtask check-numbered-comments
 
 # Format code
 [group: 'misc']
 fmt:
     cargo fmt --all
-    rustfmt scripts/*.rs
 
 # Clean build artifacts
 [group: 'clean']

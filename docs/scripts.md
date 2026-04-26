@@ -1,44 +1,70 @@
-# Scripts Documentation
+# Utility Tasks
 
-This document describes the purpose and usage of all scripts in the `scripts/` directory.
+This document describes the utility tasks exposed by the `xtask` crate.
 
-## check_workspace_deps.rs
+## Usage
 
-**Purpose**: Verifies workspace integrity by checking that:
-1. All dependencies use `workspace = true` instead of hardcoded version numbers
-2. Dependencies are sorted alphabetically
-3. No tabs are used (spaces preferred)
-
-**Usage**:
+Run tasks through `just` for everyday development:
 
 ```bash
-# Run via just command (recommended)
 just check-workspace
-
-# Or run directly with rust-script
-rust-script scripts/check_workspace_deps.rs
+just check-code-fmt
+just check-numbered-comments
 ```
 
-**How it works**:
-1. Scans `Cargo.toml` in root directory and all files in `crates/` directory
-2. Checks `[dependencies]` and `[dev-dependencies]` sections
-3. Verifies dependencies use `workspace = true` pattern
-4. Checks alphabetical ordering of dependencies
-5. Validates formatting (no tabs)
-6. Automatically skips local path dependencies (workspace members)
+Tasks can also be run directly with Cargo:
 
-**Requirements**:
-- `rust-script` installed: `cargo install rust-script`
-- Rust toolchain (as specified in `rust-toolchain.toml`)
-
-**CI Integration Example**:
-
-```yaml
-- name: Install rust-script
-  run: cargo install rust-script
-
-- name: Check workspace dependencies
-  run: just check-workspace
+```bash
+cargo xtask check-workspace
+cargo xtask check-code-fmt
+cargo xtask check-numbered-comments
 ```
 
-**Cross-platform**: ✅ Windows / macOS / Linux
+## Commands
+
+### `check-workspace`
+
+Verifies workspace integrity by checking that:
+
+1. dependencies use `workspace = true` instead of hardcoded version numbers where expected
+2. dependencies are sorted alphabetically within each block
+3. `Cargo.toml` files do not use tabs
+
+The check scans `Cargo.toml` files in the repository, including the root
+manifest, crates under `crates/`, and `xtask/Cargo.toml`. Local path
+dependencies are skipped.
+
+### `check-code-fmt`
+
+Checks repository-specific Rust formatting conventions that are not covered by
+`rustfmt`, including spacing between adjacent `impl` blocks and avoiding
+indented `use` statements outside test modules.
+
+### `check-numbered-comments`
+
+Rejects numbered step comments such as `// 1.` in Rust source files. These are
+usually development notes and should be removed or rewritten as normal comments.
+
+### `compare-benchmarks`
+
+Compares benchmark outputs and prints a Markdown report.
+
+```bash
+cargo xtask compare-benchmarks \
+  --main <main_bench_file> \
+  --pr <pr_bench_file> \
+  --main-pipeline <main_pipeline_file> \
+  --pr-pipeline <pr_pipeline_file> \
+  --baseline <NAME=PATH> \
+  --baseline-pipeline <NAME=PATH>
+```
+
+The benchmark workflow uses this command to generate the pull request benchmark
+report.
+
+## Requirements
+
+- Rust toolchain as specified in `rust-toolchain.toml`
+- `just` for the recommended command entrypoints
+
+No separate `rust-script` installation is required.

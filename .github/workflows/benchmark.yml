@@ -21,7 +21,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y redis-tools redis-server
-          cargo install rust-script
 
       - name: Resolve latest baseline releases
         run: |
@@ -205,11 +204,10 @@ jobs:
         id: compare
         working-directory: pr_branch
         run: |
-          # The script is in pr_branch/scripts/compare_benchmarks.rs
-          # benchmark files are in ../ (root of workspace)
+          # Benchmark files are in ../ (root of workspace)
           
           # output to a file to handle newlines easily in github-script or step output
-          rust-script scripts/compare_benchmarks.rs \
+          cargo xtask compare-benchmarks \
             --main ../benchmark_main.txt \
             --pr ../benchmark_pr.txt \
             --baseline "Redis=../benchmark_redis.txt" \

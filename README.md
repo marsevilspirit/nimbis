@@ -37,14 +37,10 @@ For detailed information about the crate organization, see [Crates Organization]
 - **Rust**: Latest stable version
 - **Go**: Required for integration tests
 - **Just**: Command runner
-- **rust-script**: Required for running utility scripts
 
 **Install dependencies:**
 
 ```bash
-# Install rust-script
-cargo install rust-script
-
 # Install just
 cargo install just
 
