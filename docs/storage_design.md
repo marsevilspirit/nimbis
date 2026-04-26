@@ -79,7 +79,7 @@ All keys start in the `String DB`, which acts as the source of truth for the key
 *   **String DB**: Key=`\x00\x06myhash`, Value=`['h']` + `1`
 *   **Hash DB**: Key=`\x00\x06myhash\x00\x00\x00\x06field1`, Value=`value1`
 
-**Note on Expiration:** Both `StringValue` and `HashMetaValue` implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`), which provides a unified interface for managing TTL/expiration logic. This ensures consistent expiration behavior across different data types and eliminates code duplication.
+**Note on Expiration:** Both `StringValue` and `HashMetaValue` implement the `Expirable` trait (defined in `nimbis-storage/src/expirable.rs`), which provides a unified interface for managing TTL/expiration logic. This ensures consistent expiration behavior across different data types and eliminates code duplication.
 
 #### 4. List Type
 
@@ -182,7 +182,7 @@ All keys start in the `String DB`, which acts as the source of truth for the key
 
 ## Storage Architecture
 
-The core interface is defined by the `Storage` struct in `crates/storage/src/storage.rs`. It provides an asynchronous key-value interface.
+The core interface is defined by the `Storage` struct in `nimbis-storage/src/storage.rs`. It provides an asynchronous key-value interface.
 
 ```rust
 #[derive(Clone)]
@@ -209,7 +209,7 @@ It leverages multiple `SlateDB` instances (5 isolated databases total):
 
 To handle different data types uniformly, the storage layer uses a few key abstractions:
 
-- **`MetaValue` Trait**: Defined in `crates/storage/src/string/meta.rs`, this trait provides a common interface for all metadata and value types stored in the `string_db`. It requires implementations for decoding, encoding, and checking the type code (`is_type_match`).
+- **`MetaValue` Trait**: Defined in `nimbis-storage/src/string/meta.rs`, this trait provides a common interface for all metadata and value types stored in the `string_db`. It requires implementations for decoding, encoding, and checking the type code (`is_type_match`).
 - **`get_meta<T: MetaValue>`**: A generic helper method in the `Storage` struct that encapsulates the logic for:
   1. Fetching raw bytes from `string_db`.
   2. Performing type-code validation.
@@ -224,7 +224,7 @@ For collection types (Hash and Set), Nimbis provides a centralized helper:
 
 ### String Operations
 
-String-specific operations (`get` and `set`) are implemented in `crates/storage/src/storage_string.rs`.
+String-specific operations (`get` and `set`) are implemented in `nimbis-storage/src/storage_string.rs`.
 
 ```rust
 impl Storage {
@@ -249,8 +249,8 @@ impl Storage {
 ```
 
 - **Encoding**: 
-  - `StringKey` (in `crates/storage/src/string/key.rs`) handles key encoding. No manual prefixes are used as data is isolated in `string_db`.
-  - `StringValue` (in `crates/storage/src/string/value.rs`) manages the raw bytes.
+  - `StringKey` (in `nimbis-storage/src/string/key.rs`) handles key encoding. No manual prefixes are used as data is isolated in `string_db`.
+  - `StringValue` (in `nimbis-storage/src/string/value.rs`) manages the raw bytes.
 
 - **Binary Format**:
   - `[DataType::String (1 byte)] [expire_time (8 bytes BE)] [payload (remainder)]`
@@ -259,7 +259,7 @@ impl Storage {
 
 ### Hash Operations
 
-Hash operations are implemented in `crates/storage/src/storage_hash.rs`.
+Hash operations are implemented in `nimbis-storage/src/storage_hash.rs`.
 
 ```rust
 impl Storage {
@@ -281,7 +281,7 @@ impl Storage {
 
 ### List Operations
 
-List operations are implemented in `crates/storage/src/storage_list.rs`.
+List operations are implemented in `nimbis-storage/src/storage_list.rs`.
 
 ```rust
 impl Storage {
@@ -301,7 +301,7 @@ impl Storage {
 
 ### Set Operations
 
-Set operations are implemented in `crates/storage/src/storage_set.rs`.
+Set operations are implemented in `nimbis-storage/src/storage_set.rs`.
 
 ```rust
 impl Storage {
@@ -321,7 +321,7 @@ impl Storage {
 
 ### Sorted Set (ZSet) Operations
 
-Sorted Set operations are implemented in `crates/storage/src/storage_zset.rs`.
+Sorted Set operations are implemented in `nimbis-storage/src/storage_zset.rs`.
 
 ```rust
 impl Storage {
@@ -352,7 +352,7 @@ impl Storage {
 
 #### Expiration
  
- All data types that store metadata in String DB implement the `Expirable` trait (defined in `crates/storage/src/expirable.rs`) and the `MetaValue` trait (in `crates/storage/src/string/meta.rs`), providing unified TTL management:
+ All data types that store metadata in String DB implement the `Expirable` trait (defined in `nimbis-storage/src/expirable.rs`) and the `MetaValue` trait (in `nimbis-storage/src/string/meta.rs`), providing unified TTL management:
  - `StringValue` (String type)
  - `HashMetaValue` (Hash type)
  - `ListMetaValue` (List type)
@@ -530,7 +530,7 @@ Collection types (Hash, List, Set, ZSet) use a "Master Expiration" pattern:
 - When SlateDB returns `None` for the metadata key (expired), the collection is treated as non-existent. Orphaned data records are cleaned up asynchronously by the `CollectionCompactionFilter`.
 
 #### Expirable Trait (Code Organization)
-To avoid code duplication across different value types, the expiration logic is centralized in the `Expirable` trait defined in `crates/storage/src/expirable.rs`.
+To avoid code duplication across different value types, the expiration logic is centralized in the `Expirable` trait defined in `nimbis-storage/src/expirable.rs`.
 
 ##### Trait Definition
 ```rust

@@ -14,11 +14,11 @@ This document details the command system implementation, arity rules, and all su
 
 The command system allows defining and executing Redis-compatible commands independently. It separates command metadata (immutable definition) from execution logic.
 
-The command system is integrated into the `nimbis` crate within the `cmd` module (`crates/nimbis/src/cmd/`).
+The command system is integrated into the `nimbis` crate within the `cmd` module (`nimbis/src/cmd/`).
 
 ### Core Components
 
-The system is built around the following core components defined in `crates/nimbis/src/cmd/mod.rs`:
+The system is built around the following core components defined in `nimbis/src/cmd/mod.rs`:
 
 1.  **`CmdMeta`**: Contains immutable metadata for a command.
     *   `name`: The command name (e.g., "SET", "GET").
@@ -31,7 +31,7 @@ The system is built around the following core components defined in `crates/nimb
     *   `execute(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue`: The main entry point for execution. It handles validation (arity check via `validate_arity(args.len() + 1)`) automatically before calling `do_cmd`.
     *   `do_cmd(&self, storage: &Arc<Storage>, args: &[bytes::Bytes]) -> RespValue`: The actual execution logic of the command. This must be implemented by concrete commands.
 
-3.  **`CmdTable`**: A command registry storing instances of all available commands (defined in `crates/nimbis/src/cmd/table.rs`). The commands are stored as `Arc<dyn Cmd>`.
+3.  **`CmdTable`**: A command registry storing instances of all available commands (defined in `nimbis/src/cmd/table.rs`). The commands are stored as `Arc<dyn Cmd>`.
 
 4.  **`ParsedCmd`**: A structure representing a parsed command with its name and arguments.
 
@@ -39,7 +39,7 @@ The system is built around the following core components defined in `crates/nimb
 
 Commands are parsed from incoming `RespValue` messages into a `ParsedCmd` struct, which extracts the command name and arguments.
 
-Dispatching is handled in `handle_client` (`crates/nimbis/src/server.rs`) by looking up the command name in the `CmdTable` and calling `execute`:
+Dispatching is handled in `handle_client` (`nimbis/src/server.rs`) by looking up the command name in the `CmdTable` and calling `execute`:
 
 ```rust
 if let Some(cmd) = cmd_table.inner.get(&parsed_cmd.name) {
@@ -52,10 +52,10 @@ if let Some(cmd) = cmd_table.inner.get(&parsed_cmd.name) {
 
 ### Module Structure
 
-The command system in `crates/nimbis/src/cmd/` has the following structure:
+The command system in `nimbis/src/cmd/` has the following structure:
 
 ```
-crates/nimbis/src/cmd/
+nimbis/src/cmd/
 ├── cmd_get.rs           # GET command
 ├── cmd_set.rs           # SET command
 ├── cmd_incr.rs          # INCR command
@@ -120,7 +120,7 @@ Nimbis follows standard Redis command arity rules. The `arity` field in command 
 
 ### Implementation Details
 
-In `CmdMeta::validate_arity` (in `crates/nimbis/src/cmd/mod.rs`):
+In `CmdMeta::validate_arity` (in `nimbis/src/cmd/mod.rs`):
 - The input `arg_count` should be `args.len() + 1` (i.e., the length of the `args` array plus the command name).
 
 ---
@@ -176,14 +176,14 @@ To add a new command (e.g., `PING`), follow these steps:
 
 ### 1. Define the Command Struct
 
-Create a new file in the `cmd` module (e.g., `crates/nimbis/src/cmd/cmd_ping.rs`) and define your command struct. It should hold its own `CmdMeta`.
+Create a new file in the `cmd` module (e.g., `nimbis/src/cmd/cmd_ping.rs`) and define your command struct. It should hold its own `CmdMeta`.
 
 ```rust
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use resp::RespValue;
-use storage::Storage;
+use nimbis_resp::RespValue;
+use nimbis_storage::Storage;
 
 use super::Cmd;
 use super::CmdMeta;
@@ -240,16 +240,16 @@ impl Cmd for PingCmd {
 
 ### 4. Register the Command
 
-In `crates/nimbis/src/cmd/mod.rs`, add your new module and export it:
+In `nimbis/src/cmd/mod.rs`, add your new module and export it:
 
 ```rust
-// crates/nimbis/src/cmd/mod.rs
+// nimbis/src/cmd/mod.rs
 
 mod cmd_ping;
 pub use cmd_ping::PingCmd;
 ```
 
-Then, in `crates/nimbis/src/cmd/table.rs`, register the command in the `CmdTable::new()` function:
+Then, in `nimbis/src/cmd/table.rs`, register the command in the `CmdTable::new()` function:
 
 ```rust
 impl CmdTable {

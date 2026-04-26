@@ -1,0 +1,22 @@
+[package]
+name = "nimbis-resp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "High-performance RESP (Redis Serialization Protocol) library"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+memchr = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+rstest = { workspace = true }
+tokio = { workspace = true }
+
+[[bench]]
+name = "benchmarks"
+harness = false

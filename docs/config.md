@@ -12,10 +12,10 @@ During service operation, we often need to dynamically adjust certain parameters
 
 The `config` module is part of the `nimbis` crate. It depends on the `macros` crate for the `OnlineConfig` derive macro.
 
-#### `crates/nimbis/Cargo.toml`
+#### `nimbis/Cargo.toml`
 ```toml
 [dependencies]
-macros = { workspace = true }
+nimbis-macros = { workspace = true }
 clap = { workspace = true }
 # ... other dependencies
 ```
@@ -129,7 +129,7 @@ println!("Host: {}, Port: {}", config.host, config.port);
 
 ## 3. Implementation Principle
 
-The core of the `config` module's dynamic logic is the `OnlineConfig` derive macro, located in `crates/macros/src/lib.rs`.
+The core of the `config` module's dynamic logic is the `OnlineConfig` derive macro, located in `nimbis-macros/src/lib.rs`.
 
 ### 3.1 Code Generation
 
@@ -142,10 +142,10 @@ The macro uses the `quote` library to generate the implementation of the methods
 
 ## 4. Real-World Example: Dynamic Log Level
 
-The `ServerConfig` in `crates/nimbis/src/config.rs` demonstrates the callback feature and how it's accessed via the macro:
+The `ServerConfig` in `nimbis/src/config.rs` demonstrates the callback feature and how it's accessed via the macro:
 
 ```rust
-// crates/nimbis/src/config.rs
+// nimbis/src/config.rs
 #[derive(Debug, Clone, OnlineConfig)]
 pub struct ServerConfig {
     #[online_config(immutable)]
