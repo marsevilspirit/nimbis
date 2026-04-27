@@ -34,6 +34,8 @@ jobs:
       with:
         # Cache key includes the OS to separate caches per platform
         shared-key: ${{ runner.os }}-rust
+        # Persist cache even when Windows job fails midway, so next runs can still restore.
+        cache-on-failure: true
 
     - name: Install just
       uses: taiki-e/install-action@just
