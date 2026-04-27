@@ -17,6 +17,7 @@ jobs:
   build-cross-platform:
     name: build-cross-platform (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -45,7 +46,6 @@ jobs:
   test-linux-full:
     name: test-linux-full
     runs-on: ubuntu-latest
-    needs: build-cross-platform
 
     steps:
     - uses: actions/checkout@v6
