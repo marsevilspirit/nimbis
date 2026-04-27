@@ -17,7 +17,7 @@ test:
 [group: 'test']
 e2e-test: (build "--release")
     rm -rf nimbis_store
-    cd tests && go test -timeout 15m --ginkgo.v
+    cd e2e-test && go test -timeout 15m --ginkgo.v
 
 # Run storage benchmarks
 [group: 'test']

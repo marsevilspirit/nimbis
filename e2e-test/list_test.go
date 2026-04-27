@@ -3,7 +3,7 @@ package tests
 import (
 	"context"
 
-	"github.com/marsevilspirit/nimbis/tests/util"
+	"github.com/marsevilspirit/nimbis/e2e-test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/redis/go-redis/v9"

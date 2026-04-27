@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/marsevilspirit/nimbis/tests/util"
+	"github.com/marsevilspirit/nimbis/e2e-test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/redis/go-redis/v9"
@@ -77,7 +77,7 @@ var _ = Describe("Set Commands", func() {
 		card, err := rdb.SCard(ctx, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(card).To(Equal(int64(3))) // Should not be inflated to 5
-		
+
 		rdb.Del(ctx, key)
 	})
 
