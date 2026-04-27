@@ -196,10 +196,10 @@ macro_rules! server_config {
 }
 
 pub fn setup(args: Cli) -> Result<(), ConfigError> {
-	let mut config = match resolve_config_path(args.config.as_deref(), Path::new(".")) {
-		Some(path) => load_from_file(path)?,
-		None => ServerConfig::default(),
-	};
+	let mut config = resolve_config_path(args.config.as_deref(), Path::new("."))
+		.map(load_from_file)
+		.transpose()?
+		.unwrap_or_default();
 
 	// Override with CLI arguments if explicitly provided
 	if let Some(host) = args.host {
@@ -238,25 +238,16 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 }
 
 fn resolve_default_config_path_from_base(base: &Path) -> Option<PathBuf> {
-	let preferred = base.join("config").join("config.toml");
-	if preferred.exists() {
-		return Some(preferred);
-	}
-
-	let legacy = base.join("conf").join("config.toml");
-	if legacy.exists() {
-		return Some(legacy);
-	}
-
-	None
+	["config/config.toml", "conf/config.toml"]
+		.into_iter()
+		.map(|p| base.join(p))
+		.find(|p| p.exists())
 }
 
 fn resolve_config_path(explicit: Option<&Path>, base: &Path) -> Option<PathBuf> {
-	if let Some(path) = explicit {
-		return Some(path.to_path_buf());
-	}
-
-	resolve_default_config_path_from_base(base)
+	explicit
+		.map(Path::to_path_buf)
+		.or_else(|| resolve_default_config_path_from_base(base))
 }
 
 fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
