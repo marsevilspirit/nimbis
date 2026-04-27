@@ -75,7 +75,7 @@ impl Logger {
 
 	/// Initialize the logger with the provided log level.
 	pub fn init(level: &str, output: LogOutput) -> Result<Self, TelemetryError> {
-		let env_filter = validate_log_level(level)?;
+		let env_filter = parse_env_filter(level)?;
 
 		let is_file = output.is_file();
 		let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
@@ -92,7 +92,7 @@ impl Logger {
 
 	/// Reload the log level dynamically.
 	pub fn reload_log_level(&self, level: &str) -> Result<(), TelemetryError> {
-		let new_filter = validate_log_level(level)?;
+		let new_filter = parse_env_filter(level)?;
 
 		let Some(reload_handle) = self.reload_handle.as_ref() else {
 			return Ok(());
@@ -389,8 +389,12 @@ where
 		.map_err(|e| TelemetryError::InitFailed(e.to_string()))
 }
 
-pub fn validate_log_level(level: &str) -> Result<EnvFilter, TelemetryError> {
-	EnvFilter::try_new(level).map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))
+fn parse_env_filter(level: &str) -> Result<EnvFilter, TelemetryError> {
+	EnvFilter::try_new(level).map_err(|e| TelemetryError::InvalidLogLevel(format!("{level}: {e}")))
+}
+
+pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
+	parse_env_filter(level).map(|_| ())
 }
 
 #[cfg(test)]
@@ -490,6 +494,17 @@ mod tests {
 			"Expected InvalidLogLevel for: {}",
 			level
 		);
+	}
+
+	#[test]
+	fn test_invalid_log_level_includes_parse_error() {
+		let result = validate_log_level("nimbis=verbose");
+
+		assert!(matches!(
+			result,
+			Err(TelemetryError::InvalidLogLevel(message))
+				if message.starts_with("nimbis=verbose:") && message.len() > "nimbis=verbose:".len()
+		));
 	}
 
 	// CustomRollingFile tests

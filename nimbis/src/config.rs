@@ -513,7 +513,7 @@ log_level = "nimbis=verbose"
 
 		let err = load_from_file(&file_path).unwrap_err();
 		assert!(
-			matches!(err, ConfigError::Telemetry(TelemetryError::InvalidLogLevel(v)) if v == "nimbis=verbose")
+			matches!(err, ConfigError::Telemetry(TelemetryError::InvalidLogLevel(v)) if v.starts_with("nimbis=verbose:"))
 		);
 	}
 
