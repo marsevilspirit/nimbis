@@ -75,7 +75,9 @@ impl Logger {
 
 	/// Initialize the logger with the provided log level.
 	pub fn init(level: &str, output: LogOutput) -> Result<Self, TelemetryError> {
-		let env_filter = EnvFilter::new(level);
+		validate_log_level(level)?;
+		let env_filter = EnvFilter::try_new(level)
+			.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))?;
 
 		let is_file = output.is_file();
 		let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
@@ -98,7 +100,8 @@ impl Logger {
 			return Ok(());
 		};
 
-		let new_filter = EnvFilter::new(level.to_lowercase());
+		let new_filter = EnvFilter::try_new(level)
+			.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))?;
 		reload_handle
 			.reload(new_filter)
 			.map_err(|e| TelemetryError::ReloadFailed(e.to_string()))
@@ -391,14 +394,18 @@ where
 }
 
 pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
-	const VALID_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
-	let level_lower = level.to_lowercase();
-
-	if !VALID_LEVELS.contains(&level_lower.as_str()) {
-		Err(TelemetryError::InvalidLogLevel(level.to_string()))
-	} else {
-		Ok(())
+	if !level.contains('=') && !level.contains(',') {
+		const VALID_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
+		let level_lower = level.to_lowercase();
+		if !VALID_LEVELS.contains(&level_lower.as_str()) {
+			return Err(TelemetryError::InvalidLogLevel(level.to_string()));
+		}
+		return Ok(());
 	}
+
+	EnvFilter::try_new(level)
+		.map(|_| ())
+		.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))
 }
 
 #[cfg(test)]
@@ -466,6 +473,9 @@ mod tests {
 	#[case("DEBUG")]
 	#[case("INFO")]
 	#[case("DeBuG")] // Mixed case
+	#[case("nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info")]
+	#[case("tokio=warn,info")]
+	#[case("nimbis::worker=trace")]
 	fn test_valid_log_levels(#[case] level: &str) {
 		assert!(validate_log_level(level).is_ok());
 	}
@@ -477,6 +487,13 @@ mod tests {
 	#[case("bar")]
 	#[case("warning")] // Common mistake (should be "warn")
 	#[case("critical")] // Common mistake (not a standard Rust log level)
+	#[case("=")]
+	#[case("=info")]
+	#[case("nimbis=debug,=warn")]
+	#[case("nimbis=debug=info")]
+	#[case("nimbis=[debug]")]
+	#[case("nimbis=verbose")]
+	#[case("nimbis==debug")]
 	fn test_invalid_log_levels(#[case] level: &str) {
 		let result = validate_log_level(level);
 		assert!(

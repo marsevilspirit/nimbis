@@ -184,5 +184,25 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Field 'unknown_field' not found"))
 		})
+
+		It("should set log_level with a valid EnvFilter expression", func() {
+			filter := "nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info"
+
+			err := rdb.ConfigSet(ctx, "log_level", filter).Err()
+			Expect(err).NotTo(HaveOccurred())
+
+			result, err := rdb.ConfigGet(ctx, "log_level").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(HaveKeyWithValue("log_level", filter))
+
+			// Restore default so this test does not affect others.
+			Expect(rdb.ConfigSet(ctx, "log_level", "info").Err()).To(Succeed())
+		})
+
+		It("should reject an invalid EnvFilter expression for log_level", func() {
+			err := rdb.ConfigSet(ctx, "log_level", "nimbis=verbose").Err()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Invalid log level"))
+		})
 	})
 })

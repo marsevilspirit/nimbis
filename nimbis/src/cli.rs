@@ -19,8 +19,8 @@ pub struct Cli {
 	#[arg(long, value_hint = clap::ValueHint::Hostname)]
 	pub host: Option<String>,
 
-	/// Log level (trace, debug, info, warn, error)
-	#[arg(short, long, value_parser = ["trace", "debug", "info", "warn", "error"])]
+	/// Log level/filter expression (EnvFilter syntax, e.g. "nimbis=debug,info")
+	#[arg(short, long)]
 	pub log_level: Option<String>,
 
 	/// Number of worker threads (default: number of CPU cores)
