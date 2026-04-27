@@ -49,7 +49,7 @@ jobs:
       with:
         go-version: '1.25'
         cache: true
-        cache-dependency-path: tests/go.sum
+        cache-dependency-path: e2e-test/go.sum
 
     - name: Check
       run: just check

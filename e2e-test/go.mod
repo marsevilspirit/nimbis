@@ -1,4 +1,4 @@
-module github.com/marsevilspirit/nimbis/tests
+module github.com/marsevilspirit/nimbis/e2e-test
 
 go 1.25.5
 
