@@ -20,6 +20,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     steps:
     - uses: actions/checkout@v6
@@ -61,14 +63,14 @@ jobs:
       run: just test
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && secrets.CODECOV_TOKEN != ''
+      if: matrix.os == 'ubuntu-latest' && env.CODECOV_TOKEN != ''
       uses: codecov/codecov-action@v6
       with:
         files: ./codecov.json
         flags: rust
         name: rust-coverage
         fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
+        token: ${{ env.CODECOV_TOKEN }}
 
     - name: Run E2E Test
       run: just e2e-test
