@@ -60,6 +60,8 @@ jobs:
       with:
         # Cache key includes the OS to separate caches per platform
         shared-key: ${{ runner.os }}-rust
+        # Persist cache on failures for better recovery in subsequent runs.
+        cache-on-failure: true
 
     - name: Install just
       uses: taiki-e/install-action@just
@@ -84,7 +86,7 @@ jobs:
       run: just e2e-test
 
     - name: Upload coverage to Codecov
-      if: secrets.CODECOV_TOKEN != ''
+      if: github.event_name == 'push' && secrets.CODECOV_TOKEN != ''
       uses: codecov/codecov-action@v6
       with:
         files: ./codecov.json
