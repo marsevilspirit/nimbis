@@ -72,3 +72,5 @@ Available recipes:
     e2e-test    # Run e2e tests
     test        # Run unit tests
 ```
+
+Default configuration path is `config/config.toml`. Legacy `conf/config.toml` is still supported as a fallback.

@@ -196,12 +196,10 @@ macro_rules! server_config {
 }
 
 pub fn setup(args: Cli) -> Result<(), ConfigError> {
-	let default_config = "conf/config.toml";
-	let mut config = match args.config.as_deref() {
-		Some(p) => load_from_file(p)?,
-		None if Path::new(default_config).exists() => load_from_file(default_config)?,
-		None => ServerConfig::default(),
-	};
+	let mut config = resolve_config_path(args.config.as_deref(), Path::new("."))
+		.map(load_from_file)
+		.transpose()?
+		.unwrap_or_default();
 
 	// Override with CLI arguments if explicitly provided
 	if let Some(host) = args.host {
@@ -237,6 +235,19 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	TELEMETRY_MANAGER.init(telemetry_manager);
 	SERVER_CONF.init(config);
 	Ok(())
+}
+
+fn resolve_default_config_path_from_base(base: &Path) -> Option<PathBuf> {
+	["config/config.toml", "conf/config.toml"]
+		.into_iter()
+		.map(|p| base.join(p))
+		.find(|p| p.exists())
+}
+
+fn resolve_config_path(explicit: Option<&Path>, base: &Path) -> Option<PathBuf> {
+	explicit
+		.map(Path::to_path_buf)
+		.or_else(|| resolve_default_config_path_from_base(base))
 }
 
 fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
@@ -557,5 +568,51 @@ log_level = "nimbis=verbose"
 
 		let output = resolve_log_output(&config).unwrap();
 		assert!(matches!(output, LogOutput::Terminal(_)));
+	}
+
+	#[test]
+	fn test_default_config_prefers_config_dir() {
+		let dir = tempfile::tempdir().unwrap();
+		let preferred_dir = dir.path().join("config");
+		let legacy_dir = dir.path().join("conf");
+		std::fs::create_dir_all(&preferred_dir).unwrap();
+		std::fs::create_dir_all(&legacy_dir).unwrap();
+		std::fs::write(preferred_dir.join("config.toml"), "host = \"127.0.0.2\"").unwrap();
+		std::fs::write(legacy_dir.join("config.toml"), "host = \"127.0.0.3\"").unwrap();
+
+		let path = resolve_default_config_path_from_base(dir.path()).unwrap();
+		assert_eq!(path, preferred_dir.join("config.toml"));
+	}
+
+	#[test]
+	fn test_default_config_falls_back_to_legacy_conf_dir() {
+		let dir = tempfile::tempdir().unwrap();
+		let legacy_dir = dir.path().join("conf");
+		std::fs::create_dir_all(&legacy_dir).unwrap();
+		std::fs::write(legacy_dir.join("config.toml"), "host = \"127.0.0.3\"").unwrap();
+
+		let path = resolve_default_config_path_from_base(dir.path()).unwrap();
+		assert_eq!(path, legacy_dir.join("config.toml"));
+	}
+
+	#[test]
+	fn test_default_config_returns_none_when_missing() {
+		let dir = tempfile::tempdir().unwrap();
+
+		let path = resolve_default_config_path_from_base(dir.path());
+		assert!(path.is_none());
+	}
+
+	#[test]
+	fn test_explicit_config_path_overrides_default_paths() {
+		let dir = tempfile::tempdir().unwrap();
+		let preferred_dir = dir.path().join("config");
+		std::fs::create_dir_all(&preferred_dir).unwrap();
+		std::fs::write(preferred_dir.join("config.toml"), "host = \"127.0.0.2\"").unwrap();
+		let explicit = dir.path().join("custom.toml");
+		std::fs::write(&explicit, "host = \"127.0.0.9\"").unwrap();
+
+		let path = resolve_config_path(Some(explicit.as_path()), dir.path()).unwrap();
+		assert_eq!(path, explicit);
 	}
 }
