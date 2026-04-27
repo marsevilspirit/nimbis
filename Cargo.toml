@@ -28,7 +28,7 @@ arc-swap = "1.8.1"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"] }
 dashmap = "6.1.0"
 fastrace = "0.7.17"
 fastrace-opentelemetry = "0.16.0"
