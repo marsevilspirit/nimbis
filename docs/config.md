@@ -40,7 +40,7 @@ pub struct MyConfig {
     #[online_config(immutable)]
     pub id: i32,
     
-    // Field with callback - validates the new log level when updated
+    // Field with callback - validates the log filter expression when updated
     #[online_config(callback = "on_log_level_change")]
     pub log_level: String,
 
@@ -64,7 +64,7 @@ impl MyConfig {
     // Callback method invoked when log_level is updated
     fn on_log_level_change(&mut self) -> Result<(), String> {
         // Validate or perform side effects before the new config is committed
-        println!("Log level changed to: {}", self.log_level);
+        println!("Log level/filter changed to: {}", self.log_level);
         Ok(())
     }
 }
@@ -186,7 +186,9 @@ let level = server_config!(log_level);
 let current = SERVER_CONF.load();
 ```
 
-This allows the server to dynamically change its log level at runtime via the `CONFIG SET log_level debug` command without restarting.
+`log_level` accepts `tracing_subscriber::EnvFilter` syntax, so both a plain level (`info`) and a target-specific filter (`nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info`) are valid.
+
+This allows the server to dynamically change its log filter at runtime via commands such as `CONFIG SET log_level nimbis=debug,info` without restarting.
 
 ### 4.2 Startup-only Log Output
 

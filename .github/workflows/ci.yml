@@ -34,6 +34,8 @@ jobs:
       with:
         # Cache key includes the OS to separate caches per platform
         shared-key: ${{ runner.os }}-rust
+        # Persist cache even when Windows job fails midway, so next runs can still restore.
+        cache-on-failure: true
 
     - name: Install just
       uses: taiki-e/install-action@just
@@ -49,7 +51,7 @@ jobs:
       with:
         go-version: '1.25'
         cache: true
-        cache-dependency-path: tests/go.sum
+        cache-dependency-path: e2e-test/go.sum
 
     - name: Check
       run: just check
@@ -61,14 +63,16 @@ jobs:
       run: just test
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v5
+      if: matrix.os == 'ubuntu-latest' && github.event_name == 'push'
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      uses: codecov/codecov-action@v6
       with:
         files: ./codecov.json
         flags: rust
         name: rust-coverage
         fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
+        token: ${{ env.CODECOV_TOKEN }}
 
     - name: Run E2E Test
       run: just e2e-test

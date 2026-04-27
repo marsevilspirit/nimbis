@@ -8,14 +8,14 @@
   - `crates/resp`: RESP parser/encoder
   - `crates/macros`: proc macros (notably `OnlineConfig`)
   - `crates/telemetry`: logging/tracing setup
-- Integration tests are Go-based in `tests/` and run against a real `nimbis` process.
+- Integration tests are Go-based in `e2e-test/` and run against a real `nimbis` process.
 
 ## Toolchain and prerequisites
 - Rust toolchain is pinned to `nightly` (`rust-toolchain.toml`).
 - Required CLIs used by repo tasks:
   - `just`
   - `cargo-nextest`
-  - Go toolchain (for `tests/`)
+  - Go toolchain (for `e2e-test/`)
 
 Install quickly (if missing):
 

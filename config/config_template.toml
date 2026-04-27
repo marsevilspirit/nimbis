@@ -4,7 +4,10 @@
 host = "127.0.0.1"
 port = 6379
 
-# Log level (trace, debug, info, warn, error)
+# Log level/filter expression (EnvFilter syntax).
+# Examples:
+# - "info"
+# - "nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info"
 log_level = "info"
 
 # Log output mode: "terminal" or "file"
