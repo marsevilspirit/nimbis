@@ -92,13 +92,12 @@ impl Logger {
 
 	/// Reload the log level dynamically.
 	pub fn reload_log_level(&self, level: &str) -> Result<(), TelemetryError> {
-		validate_log_level(level)?;
+		let new_filter = validate_log_level(level)?;
 
 		let Some(reload_handle) = self.reload_handle.as_ref() else {
 			return Ok(());
 		};
 
-		let new_filter = EnvFilter::new(level.to_lowercase());
 		reload_handle
 			.reload(new_filter)
 			.map_err(|e| TelemetryError::ReloadFailed(e.to_string()))
@@ -390,15 +389,8 @@ where
 		.map_err(|e| TelemetryError::InitFailed(e.to_string()))
 }
 
-pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
-	const VALID_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
-	let level_lower = level.to_lowercase();
-
-	if !VALID_LEVELS.contains(&level_lower.as_str()) {
-		Err(TelemetryError::InvalidLogLevel(level.to_string()))
-	} else {
-		Ok(())
-	}
+pub fn validate_log_level(level: &str) -> Result<EnvFilter, TelemetryError> {
+	EnvFilter::try_new(level).map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))
 }
 
 #[cfg(test)]
@@ -462,21 +454,26 @@ mod tests {
 	#[case("info")]
 	#[case("warn")]
 	#[case("error")]
+	#[case("off")]
+	#[case("tokio")]
+	#[case("[my_span]")]
+	#[case("3")]
 	#[case("TRACE")] // Test case insensitivity
 	#[case("DEBUG")]
 	#[case("INFO")]
 	#[case("DeBuG")] // Mixed case
+	#[case("nimbis=debug,tokio=warn")]
 	fn test_valid_log_levels(#[case] level: &str) {
 		assert!(validate_log_level(level).is_ok());
 	}
 
 	/// Test that invalid log levels are rejected
 	#[rstest]
-	#[case("invalid")]
-	#[case("foo")]
-	#[case("bar")]
-	#[case("warning")] // Common mistake (should be "warn")
-	#[case("critical")] // Common mistake (not a standard Rust log level)
+	#[case("nimbis=invalid")]
+	#[case("tokio=warning")]
+	#[case("hyper=critical")]
+	#[case("nimbis==debug")]
+	#[case("[")]
 	fn test_invalid_log_levels(#[case] level: &str) {
 		let result = validate_log_level(level);
 		assert!(
