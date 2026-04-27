@@ -3,12 +3,12 @@ use std::sync::OnceLock;
 
 use crate::TelemetryError;
 use crate::logger;
-use crate::trace;
+use crate::tracer;
 
 /// Unified telemetry entrypoint for log + trace initialization.
 pub struct TelemetryManager {
 	logger: logger::Logger,
-	trace: trace::Tracer,
+	tracer: tracer::Tracer,
 }
 
 impl TelemetryManager {
@@ -21,14 +21,14 @@ impl TelemetryManager {
 		trace_endpoint: String,
 	) -> Result<Self, TelemetryError> {
 		let logger = logger::Logger::init(level, output)?;
-		let trace = trace::Tracer::init(trace_enabled, trace_endpoint)?;
-		Ok(Self { logger, trace })
+		let tracer = tracer::Tracer::init(trace_enabled, trace_endpoint)?;
+		Ok(Self { logger, tracer })
 	}
 
 	pub fn disabled() -> Self {
 		Self {
 			logger: logger::Logger::disabled(),
-			trace: trace::Tracer::disabled(),
+			tracer: tracer::Tracer::disabled(),
 		}
 	}
 
@@ -39,7 +39,7 @@ impl TelemetryManager {
 
 	/// Flush pending telemetry records before process shutdown.
 	pub fn flush(&self) {
-		self.trace.flush();
+		self.tracer.flush();
 	}
 }
 

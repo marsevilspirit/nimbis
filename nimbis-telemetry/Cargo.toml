@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-
 chrono = { workspace = true }
 fastrace = { workspace = true }
 fastrace-opentelemetry = { workspace = true }
@@ -21,5 +20,4 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-
 rstest = { workspace = true }

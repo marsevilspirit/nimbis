@@ -1,6 +1,6 @@
 pub mod logger;
 pub mod manager;
-pub mod trace;
+pub mod tracer;
 use thiserror::Error;
 
 /// Errors that can occur in the telemetry module
