@@ -28,7 +28,7 @@ arc-swap = "1.8.1"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"] }
 dashmap = "6.1.0"
 fastrace = "0.7.17"
 fastrace-opentelemetry = "0.16.0"
@@ -49,7 +49,7 @@ slatedb = { git = "https://github.com/slatedb/slatedb", branch = "main", feature
 syn = { version = "2.0.114", features = ["full"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"
-tokio = { version = "1.51.1", features = ["full"] }
+tokio = { version = "1.52.1", features = ["full"] }
 toml = "1.0.1"
 toml_edit = "0.23.7"
 tracing = "0.1.44"

@@ -75,7 +75,7 @@ impl Logger {
 
 	/// Initialize the logger with the provided log level.
 	pub fn init(level: &str, output: LogOutput) -> Result<Self, TelemetryError> {
-		let env_filter = EnvFilter::new(level);
+		let env_filter = validate_log_level(level)?;
 
 		let is_file = output.is_file();
 		let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
@@ -463,6 +463,9 @@ mod tests {
 	#[case("INFO")]
 	#[case("DeBuG")] // Mixed case
 	#[case("nimbis=debug,tokio=warn")]
+	#[case("nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info")]
+	#[case("tokio=warn,info")]
+	#[case("nimbis::worker=trace")]
 	fn test_valid_log_levels(#[case] level: &str) {
 		assert!(validate_log_level(level).is_ok());
 	}
@@ -474,6 +477,12 @@ mod tests {
 	#[case("hyper=critical")]
 	#[case("nimbis==debug")]
 	#[case("[")]
+	#[case("=")]
+	#[case("=info")]
+	#[case("nimbis=debug,=warn")]
+	#[case("nimbis=debug=info")]
+	#[case("nimbis=[debug]")]
+	#[case("nimbis=verbose")]
 	fn test_invalid_log_levels(#[case] level: &str) {
 		let result = validate_log_level(level);
 		assert!(
