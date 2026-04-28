@@ -19,10 +19,16 @@ e2e-test: (build "--release")
     rm -rf nimbis_store
     cd e2e-test && go test -timeout 15m --ginkgo.v
 
-# Run storage benchmarks
+# Run benchmarks for all crates, or for a specific package when PACKAGE is provided
 [group: 'test']
-bench:
-    cargo bench -p nimbis-storage --bench benchmarks
+bench package="" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{package}}" ]; then
+        cargo bench --workspace {{args}}
+    else
+        cargo bench -p {{package}} {{args}}
+    fi
 
 # Check all crates
 [group: 'check']
