@@ -16,3 +16,4 @@ pub mod version;
 pub mod zset;
 
 pub use crate::storage::Storage;
+pub use crate::storage::validate_object_store_url;

@@ -74,3 +74,25 @@ Available recipes:
 ```
 
 Default configuration path is `config/config.toml`. Legacy `conf/config.toml` is still supported as a fallback.
+
+### Object Store Configuration
+
+Nimbis stores data through the `object_store` crate. Local development uses a file-backed object store by default:
+
+```toml
+object_store_url = "file:nimbis_store"
+```
+
+S3-compatible services such as MinIO use the same setting plus object store options:
+
+```toml
+object_store_url = "s3://nimbis/dev"
+
+[object_store_options]
+aws_region = "us-east-1"
+aws_endpoint = "http://127.0.0.1:9000"
+aws_access_key_id = "minioadmin"
+aws_secret_access_key = "minioadmin"
+aws_virtual_hosted_style_request = "false"
+aws_allow_http = "true"
+```

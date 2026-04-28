@@ -203,7 +203,7 @@ It leverages multiple `SlateDB` instances (5 isolated databases total):
 - **Set DB**: Stores Set members exclusively.
 - **ZSet DB**: Stores Sorted Set members and score indices exclusively.
 - **Isolated Storage**: Each data type has its own database instance for better isolation and performance.
-- **Sharded Storage**: Each worker owns its own `Storage` instance in `{data_path}/shard-{id}/` for zero-lock contention.
+- **Sharded Storage**: Each worker owns its own `Storage` instance under `{object_store_url path}/shard-{id}/` for zero-lock contention.
 
 ### Unified Metadata Management
 
@@ -372,21 +372,24 @@ impl Storage {
 
 ### Storage Initialization
 
-The server initializes the storage in `Storage::open`:
+The server initializes storage from the configured object store URL:
 
 ```rust
-// Initialize persistent storage at local path
-let storage = Storage::open("./nimbis_store").await?;
+let storage = Storage::open_object_store(
+    "file:nimbis_store",
+    std::iter::empty::<(&str, &str)>(),
+    Some(shard_id),
+).await?;
 ```
 
 This method:
-1. Creates a local file system backend using the provided path
+1. Creates an object store backend by parsing the configured URL and options
 2. Initializes separate SlateDB instances for String, Hash, List, Set, and ZSet data
 3. Returns an `Arc<Storage>` that can be shared across threads
 
 ### Directory Structure
 
-When you call `Storage::open("./nimbis_store", Some(shard_id))`, it creates the following structure per worker:
+With `object_store_url = "file:nimbis_store"`, each worker uses this layout:
 
 ```
 nimbis_store/

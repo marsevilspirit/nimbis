@@ -38,11 +38,11 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
 		})
 
-		It("should get the data path", func() {
-			result, err := rdb.ConfigGet(ctx, "data_path").Result()
+		It("should get the object store URL", func() {
+			result, err := rdb.ConfigGet(ctx, "object_store_url").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
+			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
 		})
 
 		It("should get the log output", func() {
@@ -75,12 +75,14 @@ var _ = Describe("CONFIG Commands", func() {
 		It("should get all fields with * wildcard", func() {
 			result, err := rdb.ConfigGet(ctx, "*").Result()
 			Expect(err).NotTo(HaveOccurred())
-			// host, port, data_path, save, appendonly, log_level, log_output,
-			// log_rotation, trace_enabled, trace_endpoint, worker_threads
-			Expect(result).To(HaveLen(11))
+			// host, port, object_store_url, object_store_options, save, appendonly,
+			// log_level, log_output, log_rotation, trace_enabled, trace_endpoint,
+			// worker_threads
+			Expect(result).To(HaveLen(12))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
-			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
+			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
+			Expect(result).To(HaveKeyWithValue("object_store_options", "{}"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))
@@ -113,10 +115,10 @@ var _ = Describe("CONFIG Commands", func() {
 		})
 
 		It("should match fields with suffix wildcard", func() {
-			result, err := rdb.ConfigGet(ctx, "*path").Result()
+			result, err := rdb.ConfigGet(ctx, "*url").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("data_path", "./nimbis_store"))
+			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
 		})
 
 		It("should return empty array for non-matching wildcard", func() {
@@ -138,15 +140,25 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result["host"]).To(Equal("127.0.0.1"))
 		})
 
-		It("should fail to set immutable field 'data_path'", func() {
-			err := rdb.ConfigSet(ctx, "data_path", "/tmp/nimbis").Err()
+		It("should fail to set immutable field 'object_store_url'", func() {
+			err := rdb.ConfigSet(ctx, "object_store_url", "file:/tmp/nimbis").Err()
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("Field 'data_path' is immutable"))
+			Expect(err.Error()).To(ContainSubstring("Field 'object_store_url' is immutable"))
 
 			// Verify the value hasn't changed
-			result, err := rdb.ConfigGet(ctx, "data_path").Result()
+			result, err := rdb.ConfigGet(ctx, "object_store_url").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result["data_path"]).To(Equal("./nimbis_store"))
+			Expect(result["object_store_url"]).To(Equal("file:nimbis_store"))
+		})
+
+		It("should fail to set immutable field 'object_store_options'", func() {
+			err := rdb.ConfigSet(ctx, "object_store_options", "{}").Err()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Field 'object_store_options' is immutable"))
+
+			result, err := rdb.ConfigGet(ctx, "object_store_options").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result["object_store_options"]).To(Equal("{}"))
 		})
 
 		It("should fail to set immutable field 'log_output'", func() {

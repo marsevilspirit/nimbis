@@ -11,15 +11,14 @@ port = 6379
 log_level = "info"
 
 # Log output mode: "terminal" or "file"
-# When set to "file", logs are written under {data_path}/ using nimbis.log as
-# the path template. With log_rotation = "never", logs stay in
-# {data_path}/nimbis.log; other rotation modes create time-rotated files in the
-# same directory according to log_rotation.
+# When set to "file", logs are written to nimbis.log in the current working
+# directory. With log_rotation = "never", logs stay in that single file; other
+# rotation modes create time-rotated files according to log_rotation.
 log_output = "terminal"
 
 # File log rotation: "minutely", "hourly", "daily", or "never"
 # Only used when log_output = "file". Defaulting to "daily" avoids unbounded
-# log growth while keeping files under {data_path}/ with the same base name.
+# log growth while keeping files with the same base name.
 log_rotation = "daily"
 
 # Enable fastrace collection and OpenTelemetry export
@@ -32,8 +31,22 @@ trace_endpoint = ""
 # Number of worker threads (default: number of CPU cores)
 # worker_threads = 8
 
-# Path to store data
-data_path = "./nimbis_store"
+# Object store root URL for SlateDB data.
+# Local development can use a relative file URL:
+object_store_url = "file:nimbis_store"
+#
+# Absolute local paths and S3-compatible stores use the same setting:
+# object_store_url = "file:///tmp/nimbis_store"
+# object_store_url = "s3://nimbis/dev"
+#
+# Optional object_store crate options for cloud backends.
+# [object_store_options]
+# aws_region = "us-east-1"
+# aws_endpoint = "http://127.0.0.1:9000"
+# aws_access_key_id = "minioadmin"
+# aws_secret_access_key = "minioadmin"
+# aws_virtual_hosted_style_request = "false"
+# aws_allow_http = "true"
 
 # Placeholder for Redis compatibility (immutable)
 save = ""

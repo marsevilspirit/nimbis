@@ -21,6 +21,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+use std::collections::BTreeMap;
+use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -66,20 +68,28 @@ pub enum ConfigError {
 	#[error("Configuration file has no extension")]
 	NoExtension,
 
-	#[error("Failed to initialize data directory '{path}': {source}")]
-	DataPathInit {
-		source: std::io::Error,
-		path: String,
-	},
-
 	#[error("trace_endpoint must be set when trace_enabled is true")]
 	TraceEndpointRequired,
 
 	#[error("Invalid trace_endpoint: {0}. Expected an http or https URL with a host")]
 	InvalidTraceEndpoint(String),
 
+	#[error("Invalid object_store_url: {0}")]
+	InvalidObjectStoreUrl(String),
+
 	#[error(transparent)]
 	Telemetry(#[from] TelemetryError),
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct ObjectStoreOptions(pub BTreeMap<String, String>);
+
+impl fmt::Display for ObjectStoreOptions {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let value = serde_json::to_string(&self.0).map_err(|_| fmt::Error)?;
+		f.write_str(&value)
+	}
 }
 
 #[derive(Debug, Clone, OnlineConfig, Deserialize, Serialize)]
@@ -90,7 +100,9 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub port: u16,
 	#[online_config(immutable)]
-	pub data_path: String,
+	pub object_store_url: String,
+	#[online_config(immutable)]
+	pub object_store_options: ObjectStoreOptions,
 	// Support redis-benchmark
 	#[online_config(immutable)]
 	pub save: String,
@@ -124,6 +136,7 @@ impl ServerConfig {
 		if self.trace_enabled {
 			validate_trace_endpoint(&self.trace_endpoint)?;
 		}
+		validate_object_store_url(&self.object_store_url)?;
 
 		Ok(())
 	}
@@ -134,7 +147,8 @@ impl Default for ServerConfig {
 		Self {
 			host: "127.0.0.1".into(),
 			port: 6379,
-			data_path: "./nimbis_store".into(),
+			object_store_url: "file:nimbis_store".into(),
+			object_store_options: ObjectStoreOptions::default(),
 			save: "".into(),
 			appendonly: "no".into(),
 			log_level: "info".into(),
@@ -214,17 +228,11 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	if let Some(t) = args.worker_threads {
 		config.worker_threads = t;
 	}
+	apply_env_overrides(&mut config, std::env::vars());
 
 	config.validate()?;
 
 	let log_output = resolve_log_output(&config)?;
-
-	if log_output.is_file() {
-		std::fs::create_dir_all(&config.data_path).map_err(|source| ConfigError::DataPathInit {
-			path: config.data_path.clone(),
-			source,
-		})?;
-	}
 
 	let telemetry_manager = Arc::new(TelemetryManager::init(
 		&config.log_level,
@@ -250,12 +258,12 @@ fn resolve_config_path(explicit: Option<&Path>, base: &Path) -> Option<PathBuf> 
 		.or_else(|| resolve_default_config_path_from_base(base))
 }
 
-fn resolve_log_file_path(config: &ServerConfig) -> PathBuf {
-	Path::new(&config.data_path).join("nimbis.log")
+fn resolve_log_file_path() -> PathBuf {
+	PathBuf::from("nimbis.log")
 }
 
 fn resolve_log_output(config: &ServerConfig) -> Result<LogOutput, ConfigError> {
-	let log_file_path = resolve_log_file_path(config);
+	let log_file_path = resolve_log_file_path();
 
 	match config.log_output.trim().to_ascii_lowercase().as_str() {
 		"terminal" => Ok(LogOutput::Terminal(Terminal)),
@@ -266,6 +274,27 @@ fn resolve_log_output(config: &ServerConfig) -> Result<LogOutput, ConfigError> {
 		_ => Err(ConfigError::from(TelemetryError::InvalidLogOutput(
 			config.log_output.clone(),
 		))),
+	}
+}
+
+fn apply_env_overrides<I, K, V>(config: &mut ServerConfig, vars: I)
+where
+	I: IntoIterator<Item = (K, V)>,
+	K: AsRef<str>,
+	V: Into<String>,
+{
+	const OPTION_PREFIX: &str = "NIMBIS_OBJECT_STORE_OPTION_";
+
+	for (key, value) in vars {
+		let key = key.as_ref();
+		if key == "NIMBIS_OBJECT_STORE_URL" {
+			config.object_store_url = value.into();
+		} else if let Some(option_key) = key.strip_prefix(OPTION_PREFIX) {
+			config
+				.object_store_options
+				.0
+				.insert(option_key.to_ascii_lowercase(), value.into());
+		}
 	}
 }
 
@@ -283,6 +312,12 @@ fn validate_trace_endpoint(endpoint: &str) -> Result<(), ConfigError> {
 		return Err(ConfigError::InvalidTraceEndpoint(endpoint.to_string()));
 	}
 
+	Ok(())
+}
+
+fn validate_object_store_url(object_store_url: &str) -> Result<(), ConfigError> {
+	nimbis_storage::validate_object_store_url(object_store_url)
+		.map_err(|_| ConfigError::InvalidObjectStoreUrl(object_store_url.to_string()))?;
 	Ok(())
 }
 
@@ -343,7 +378,8 @@ mod tests {
 		let content = r#"
 host = "127.0.0.1"
 port = 1234
-data_path = "./data"
+object_store_url = "file:./data"
+object_store_options = { aws_region = "us-east-1" }
 save = "900 1"
 appendonly = "yes"
 log_level = "debug"
@@ -358,6 +394,15 @@ worker_threads = 4
 		let config = load_from_file(&file_path).unwrap();
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
+		assert_eq!(config.object_store_url, "file:./data");
+		assert_eq!(
+			config
+				.object_store_options
+				.0
+				.get("aws_region")
+				.map(String::as_str),
+			Some("us-east-1")
+		);
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
@@ -373,7 +418,10 @@ worker_threads = 4
 {
   "host": "127.0.0.1",
   "port": 1234,
-  "data_path": "./data",
+  "object_store_url": "file:./data",
+  "object_store_options": {
+    "aws_region": "us-east-1"
+  },
   "save": "900 1",
   "appendonly": "yes",
   "log_level": "debug",
@@ -389,6 +437,15 @@ worker_threads = 4
 		let config = load_from_file(&file_path).unwrap();
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
+		assert_eq!(config.object_store_url, "file:./data");
+		assert_eq!(
+			config
+				.object_store_options
+				.0
+				.get("aws_region")
+				.map(String::as_str),
+			Some("us-east-1")
+		);
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
@@ -402,7 +459,9 @@ worker_threads = 4
 		let content = r#"
 host: "127.0.0.1"
 port: 1234
-data_path: "./data"
+object_store_url: "file:./data"
+object_store_options:
+  aws_region: "us-east-1"
 save: "900 1"
 appendonly: "yes"
 log_level: "debug"
@@ -417,6 +476,15 @@ worker_threads: 4
 		let config = load_from_file(&file_path).unwrap();
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
+		assert_eq!(config.object_store_url, "file:./data");
+		assert_eq!(
+			config
+				.object_store_options
+				.0
+				.get("aws_region")
+				.map(String::as_str),
+			Some("us-east-1")
+		);
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
@@ -436,6 +504,70 @@ worker_threads: 4
 	#[test]
 	fn test_default_trace_enabled() {
 		assert!(!ServerConfig::default().trace_enabled);
+	}
+
+	#[test]
+	fn test_default_object_store_url() {
+		assert_eq!(
+			ServerConfig::default().object_store_url,
+			"file:nimbis_store"
+		);
+		assert!(ServerConfig::default().object_store_options.0.is_empty());
+	}
+
+	#[test]
+	fn test_apply_object_store_env_overrides() {
+		let env = [
+			("NIMBIS_OBJECT_STORE_URL", "s3://nimbis/dev"),
+			("NIMBIS_OBJECT_STORE_OPTION_AWS_REGION", "us-east-1"),
+			(
+				"NIMBIS_OBJECT_STORE_OPTION_AWS_VIRTUAL_HOSTED_STYLE_REQUEST",
+				"false",
+			),
+		];
+		let mut config = ServerConfig::default();
+
+		apply_env_overrides(&mut config, env);
+
+		assert_eq!(config.object_store_url, "s3://nimbis/dev");
+		assert_eq!(
+			config
+				.object_store_options
+				.0
+				.get("aws_region")
+				.map(String::as_str),
+			Some("us-east-1")
+		);
+		assert_eq!(
+			config
+				.object_store_options
+				.0
+				.get("aws_virtual_hosted_style_request")
+				.map(String::as_str),
+			Some("false")
+		);
+	}
+
+	#[test]
+	fn test_object_store_url_must_be_valid() {
+		let config = ServerConfig {
+			object_store_url: "not a url".into(),
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidObjectStoreUrl(_)));
+	}
+
+	#[test]
+	fn test_object_store_url_must_use_supported_scheme() {
+		let config = ServerConfig {
+			object_store_url: "unknown://bucket/path".into(),
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidObjectStoreUrl(_)));
 	}
 
 	#[test]
@@ -530,12 +662,7 @@ log_level = "nimbis=verbose"
 
 	#[test]
 	fn test_resolve_log_file_path() {
-		let config = ServerConfig::default();
-
-		assert_eq!(
-			resolve_log_file_path(&config),
-			Path::new(&config.data_path).join("nimbis.log")
-		);
+		assert_eq!(resolve_log_file_path(), Path::new("nimbis.log"));
 	}
 
 	#[test]
@@ -549,7 +676,6 @@ log_level = "nimbis=verbose"
 		let config = ServerConfig {
 			log_output: "file".into(),
 			log_rotation: "hourly".into(),
-			data_path: "./custom_data".into(),
 			..ServerConfig::default()
 		};
 

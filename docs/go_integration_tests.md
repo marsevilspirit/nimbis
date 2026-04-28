@@ -28,7 +28,7 @@ The test program attempts to find the `nimbis` executable in the following way:
 
 ### Server Startup Process
 1.  `util.StartServer()` starts a subprocess (`os/exec`) to run `nimbis`.
-2.  Sets the working directory to the project root to ensure the server can correctly load configuration files or data directories (e.g., `nimbis_store`).
+2.  Sets the working directory to the project root so relative configuration values such as `object_store_url = "file:nimbis_store"` resolve predictably.
 3.  Redirects the server's `Stdout` and `Stderr` to the test process's standard output for easy debugging.
 4.  **Health Check**: After startup, the test program loops to try sending `PING` commands to `localhost:6379`. Only after receiving a `PONG` response does it consider the server successfully started and begins executing tests; otherwise, it reports an error after a timeout.
 
@@ -125,11 +125,11 @@ The current integration tests cover the following functional areas of the Nimbis
 
 ### 4.4 Configuration (`config_test.go`)
 - **CONFIG GET**:
-  - Exact match (e.g., `host`, `port`, `data_path`).
+  - Exact match (e.g., `host`, `port`, `object_store_url`).
   - Wildcard support (`*`, `prefix*`, `*suffix`).
   - Handling of non-existent fields.
 - **CONFIG SET**:
-  - Verification of immutable fields protection (`host`, `port`, `data_path` cannot be changed at runtime).
+  - Verification of immutable fields protection (`host`, `port`, `object_store_url` cannot be changed at runtime).
   - Error reporting for unknown fields.
 
 ### 4.5 Type Conflict Handling (`conflict_key_test.go`)
@@ -222,4 +222,3 @@ This suite ensures Nimbis behaves correctly (like Redis) when multiple data type
   - List elements: Ensures list operations maintain correct boundaries.
   - ZSet members: Verifies sorted set member and score index separation.
 - **Length-Prefixed Encoding**: Validates that the key encoding scheme (using length prefixes) prevents ambiguity.
-

@@ -195,7 +195,7 @@ This allows the server to dynamically change its log filter at runtime via comma
 Nimbis also exposes an immutable `log_output` field for selecting the startup log sink:
 
 - `terminal`: keep writing logs to stderr via the tracing formatter.
-- `file`: write logs under `{data_path}/` using `nimbis` as the base file name and `.log` as the suffix.
+- `file`: write logs to `nimbis.log` in the current working directory.
 
 Because log sink selection changes bootstrap behavior, `log_output` is immutable and must be set in the configuration file before startup. Runtime commands such as `CONFIG SET log_output file` will be rejected.
 
@@ -204,13 +204,42 @@ When `log_output = "file"`, the immutable `log_rotation` field controls time-bas
 - `minutely`: rotate once per minute.
 - `hourly`: rotate once per hour.
 - `daily`: rotate once per day. This is the default to avoid unbounded log growth.
-- `never`: disable rotation and keep writing to the single file `{data_path}/nimbis.log`.
+- `never`: disable rotation and keep writing to the single file `nimbis.log`.
 
-For the rotating modes, Nimbis uses a custom rolling file implementation that manages log files directly. Logs are created in `{data_path}/` with `nimbis` as the filename prefix and `.log` as the suffix. When rotation is enabled, the appender adds timestamp-based suffixes to archived log files according to the selected rotation policy.
+For the rotating modes, Nimbis uses a custom rolling file implementation that manages log files directly. Logs use `nimbis` as the filename prefix and `.log` as the suffix. When rotation is enabled, the appender adds timestamp-based suffixes to archived log files according to the selected rotation policy.
+
+### 4.3 Startup-only Object Store
+
+Nimbis stores SlateDB data through the `object_store` crate. The immutable `object_store_url` field selects the object store root:
+
+```toml
+object_store_url = "file:nimbis_store"
+```
+
+Absolute local paths and S3-compatible stores use the same field:
+
+```toml
+object_store_url = "file:///tmp/nimbis_store"
+object_store_url = "s3://nimbis/dev"
+```
+
+Cloud-specific options are supplied through `object_store_options`:
+
+```toml
+[object_store_options]
+aws_region = "us-east-1"
+aws_endpoint = "http://127.0.0.1:9000"
+aws_access_key_id = "minioadmin"
+aws_secret_access_key = "minioadmin"
+aws_virtual_hosted_style_request = "false"
+aws_allow_http = "true"
+```
+
+Environment variables can override these startup values with `NIMBIS_OBJECT_STORE_URL` and `NIMBIS_OBJECT_STORE_OPTION_<KEY>`.
 
 Runtime commands such as `CONFIG SET log_rotation hourly` are rejected for the same reason: rotation is part of bootstrap-only logger setup.
 
-### 4.3 Startup-only Trace Collection
+### 4.4 Startup-only Trace Collection
 
 The immutable `trace_enabled` field controls whether Nimbis initializes the fastrace collector during startup:
 

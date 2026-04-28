@@ -25,12 +25,13 @@ impl MockNimbisServer {
 	pub fn new() -> Self {
 		let port = pick_free_port().expect("pick free port");
 		let data_dir = tempdir().expect("create temp dir");
-		let data_path = data_dir.path().display().to_string();
+		let object_store_url = format!("file:{}", data_dir.path().display());
 
 		let config = ServerConfig {
 			host: "127.0.0.1".to_string(),
 			port,
-			data_path: data_path.clone(),
+			object_store_url: object_store_url.clone(),
+			object_store_options: Default::default(),
 			save: "".to_string(),
 			appendonly: "no".to_string(),
 			log_level: "error".to_string(),
@@ -62,7 +63,7 @@ impl MockNimbisServer {
 			}
 		});
 
-		wait_until_ready("127.0.0.1", port, &data_path);
+		wait_until_ready("127.0.0.1", port, &object_store_url);
 
 		Self {
 			host: "127.0.0.1".to_string(),
@@ -85,7 +86,7 @@ impl Drop for MockNimbisServer {
 	}
 }
 
-fn wait_until_ready(host: &str, port: u16, data_path: &str) {
+fn wait_until_ready(host: &str, port: u16, object_store_url: &str) {
 	// Keep startup failures quick while still allowing slower CI hosts
 	// enough time to initialize SlateDB.
 	let ready_timeout = Duration::from_secs(15);
@@ -108,7 +109,7 @@ fn wait_until_ready(host: &str, port: u16, data_path: &str) {
 	}
 
 	panic!(
-		"nimbis did not become ready at {}:{} within {:?}; data_path={}; last_error={}",
-		host, port, ready_timeout, data_path, last_error
+		"nimbis did not become ready at {}:{} within {:?}; object_store_url={}; last_error={}",
+		host, port, ready_timeout, object_store_url, last_error
 	);
 }

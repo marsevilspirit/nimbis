@@ -58,6 +58,10 @@ pub enum StorageError {
 	/// Data inconsistency detected
 	#[error("Data inconsistency detected: {message}")]
 	DataInconsistency { message: String },
+
+	/// Object store configuration failed
+	#[error("Object store configuration failed: {message}")]
+	ObjectStoreConfig { message: String },
 }
 
 impl StorageError {
@@ -69,6 +73,7 @@ impl StorageError {
 			Self::DecodeError { .. } => "E1002",
 			Self::IoError { .. } => "E1003",
 			Self::DataInconsistency { .. } => "E1004",
+			Self::ObjectStoreConfig { .. } => "E1005",
 		}
 	}
 
@@ -135,6 +140,14 @@ impl From<slatedb::object_store::Error> for StorageError {
 	fn from(err: slatedb::object_store::Error) -> Self {
 		Self::DatabaseError {
 			source: Box::new(err),
+		}
+	}
+}
+
+impl From<url::ParseError> for StorageError {
+	fn from(err: url::ParseError) -> Self {
+		Self::ObjectStoreConfig {
+			message: err.to_string(),
 		}
 	}
 }

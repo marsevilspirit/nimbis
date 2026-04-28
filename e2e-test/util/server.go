@@ -74,12 +74,12 @@ func StartServer() error {
 		return fmt.Errorf("failed to find project root: %w", err)
 	}
 
-	// Clean up nimbis_store
+	// Clean up the default file-backed object store path.
 	dataPath := filepath.Join(projectRoot, "nimbis_store")
 	_ = os.RemoveAll(dataPath)
 
 	serverCmd = exec.Command(binPath)
-	serverCmd.Dir = projectRoot // Run from project root to find nimbis_store
+	serverCmd.Dir = projectRoot // Resolve relative object_store_url values from the project root.
 	// Redirect stdout/stderr for debugging
 	serverCmd.Stdout = os.Stdout
 	serverCmd.Stderr = os.Stderr
