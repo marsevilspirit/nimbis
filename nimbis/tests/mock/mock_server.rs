@@ -38,6 +38,10 @@ impl MockNimbisServer {
 			log_rotation: "daily".to_string(),
 			trace_enabled: false,
 			trace_endpoint: "".to_string(),
+			trace_sampling_ratio: 0.0001,
+			trace_protocol: "grpc".to_string(),
+			trace_export_timeout_seconds: 10,
+			trace_report_interval_ms: 1000,
 			worker_threads: 2,
 		};
 
