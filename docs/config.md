@@ -58,6 +58,22 @@ pub struct MyConfig {
     // Immutable OpenTelemetry endpoint used when trace collection is enabled
     #[online_config(immutable)]
     pub trace_endpoint: String,
+
+    // Immutable startup-only sampling ratio (0.0 - 1.0)
+    #[online_config(immutable)]
+    pub trace_sampling_ratio: f64,
+
+    // Immutable startup-only OTLP transport protocol
+    #[online_config(immutable)]
+    pub trace_protocol: String,
+
+    // Immutable startup-only OTLP exporter timeout (seconds)
+    #[online_config(immutable)]
+    pub trace_export_timeout_seconds: u64,
+
+    // Immutable startup-only collector flush/report interval (milliseconds)
+    #[online_config(immutable)]
+    pub trace_report_interval_ms: u64,
 }
 
 impl MyConfig {
@@ -170,6 +186,18 @@ pub struct ServerConfig {
     pub trace_endpoint: String,
 
     #[online_config(immutable)]
+    pub trace_sampling_ratio: f64,
+
+    #[online_config(immutable)]
+    pub trace_protocol: String,
+
+    #[online_config(immutable)]
+    pub trace_export_timeout_seconds: u64,
+
+    #[online_config(immutable)]
+    pub trace_report_interval_ms: u64,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```
@@ -219,7 +247,29 @@ The immutable `trace_enabled` field controls whether Nimbis initializes the fast
 
 When `trace_enabled = true`, the immutable `trace_endpoint` field is required and must be a valid `http` or `https` URL with a host, such as `http://localhost:4317`. Traces are exported to that OpenTelemetry endpoint via gRPC.
 
+Additional startup-only trace controls:
+
+- `trace_sampling_ratio`: decimal value in `[0.0, 1.0]`. This controls command-span sampling rate.
+- `trace_protocol`: one of `grpc`, `http_binary`, `http_json`.
+- `trace_export_timeout_seconds`: timeout for each OTLP export request.
+- `trace_report_interval_ms`: maximum interval between collector report cycles; reducing this can reduce burst size.
+
 When `trace_enabled = false`, `trace_endpoint` may be left empty. This is the default configuration and disables trace export entirely.
+
+Environment variables can override file-based trace configuration at startup:
+
+- `NIMBIS_TRACE_ENABLED`
+- `NIMBIS_TRACE_ENDPOINT`
+- `NIMBIS_TRACE_SAMPLING_RATIO`
+- `NIMBIS_TRACE_PROTOCOL`
+- `NIMBIS_TRACE_EXPORT_TIMEOUT_SECONDS`
+- `NIMBIS_TRACE_REPORT_INTERVAL_MS`
+
+Recommended profiles:
+
+- Local development: `trace_enabled=true`, `trace_sampling_ratio=1.0`, `trace_report_interval_ms=500`, pointing to a local collector.
+- Production baseline: `trace_enabled=true`, `trace_sampling_ratio=0.0001` (0.01%), `trace_protocol=grpc`, `trace_export_timeout_seconds=10`, `trace_report_interval_ms=1000`.
+- Emergency high-load safety: temporarily set `trace_enabled=false` or reduce `trace_sampling_ratio` toward `0.0`.
 
 Runtime commands such as `CONFIG SET trace_enabled true` or `CONFIG SET trace_endpoint http://localhost:4317` are rejected because fastrace collector setup is part of bootstrap-only telemetry initialization.
 

@@ -17,11 +17,10 @@ impl TelemetryManager {
 	pub fn init(
 		level: &str,
 		output: logger::LogOutput,
-		trace_enabled: bool,
-		trace_endpoint: String,
+		trace_config: tracer::TracerConfig,
 	) -> Result<Self, TelemetryError> {
 		let logger = logger::Logger::init(level, output)?;
-		let tracer = tracer::Tracer::init(trace_enabled, trace_endpoint)?;
+		let tracer = tracer::Tracer::init(trace_config)?;
 		Ok(Self { logger, tracer })
 	}
 

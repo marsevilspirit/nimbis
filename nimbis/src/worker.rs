@@ -20,6 +20,7 @@ use crate::client::ClientConnection;
 use crate::client::next_client_session_id;
 use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
+use crate::server_config;
 
 pub struct CmdRequest {
 	pub(crate) cmd_name: String,
@@ -105,13 +106,19 @@ impl Worker {
 	}
 
 	async fn handle_cmd_request(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
+		if !server_config!(trace_enabled) {
+			Self::handle_cmd_request_inner(req, cmd_table, storage).await;
+			return;
+		}
+
 		// Apply a 0.01% sampling rate for tracing to prevent massive gRPC payload and
 		// reduce overhead.
+		let sampling_ratio = server_config!(trace_sampling_ratio);
 		let is_sampled = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
 			.unwrap_or_default()
 			.subsec_nanos()
-			.is_multiple_of(10000);
+			.is_multiple_of(sampling_divisor(sampling_ratio));
 		let span_context = SpanContext::random().sampled(is_sampled);
 		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[
@@ -140,5 +147,30 @@ impl Worker {
 				req.cmd_name, resp
 			);
 		}
+	}
+}
+
+fn sampling_divisor(sampling_ratio: f64) -> u32 {
+	if sampling_ratio >= 1.0 {
+		return 1;
+	}
+
+	if sampling_ratio <= 0.0 {
+		return u32::MAX;
+	}
+
+	(1.0 / sampling_ratio).round().max(1.0) as u32
+}
+
+#[cfg(test)]
+mod tests {
+	use super::sampling_divisor;
+
+	#[test]
+	fn test_sampling_divisor_limits() {
+		assert_eq!(sampling_divisor(1.0), 1);
+		assert_eq!(sampling_divisor(0.5), 2);
+		assert_eq!(sampling_divisor(0.0001), 10000);
+		assert_eq!(sampling_divisor(0.0), u32::MAX);
 	}
 }
