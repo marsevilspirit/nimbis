@@ -103,3 +103,16 @@ Source of truth: `nimbis/src/cmd/table.rs`.
 2. Implement `Cmd` for the command struct.
 3. Export the module in `nimbis/src/cmd/mod.rs`.
 4. Register it in `nimbis/src/cmd/table.rs`.
+
+## Redis Compatibility Notes (Known Gaps)
+
+Nimbis is Redis-compatible for the implemented subset, but does **not** yet implement full Redis semantics.
+
+- `SET` currently documents/implements the basic `SET key value` form only (no `NX|XX|EX|PX|KEEPTTL|GET` options).
+- `ZRANGE` supports `start stop [WITHSCORES]` rank mode only; flags such as `BYSCORE`, `BYLEX`, `REV`, and `LIMIT` are not part of this interface.
+- `CONFIG` is limited to `GET` and `SET` subcommands.
+- `CLIENT` is limited to `ID`, `SETNAME`, `GETNAME`, and `LIST`.
+- Multi-key string helpers like `MGET`/`MSET`, transactions (`MULTI`/`EXEC`), pub/sub, scripting, streams, cluster commands, and ACL are not documented as implemented in this command table.
+
+When adding new commands or options, update both `nimbis/src/cmd/table.rs` and this document together.
+
