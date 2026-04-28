@@ -117,7 +117,7 @@ The current integration tests cover the following functional areas of the Nimbis
   - Metadata cleanup when all fields are deleted.
 - **Updates**: Verifies that updating existing fields overwrites values but maintains field count.
 
-### 4.3 Key Deletion (`delele_test.go`)
+### 4.3 Key Deletion (`delete_test.go`)
 - **String Deletion**: Deleting single and multiple string keys.
 - **Hash Deletion**: Deleting hash keys (ensures underlying fields are cleaned up).
 - **Mixed Deletion**: Deleting a mix of string, hash, and non-existent keys in a single command.

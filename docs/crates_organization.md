@@ -111,6 +111,6 @@ just build release
 ## Running the Server
 
 ```bash
-# Run server (release)
+# Run server
 just run
 ```
