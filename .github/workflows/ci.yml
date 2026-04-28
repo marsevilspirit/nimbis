@@ -32,7 +32,7 @@ jobs:
     - name: Cache Rust Dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: ${{ runner.os }}-rust
+        shared-key: ${{ runner.os }}-rust-check
         cache-on-failure: true
 
     - name: Install just
@@ -59,7 +59,7 @@ jobs:
     - name: Cache Rust Dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: ${{ runner.os }}-rust
+        shared-key: ${{ runner.os }}-rust-unit-test
         cache-on-failure: true
 
     - name: Install just
@@ -104,7 +104,7 @@ jobs:
     - name: Cache Rust Dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: ${{ runner.os }}-rust
+        shared-key: ${{ runner.os }}-rust-build-release-e2e
         cache-on-failure: true
 
     - name: Install just
