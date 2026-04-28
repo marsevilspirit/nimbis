@@ -186,6 +186,18 @@ pub struct ServerConfig {
     pub trace_endpoint: String,
 
     #[online_config(immutable)]
+    pub trace_sampling_ratio: f64,
+
+    #[online_config(immutable)]
+    pub trace_protocol: String,
+
+    #[online_config(immutable)]
+    pub trace_export_timeout_seconds: u64,
+
+    #[online_config(immutable)]
+    pub trace_report_interval_ms: u64,
+
+    #[online_config(immutable)]
     pub worker_threads: usize,
 }
 ```

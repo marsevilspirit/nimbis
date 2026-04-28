@@ -4,6 +4,7 @@ use fastrace::collector::Config;
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
+use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
@@ -43,9 +44,9 @@ impl Tracer {
 			}
 
 			let protocol = match config.protocol.trim().to_ascii_lowercase().as_str() {
-				"grpc" => opentelemetry_otlp::Protocol::Grpc,
-				"http_binary" => opentelemetry_otlp::Protocol::HttpBinary,
-				"http_json" => opentelemetry_otlp::Protocol::HttpJson,
+				"grpc" => Protocol::Grpc,
+				"http_binary" => Protocol::HttpBinary,
+				"http_json" => Protocol::HttpJson,
 				invalid => {
 					return Err(TelemetryError::TraceInitFailed(format!(
 						"invalid trace protocol: {invalid}. expected grpc/http_binary/http_json"
@@ -53,8 +54,8 @@ impl Tracer {
 				}
 			};
 
-			let reporter = OpenTelemetryReporter::new(
-				SpanExporter::builder()
+			let exporter = match protocol {
+				Protocol::Grpc => SpanExporter::builder()
 					.with_tonic()
 					.with_endpoint(config.endpoint.clone())
 					.with_protocol(protocol)
@@ -62,7 +63,20 @@ impl Tracer {
 						config.export_timeout_seconds,
 					))
 					.build()
-					.expect("initialize otlp exporter"),
+					.map_err(|e| TelemetryError::TraceInitFailed(e.to_string()))?,
+				Protocol::HttpBinary | Protocol::HttpJson => SpanExporter::builder()
+					.with_http()
+					.with_endpoint(config.endpoint.clone())
+					.with_protocol(protocol)
+					.with_timeout(std::time::Duration::from_secs(
+						config.export_timeout_seconds,
+					))
+					.build()
+					.map_err(|e| TelemetryError::TraceInitFailed(e.to_string()))?,
+			};
+
+			let reporter = OpenTelemetryReporter::new(
+				exporter,
 				Cow::Owned(
 					Resource::builder()
 						.with_attributes([KeyValue::new("service.name", "nimbis")])
@@ -99,5 +113,25 @@ impl Tracer {
 		if self.enabled {
 			fastrace::flush();
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_init_rejects_invalid_trace_protocol() {
+		let config = TracerConfig {
+			enabled: true,
+			endpoint: "http://localhost:4317".into(),
+			sampling_ratio: 1.0,
+			protocol: "invalid".into(),
+			export_timeout_seconds: 10,
+			report_interval_ms: 1000,
+		};
+
+		let result = Tracer::init(config);
+		assert!(matches!(result, Err(TelemetryError::TraceInitFailed(_))));
 	}
 }

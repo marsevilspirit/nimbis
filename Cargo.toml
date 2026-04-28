@@ -38,7 +38,7 @@ memchr = "2.8.0"
 num_cpus = "1.17.0"
 object_store = "0.13.1"
 opentelemetry = "0.31.0"
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "http-proto", "http-json", "reqwest-client"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
 quote = "1.0.45"
 regex = "1.12.2"
