@@ -105,12 +105,12 @@ just e2e-test
 just build
 
 # Build all crates (release)
-just build release
+just build --release
 ```
 
 ## Running the Server
 
 ```bash
-# Run server (release)
+# Run server
 just run
 ```
