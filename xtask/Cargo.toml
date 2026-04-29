@@ -11,3 +11,6 @@ clap = { workspace = true }
 regex = { workspace = true }
 toml_edit = { workspace = true }
 walkdir = { workspace = true }
+
+[lib]
+doctest = false

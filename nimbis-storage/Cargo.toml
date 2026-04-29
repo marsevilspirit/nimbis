@@ -13,7 +13,6 @@ chrono = { workspace = true }
 fastrace.workspace = true
 futures = { workspace = true }
 log = { workspace = true }
-object_store = { workspace = true }
 slatedb = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -27,3 +26,6 @@ ulid = { workspace = true }
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[lib]
+doctest = false

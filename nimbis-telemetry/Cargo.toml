@@ -15,9 +15,11 @@ opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
+
+[lib]
+doctest = false
