@@ -41,6 +41,28 @@ jobs:
     - name: Check
       run: just check
 
+  cargo_shear:
+    name: Cargo Shear
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@nightly
+
+    - name: Cache Rust Dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ runner.os }}-rust-cargo-shear
+        cache-on-failure: true
+
+    - name: Install cargo-shear
+      uses: taiki-e/install-action@cargo-shear
+
+    - name: Run cargo-shear
+      run: cargo shear
+
   unit_test:
     name: Unit Test
     strategy:
