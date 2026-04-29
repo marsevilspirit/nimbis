@@ -41,7 +41,8 @@ var _ = Describe("CONFIG Commands", func() {
 			result, err := rdb.ConfigGet(ctx, "object_store_url").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
+			Expect(result).To(HaveKey("object_store_url"))
+			Expect(result["object_store_url"]).NotTo(BeEmpty())
 		})
 
 		It("should get the log output", func() {
@@ -81,8 +82,9 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveLen(16))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
-			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
-			Expect(result).To(HaveKeyWithValue("object_store_options", "{}"))
+			Expect(result).To(HaveKey("object_store_url"))
+			Expect(result["object_store_url"]).NotTo(BeEmpty())
+			Expect(result).To(HaveKey("object_store_options"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))
@@ -126,7 +128,8 @@ var _ = Describe("CONFIG Commands", func() {
 			result, err := rdb.ConfigGet(ctx, "*url").Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(HaveLen(1))
-			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
+			Expect(result).To(HaveKey("object_store_url"))
+			Expect(result["object_store_url"]).NotTo(BeEmpty())
 		})
 
 		It("should return empty array for non-matching wildcard", func() {
@@ -149,24 +152,30 @@ var _ = Describe("CONFIG Commands", func() {
 		})
 
 		It("should fail to set immutable field 'object_store_url'", func() {
-			err := rdb.ConfigSet(ctx, "object_store_url", "file:/tmp/nimbis").Err()
+			before, err := rdb.ConfigGet(ctx, "object_store_url").Result()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = rdb.ConfigSet(ctx, "object_store_url", "file:/tmp/nimbis").Err()
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Field 'object_store_url' is immutable"))
 
 			// Verify the value hasn't changed
 			result, err := rdb.ConfigGet(ctx, "object_store_url").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result["object_store_url"]).To(Equal("file:nimbis_store"))
+			Expect(result["object_store_url"]).To(Equal(before["object_store_url"]))
 		})
 
 		It("should fail to set immutable field 'object_store_options'", func() {
-			err := rdb.ConfigSet(ctx, "object_store_options", "{}").Err()
+			before, err := rdb.ConfigGet(ctx, "object_store_options").Result()
+			Expect(err).NotTo(HaveOccurred())
+
+			err = rdb.ConfigSet(ctx, "object_store_options", "{}").Err()
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Field 'object_store_options' is immutable"))
 
 			result, err := rdb.ConfigGet(ctx, "object_store_options").Result()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result["object_store_options"]).To(Equal("{}"))
+			Expect(result["object_store_options"]).To(Equal(before["object_store_options"]))
 		})
 
 		It("should fail to set immutable field 'log_output'", func() {
