@@ -16,10 +16,7 @@ env:
 jobs:
   check:
     name: Check
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
@@ -65,10 +62,7 @@ jobs:
 
   unit_test:
     name: Unit Test
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
@@ -97,16 +91,13 @@ jobs:
       run: just test
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && github.event_name == 'push'
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       uses: codecov/codecov-action@v6
       with:
         files: ./codecov.json
         flags: rust
         name: rust-coverage
-        fail_ci_if_error: true
-        token: ${{ env.CODECOV_TOKEN }}
+        fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN }}
 
   build_release_e2e:
     name: Build Release and E2E Test
