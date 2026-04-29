@@ -220,6 +220,7 @@ Absolute local paths and S3-compatible stores use the same field:
 
 ```toml
 object_store_url = "file:///tmp/nimbis_store"
+object_store_url = "memory:///nimbis/dev"
 object_store_url = "s3://nimbis/dev"
 ```
 
@@ -233,6 +234,32 @@ aws_access_key_id = "minioadmin"
 aws_secret_access_key = "minioadmin"
 aws_virtual_hosted_style_request = "false"
 aws_allow_http = "true"
+```
+
+For MinIO specifically, use an `s3://` URL with a bucket/prefix plus endpoint and credentials:
+
+```toml
+object_store_url = "s3://nimbis/dev"
+
+[object_store_options]
+aws_region = "us-east-1"
+aws_endpoint = "http://127.0.0.1:9000"
+aws_access_key_id = "minioadmin"
+aws_secret_access_key = "minioadmin"
+aws_virtual_hosted_style_request = "false"
+aws_allow_http = "true"
+```
+
+Equivalent environment variables:
+
+```bash
+NIMBIS_OBJECT_STORE_URL=s3://nimbis/dev
+NIMBIS_OBJECT_STORE_OPTION_AWS_REGION=us-east-1
+NIMBIS_OBJECT_STORE_OPTION_AWS_ENDPOINT=http://127.0.0.1:9000
+NIMBIS_OBJECT_STORE_OPTION_AWS_ACCESS_KEY_ID=minioadmin
+NIMBIS_OBJECT_STORE_OPTION_AWS_SECRET_ACCESS_KEY=minioadmin
+NIMBIS_OBJECT_STORE_OPTION_AWS_VIRTUAL_HOSTED_STYLE_REQUEST=false
+NIMBIS_OBJECT_STORE_OPTION_AWS_ALLOW_HTTP=true
 ```
 
 Environment variables can override these startup values with `NIMBIS_OBJECT_STORE_URL` and `NIMBIS_OBJECT_STORE_OPTION_<KEY>`.

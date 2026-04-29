@@ -83,6 +83,12 @@ Nimbis stores data through the `object_store` crate. Local development uses a fi
 object_store_url = "file:nimbis_store"
 ```
 
+For an in-memory object store (mainly for short-lived tests), no extra options are required:
+
+```toml
+object_store_url = "memory:///nimbis/dev"
+```
+
 S3-compatible services such as MinIO use the same setting plus object store options:
 
 ```toml
@@ -95,4 +101,16 @@ aws_access_key_id = "minioadmin"
 aws_secret_access_key = "minioadmin"
 aws_virtual_hosted_style_request = "false"
 aws_allow_http = "true"
+```
+
+The same MinIO setup can be provided via environment variables:
+
+```bash
+NIMBIS_OBJECT_STORE_URL=s3://nimbis/dev
+NIMBIS_OBJECT_STORE_OPTION_AWS_REGION=us-east-1
+NIMBIS_OBJECT_STORE_OPTION_AWS_ENDPOINT=http://127.0.0.1:9000
+NIMBIS_OBJECT_STORE_OPTION_AWS_ACCESS_KEY_ID=minioadmin
+NIMBIS_OBJECT_STORE_OPTION_AWS_SECRET_ACCESS_KEY=minioadmin
+NIMBIS_OBJECT_STORE_OPTION_AWS_VIRTUAL_HOSTED_STYLE_REQUEST=false
+NIMBIS_OBJECT_STORE_OPTION_AWS_ALLOW_HTTP=true
 ```
