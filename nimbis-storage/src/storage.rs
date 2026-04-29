@@ -34,12 +34,20 @@ fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStor
 	}
 }
 
-fn local_path_url(path: &std::path::Path) -> String {
+fn local_path_url(path: &std::path::Path) -> Result<String, StorageError> {
+	if path.is_absolute() {
+		return url::Url::from_file_path(path)
+			.map(|url| url.to_string())
+			.map_err(|_| StorageError::ObjectStoreConfig {
+				message: format!("failed to convert path '{}' to file URL", path.display()),
+			});
+	}
+
 	let path = path.display().to_string();
-	if path.starts_with('/') || path.starts_with('.') {
-		format!("file:{}", path)
+	if path.starts_with('.') {
+		Ok(format!("file:{}", path))
 	} else {
-		format!("file:./{}", path)
+		Ok(format!("file:./{}", path))
 	}
 }
 
@@ -51,17 +59,19 @@ pub fn validate_object_store_url(url: &str) -> Result<(), StorageError> {
 	Ok(())
 }
 
-fn local_file_root(raw_url: &str, url: &url::Url) -> std::path::PathBuf {
+fn local_file_root(raw_url: &str, url: &url::Url) -> Result<std::path::PathBuf, StorageError> {
 	let Some(path) = raw_url.strip_prefix("file:") else {
-		return std::path::PathBuf::from(url.path());
+		return Ok(std::path::PathBuf::from(url.path()));
 	};
 
 	if path.is_empty() {
-		std::path::PathBuf::from(".")
+		Ok(std::path::PathBuf::from("."))
 	} else if path.starts_with("//") {
-		std::path::PathBuf::from(url.path())
+		url.to_file_path().map_err(|_| StorageError::ObjectStoreConfig {
+			message: format!("invalid absolute file URL: {raw_url}"),
+		})
 	} else {
-		std::path::PathBuf::from(path)
+		Ok(std::path::PathBuf::from(path))
 	}
 }
 
@@ -81,9 +91,9 @@ where
 		})?;
 
 	if matches!(scheme, ObjectStoreScheme::Local) {
-		let root = local_file_root(raw_url, url);
-		std::fs::create_dir_all(root)?;
-		let store = LocalFileSystem::new_with_prefix(local_file_root(raw_url, url))?;
+		let root = local_file_root(raw_url, url)?;
+		std::fs::create_dir_all(&root)?;
+		let store = LocalFileSystem::new_with_prefix(root)?;
 		return Ok((Arc::new(store), ObjectStorePath::from("")));
 	}
 
@@ -113,7 +123,7 @@ impl Storage {
 		path: impl AsRef<std::path::Path>,
 		shard_id: Option<usize>,
 	) -> Result<Self, StorageError> {
-		let url = local_path_url(path.as_ref());
+		let url = local_path_url(path.as_ref())?;
 		Self::open_object_store(&url, std::iter::empty::<(&str, &str)>(), shard_id).await
 	}
 
