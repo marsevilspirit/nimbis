@@ -67,9 +67,10 @@ fn local_file_root(raw_url: &str, url: &url::Url) -> Result<std::path::PathBuf, 
 	if path.is_empty() {
 		Ok(std::path::PathBuf::from("."))
 	} else if path.starts_with("//") {
-		url.to_file_path().map_err(|_| StorageError::ObjectStoreConfig {
-			message: format!("invalid absolute file URL: {raw_url}"),
-		})
+		url.to_file_path()
+			.map_err(|_| StorageError::ObjectStoreConfig {
+				message: format!("invalid absolute file URL: {raw_url}"),
+			})
 	} else {
 		Ok(std::path::PathBuf::from(path))
 	}
