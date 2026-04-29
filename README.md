@@ -2,6 +2,8 @@
 
 A Redis-compatible database built with Rust, using object storage as the backend.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/marsevilspirit/nimbis)
+
 
 ## Roadmap
 
