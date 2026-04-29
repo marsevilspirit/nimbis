@@ -2,6 +2,8 @@
 
 A Redis-compatible database built with Rust, using object storage as the backend.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/marsevilspirit/nimbis)
+
 
 ## Roadmap
 
@@ -10,7 +12,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 ## Features
 
 - **Redis-Compatible Commands**: Comprehensive support for string, hash, list, set, and sorted set data types. See [Commands](docs/commands.md) for the complete list of supported commands and implementation guide.
-- **Persistence**: Data is persisted to SlateDB (object storage compatible).
+- **Persistence**: Data is persisted to [SlateDB](https://github.com/slatedb/slatedb) (object storage compatible).
 - **Configuration**: Dynamic configuration updates.
 - **Observability**: Detailed build and environment information (git hash, branch, rustc version) displayed on startup.
 

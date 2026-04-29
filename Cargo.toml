@@ -36,9 +36,8 @@ futures = "0.3.31"
 log = "0.4.29"
 memchr = "2.8.0"
 num_cpus = "1.17.0"
-object_store = "0.13.1"
 opentelemetry = "0.31.0"
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "http-proto", "http-json", "reqwest-client"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
 quote = "1.0.45"
 regex = "1.12.2"
@@ -52,7 +51,6 @@ thiserror = "2.0.18"
 tokio = { version = "1.52.1", features = ["full"] }
 toml = "1.0.1"
 toml_edit = "0.23.7"
-tracing = "0.1.44"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.23", features = [
     "env-filter",

@@ -24,7 +24,7 @@ The Test Suite is responsible for managing the lifecycle of the `nimbis` server 
 ### Binary Discovery
 The test program attempts to find the `nimbis` executable in the following way:
 1.  **Default Build Path**: Automatically finds the project root (by looking upwards for `Cargo.toml`) and looks for the binary in the approximate path `target/release/nimbis`.
-    - *Hint*: Please ensure you produce a release binary (e.g., via `just build release` or `just run`) before running tests.
+    - *Hint*: Please ensure you produce a release binary (e.g., via `just build --release` or `just run`) before running tests.
 
 ### Server Startup Process
 1.  `util.StartServer()` starts a subprocess (`os/exec`) to run `nimbis`.
@@ -117,7 +117,7 @@ The current integration tests cover the following functional areas of the Nimbis
   - Metadata cleanup when all fields are deleted.
 - **Updates**: Verifies that updating existing fields overwrites values but maintains field count.
 
-### 4.3 Key Deletion (`delele_test.go`)
+### 4.3 Key Deletion (`delete_test.go`)
 - **String Deletion**: Deleting single and multiple string keys.
 - **Hash Deletion**: Deleting hash keys (ensures underlying fields are cleaned up).
 - **Mixed Deletion**: Deleting a mix of string, hash, and non-existent keys in a single command.

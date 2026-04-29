@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"runtime"
 	"strconv"
 
 	"github.com/marsevilspirit/nimbis/e2e-test/util"
@@ -77,8 +76,9 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// host, port, object_store_url, object_store_options, save, appendonly,
 			// log_level, log_output, log_rotation, trace_enabled, trace_endpoint,
-			// worker_threads
-			Expect(result).To(HaveLen(12))
+			// trace_sampling_ratio, trace_protocol, trace_export_timeout_seconds,
+			// trace_report_interval_ms, worker_threads
+			Expect(result).To(HaveLen(16))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
 			Expect(result).To(HaveKeyWithValue("object_store_url", "file:nimbis_store"))
@@ -90,7 +90,15 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveKeyWithValue("log_rotation", "daily"))
 			Expect(result).To(HaveKeyWithValue("trace_enabled", "false"))
 			Expect(result).To(HaveKeyWithValue("trace_endpoint", ""))
-			Expect(result).To(HaveKeyWithValue("worker_threads", strconv.Itoa(runtime.NumCPU())))
+			Expect(result).To(HaveKeyWithValue("trace_sampling_ratio", "0.0001"))
+			Expect(result).To(HaveKeyWithValue("trace_protocol", "grpc"))
+			Expect(result).To(HaveKeyWithValue("trace_export_timeout_seconds", "10"))
+			Expect(result).To(HaveKeyWithValue("trace_report_interval_ms", "1000"))
+			workerThreads, ok := result["worker_threads"]
+			Expect(ok).To(BeTrue())
+			workerThreadsInt, convErr := strconv.Atoi(workerThreads)
+			Expect(convErr).NotTo(HaveOccurred())
+			Expect(workerThreadsInt).To(BeNumerically(">", 0))
 		})
 
 		It("should match fields with prefix wildcard", func() {

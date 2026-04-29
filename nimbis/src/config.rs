@@ -76,6 +76,20 @@ pub enum ConfigError {
 
 	#[error("Invalid object_store_url: {0}")]
 	InvalidObjectStoreUrl(String),
+	#[error("Invalid trace_sampling_ratio: {0}. Expected a value between 0.0 and 1.0")]
+	InvalidTraceSamplingRatio(f64),
+
+	#[error("Invalid trace_protocol: {0}. Valid values: grpc, http_binary, http_json")]
+	InvalidTraceProtocol(String),
+
+	#[error("trace_export_timeout_seconds must be greater than 0")]
+	InvalidTraceExportTimeout,
+
+	#[error("trace_report_interval_ms must be greater than 0")]
+	InvalidTraceReportInterval,
+
+	#[error("Invalid environment variable {key}: {value}")]
+	InvalidEnvVar { key: String, value: String },
 
 	#[error(transparent)]
 	Telemetry(#[from] TelemetryError),
@@ -119,6 +133,14 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub trace_endpoint: String,
 	#[online_config(immutable)]
+	pub trace_sampling_ratio: f64,
+	#[online_config(immutable)]
+	pub trace_protocol: String,
+	#[online_config(immutable)]
+	pub trace_export_timeout_seconds: u64,
+	#[online_config(immutable)]
+	pub trace_report_interval_ms: u64,
+	#[online_config(immutable)]
 	pub worker_threads: usize,
 }
 
@@ -138,6 +160,29 @@ impl ServerConfig {
 		}
 		validate_object_store_url(&self.object_store_url)?;
 
+		if !(0.0..=1.0).contains(&self.trace_sampling_ratio) {
+			return Err(ConfigError::InvalidTraceSamplingRatio(
+				self.trace_sampling_ratio,
+			));
+		}
+
+		match self.trace_protocol.trim().to_ascii_lowercase().as_str() {
+			"grpc" | "http_binary" | "http_json" => {}
+			_ => {
+				return Err(ConfigError::InvalidTraceProtocol(
+					self.trace_protocol.clone(),
+				));
+			}
+		}
+
+		if self.trace_export_timeout_seconds == 0 {
+			return Err(ConfigError::InvalidTraceExportTimeout);
+		}
+
+		if self.trace_report_interval_ms == 0 {
+			return Err(ConfigError::InvalidTraceReportInterval);
+		}
+
 		Ok(())
 	}
 }
@@ -156,6 +201,10 @@ impl Default for ServerConfig {
 			log_rotation: "daily".into(),
 			trace_enabled: false,
 			trace_endpoint: "".into(),
+			trace_sampling_ratio: 0.0001,
+			trace_protocol: "grpc".into(),
+			trace_export_timeout_seconds: 10,
+			trace_report_interval_ms: 1000,
 			worker_threads: num_cpus::get(),
 		}
 	}
@@ -230,6 +279,8 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	}
 	apply_env_overrides(&mut config, std::env::vars());
 
+	apply_trace_env_overrides(&mut config)?;
+
 	config.validate()?;
 
 	let log_output = resolve_log_output(&config)?;
@@ -237,12 +288,67 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	let telemetry_manager = Arc::new(TelemetryManager::init(
 		&config.log_level,
 		log_output,
-		config.trace_enabled,
-		config.trace_endpoint.clone(),
+		nimbis_telemetry::tracer::TracerConfig {
+			enabled: config.trace_enabled,
+			endpoint: config.trace_endpoint.clone(),
+			sampling_ratio: config.trace_sampling_ratio,
+			protocol: config.trace_protocol.clone(),
+			export_timeout_seconds: config.trace_export_timeout_seconds,
+			report_interval_ms: config.trace_report_interval_ms,
+		},
 	)?);
 	TELEMETRY_MANAGER.init(telemetry_manager);
 	SERVER_CONF.init(config);
 	Ok(())
+}
+
+fn apply_trace_env_overrides(config: &mut ServerConfig) -> Result<(), ConfigError> {
+	if let Some(raw) = read_non_empty_env("NIMBIS_TRACE_ENABLED") {
+		config.trace_enabled = raw
+			.parse::<bool>()
+			.map_err(|_| ConfigError::InvalidEnvVar {
+				key: "NIMBIS_TRACE_ENABLED".into(),
+				value: raw.clone(),
+			})?;
+	}
+
+	if let Some(endpoint) = read_non_empty_env("NIMBIS_TRACE_ENDPOINT") {
+		config.trace_endpoint = endpoint;
+	}
+
+	if let Some(raw) = read_non_empty_env("NIMBIS_TRACE_SAMPLING_RATIO") {
+		config.trace_sampling_ratio =
+			raw.parse::<f64>().map_err(|_| ConfigError::InvalidEnvVar {
+				key: "NIMBIS_TRACE_SAMPLING_RATIO".into(),
+				value: raw.clone(),
+			})?;
+	}
+
+	if let Some(protocol) = read_non_empty_env("NIMBIS_TRACE_PROTOCOL") {
+		config.trace_protocol = protocol;
+	}
+
+	if let Some(raw) = read_non_empty_env("NIMBIS_TRACE_EXPORT_TIMEOUT_SECONDS") {
+		config.trace_export_timeout_seconds =
+			raw.parse::<u64>().map_err(|_| ConfigError::InvalidEnvVar {
+				key: "NIMBIS_TRACE_EXPORT_TIMEOUT_SECONDS".into(),
+				value: raw.clone(),
+			})?;
+	}
+
+	if let Some(raw) = read_non_empty_env("NIMBIS_TRACE_REPORT_INTERVAL_MS") {
+		config.trace_report_interval_ms =
+			raw.parse::<u64>().map_err(|_| ConfigError::InvalidEnvVar {
+				key: "NIMBIS_TRACE_REPORT_INTERVAL_MS".into(),
+				value: raw.clone(),
+			})?;
+	}
+
+	Ok(())
+}
+
+fn read_non_empty_env(key: &str) -> Option<String> {
+	std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
 fn resolve_default_config_path_from_base(base: &Path) -> Option<PathBuf> {
@@ -571,6 +677,35 @@ worker_threads: 4
 	}
 
 	#[test]
+	fn test_default_trace_sampling_ratio() {
+		assert_eq!(ServerConfig::default().trace_sampling_ratio, 0.0001);
+	}
+
+	#[rstest]
+	#[case(-0.1)]
+	#[case(1.1)]
+	fn test_trace_sampling_ratio_must_be_between_zero_and_one(#[case] ratio: f64) {
+		let config = ServerConfig {
+			trace_sampling_ratio: ratio,
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidTraceSamplingRatio(_)));
+	}
+
+	#[test]
+	fn test_trace_protocol_rejects_unknown_values() {
+		let config = ServerConfig {
+			trace_protocol: "udp".into(),
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidTraceProtocol(_)));
+	}
+
+	#[test]
 	fn test_trace_endpoint_required_when_trace_enabled() {
 		let dir = tempfile::tempdir().unwrap();
 		let file_path = dir.path().join("config.toml");
@@ -656,7 +791,7 @@ log_level = "nimbis=verbose"
 
 		let err = load_from_file(&file_path).unwrap_err();
 		assert!(
-			matches!(err, ConfigError::Telemetry(TelemetryError::InvalidLogLevel(v)) if v == "nimbis=verbose")
+			matches!(err, ConfigError::Telemetry(TelemetryError::InvalidLogLevel(v)) if v.starts_with("nimbis=verbose:"))
 		);
 	}
 

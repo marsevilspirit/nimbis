@@ -28,6 +28,22 @@ trace_enabled = false
 # Required when trace_enabled = true, and must be an http or https URL with a host.
 trace_endpoint = ""
 
+# Trace sampling ratio between 0.0 and 1.0.
+# - 0.0 disables collection of command spans while keeping trace context wiring enabled.
+# - 1.0 samples everything.
+# Default is 0.0001 (0.01%) for production safety.
+trace_sampling_ratio = 0.0001
+
+# OTLP transport protocol: "grpc", "http_binary", or "http_json".
+trace_protocol = "grpc"
+
+# Export timeout in seconds for each OTLP push.
+trace_export_timeout_seconds = 10
+
+# Collector report interval in milliseconds.
+# Smaller values flush more frequently and reduce batch size pressure.
+trace_report_interval_ms = 1000
+
 # Number of worker threads (default: number of CPU cores)
 # worker_threads = 8
 

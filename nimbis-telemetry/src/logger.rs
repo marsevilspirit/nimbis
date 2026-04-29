@@ -75,9 +75,7 @@ impl Logger {
 
 	/// Initialize the logger with the provided log level.
 	pub fn init(level: &str, output: LogOutput) -> Result<Self, TelemetryError> {
-		validate_log_level(level)?;
-		let env_filter = EnvFilter::try_new(level)
-			.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))?;
+		let env_filter = parse_env_filter(level)?;
 
 		let is_file = output.is_file();
 		let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
@@ -94,14 +92,12 @@ impl Logger {
 
 	/// Reload the log level dynamically.
 	pub fn reload_log_level(&self, level: &str) -> Result<(), TelemetryError> {
-		validate_log_level(level)?;
+		let new_filter = parse_env_filter(level)?;
 
 		let Some(reload_handle) = self.reload_handle.as_ref() else {
 			return Ok(());
 		};
 
-		let new_filter = EnvFilter::try_new(level)
-			.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))?;
 		reload_handle
 			.reload(new_filter)
 			.map_err(|e| TelemetryError::ReloadFailed(e.to_string()))
@@ -393,19 +389,12 @@ where
 		.map_err(|e| TelemetryError::InitFailed(e.to_string()))
 }
 
-pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
-	if !level.contains('=') && !level.contains(',') {
-		const VALID_LEVELS: &[&str] = &["trace", "debug", "info", "warn", "error"];
-		let level_lower = level.to_lowercase();
-		if !VALID_LEVELS.contains(&level_lower.as_str()) {
-			return Err(TelemetryError::InvalidLogLevel(level.to_string()));
-		}
-		return Ok(());
-	}
+fn parse_env_filter(level: &str) -> Result<EnvFilter, TelemetryError> {
+	EnvFilter::try_new(level).map_err(|e| TelemetryError::InvalidLogLevel(format!("{level}: {e}")))
+}
 
-	EnvFilter::try_new(level)
-		.map(|_| ())
-		.map_err(|_| TelemetryError::InvalidLogLevel(level.to_string()))
+pub fn validate_log_level(level: &str) -> Result<(), TelemetryError> {
+	parse_env_filter(level).map(|_| ())
 }
 
 #[cfg(test)]
@@ -469,10 +458,15 @@ mod tests {
 	#[case("info")]
 	#[case("warn")]
 	#[case("error")]
+	#[case("off")]
+	#[case("tokio")]
+	#[case("[my_span]")]
+	#[case("3")]
 	#[case("TRACE")] // Test case insensitivity
 	#[case("DEBUG")]
 	#[case("INFO")]
 	#[case("DeBuG")] // Mixed case
+	#[case("nimbis=debug,tokio=warn")]
 	#[case("nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info")]
 	#[case("tokio=warn,info")]
 	#[case("nimbis::worker=trace")]
@@ -482,18 +476,17 @@ mod tests {
 
 	/// Test that invalid log levels are rejected
 	#[rstest]
-	#[case("invalid")]
-	#[case("foo")]
-	#[case("bar")]
-	#[case("warning")] // Common mistake (should be "warn")
-	#[case("critical")] // Common mistake (not a standard Rust log level)
+	#[case("nimbis=invalid")]
+	#[case("tokio=warning")]
+	#[case("hyper=critical")]
+	#[case("nimbis==debug")]
+	#[case("[")]
 	#[case("=")]
 	#[case("=info")]
 	#[case("nimbis=debug,=warn")]
 	#[case("nimbis=debug=info")]
 	#[case("nimbis=[debug]")]
 	#[case("nimbis=verbose")]
-	#[case("nimbis==debug")]
 	fn test_invalid_log_levels(#[case] level: &str) {
 		let result = validate_log_level(level);
 		assert!(
@@ -501,6 +494,17 @@ mod tests {
 			"Expected InvalidLogLevel for: {}",
 			level
 		);
+	}
+
+	#[test]
+	fn test_invalid_log_level_includes_parse_error() {
+		let result = validate_log_level("nimbis=verbose");
+
+		assert!(matches!(
+			result,
+			Err(TelemetryError::InvalidLogLevel(message))
+				if message.starts_with("nimbis=verbose:") && message.len() > "nimbis=verbose:".len()
+		));
 	}
 
 	// CustomRollingFile tests
