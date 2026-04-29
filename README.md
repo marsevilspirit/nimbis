@@ -10,7 +10,7 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 ## Features
 
 - **Redis-Compatible Commands**: Comprehensive support for string, hash, list, set, and sorted set data types. See [Commands](docs/commands.md) for the complete list of supported commands and implementation guide.
-- **Persistence**: Data is persisted to SlateDB (object storage compatible).
+- **Persistence**: Data is persisted to [SlateDB](https://github.com/slatedb/slatedb) (object storage compatible).
 - **Configuration**: Dynamic configuration updates.
 - **Observability**: Detailed build and environment information (git hash, branch, rustc version) displayed on startup.
 
