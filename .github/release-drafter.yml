@@ -29,31 +29,6 @@ template: |
 
   $CHANGES
 
-autolabeler:
-  - label: documentation
-    files:
-      - '*.md'
-    title:
-      - '/(docs|doc:|\[doc\]|typos|comment|documentation)/i'
-  - label: bug
-    title:
-      - '/(fix|race|bug|missing|correct)/i'
-  - label: dependencies
-    title:
-      - '/(bump|dependencies)/i'
-  - label: feature
-    title:
-      - '/(feature|feat|add)/i'
-  - label: refactor
-    title:
-      - '/^(refactor)(\(.+\))?:/i'
-  - label: test
-    title:
-      - '/^(test|tests)(\(.+\))?:/i'
-  - label: ci
-    files:
-      - '.github/**'
-
 version-resolver:
   major:
     labels:

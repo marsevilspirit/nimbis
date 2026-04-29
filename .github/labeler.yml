@@ -1,0 +1,24 @@
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**'
+
+test:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'test/**'
+          - 'tests/**'
+          - '**/*test*'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/go.mod'
+          - '**/go.sum'
+          - '**/Cargo.toml'
+          - '**/Cargo.lock'
