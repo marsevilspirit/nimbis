@@ -19,8 +19,8 @@ tooling.
 # Build/Test Commands
 
 - `just build` builds all crates.
-- `just check` runs workspace checks, formatting checks, `cargo check`, and
-  Clippy with warnings denied.
+- `just check` runs workspace checks, formatting checks, numbered-comment
+  checks, `cargo check`, and Clippy with warnings denied.
 - `just fmt` formats Rust code.
 - `just test` runs Rust unit tests with coverage output.
 - `just e2e-test` runs Go end-to-end tests.
