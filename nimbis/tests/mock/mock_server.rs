@@ -25,7 +25,9 @@ impl MockNimbisServer {
 	pub fn new() -> Self {
 		let port = pick_free_port().expect("pick free port");
 		let data_dir = tempdir().expect("create temp dir");
-		let object_store_url = format!("file:{}", data_dir.path().display());
+		let object_store_url = url::Url::from_directory_path(data_dir.path())
+			.expect("convert temp dir path to file URL")
+			.to_string();
 
 		let config = ServerConfig {
 			host: "127.0.0.1".to_string(),

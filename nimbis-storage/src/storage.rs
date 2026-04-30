@@ -76,7 +76,7 @@ fn local_file_root(raw_url: &str, url: &url::Url) -> Result<std::path::PathBuf, 
 	}
 }
 
-fn build_object_store<I, K, V>(
+async fn build_object_store<I, K, V>(
 	raw_url: &str,
 	url: &url::Url,
 	options: I,
@@ -93,7 +93,7 @@ where
 
 	if matches!(scheme, ObjectStoreScheme::Local) {
 		let root = local_file_root(raw_url, url)?;
-		std::fs::create_dir_all(&root)?;
+		tokio::fs::create_dir_all(&root).await?;
 		let store = LocalFileSystem::new_with_prefix(root)?;
 		return Ok((Arc::new(store), ObjectStorePath::from("")));
 	}
@@ -141,7 +141,7 @@ impl Storage {
 	{
 		let raw_url = url;
 		let url = url::Url::parse(raw_url)?;
-		let (object_store, base_path) = build_object_store(raw_url, &url, options)?;
+		let (object_store, base_path) = build_object_store(raw_url, &url, options).await?;
 		let root_path = shard_path(base_path, shard_id);
 
 		Self::open_with_object_store(object_store, root_path).await
@@ -351,7 +351,7 @@ mod tests {
 	async fn test_open_object_store_uses_url_path_and_shard_prefix() {
 		let timestamp = ulid::Ulid::new().to_string();
 		let path = std::env::temp_dir().join(format!("nimbis_test_object_store_{}", timestamp));
-		let url = format!("file:{}", path.display());
+		let url = local_path_url(path.as_path()).unwrap();
 
 		let storage = Storage::open_object_store(&url, std::iter::empty::<(&str, &str)>(), Some(3))
 			.await

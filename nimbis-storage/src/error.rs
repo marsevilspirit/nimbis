@@ -239,6 +239,11 @@ mod tests {
 			message: "test".into(),
 		};
 		assert_eq!(inconsistency_err.code(), "E1004");
+
+		let object_store_err = StorageError::ObjectStoreConfig {
+			message: "test".into(),
+		};
+		assert_eq!(object_store_err.code(), "E1005");
 	}
 
 	#[test]
@@ -259,7 +264,7 @@ mod tests {
 
 	#[test]
 	fn test_storage_error_codes_unique() {
-		let codes = ["E1000", "E1001", "E1002", "E1003", "E1004"];
+		let codes = ["E1000", "E1001", "E1002", "E1003", "E1004", "E1005"];
 		let unique_codes: std::collections::HashSet<_> = codes.iter().collect();
 		assert_eq!(
 			codes.len(),
