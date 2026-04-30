@@ -44,7 +44,10 @@ fn local_path_url(path: &std::path::Path) -> Result<String, StorageError> {
 	url::Url::from_file_path(&abs_path)
 		.map(|url| url.to_string())
 		.map_err(|_| StorageError::ObjectStoreConfig {
-			message: format!("failed to convert path '{}' to file URL", abs_path.display()),
+			message: format!(
+				"failed to convert path '{}' to file URL",
+				abs_path.display()
+			),
 		})
 }
 
