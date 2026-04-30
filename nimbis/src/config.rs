@@ -651,21 +651,12 @@ worker_threads: 4
 		);
 	}
 
-	#[test]
-	fn test_object_store_url_must_be_valid() {
+	#[rstest]
+	#[case("not a url")]
+	#[case("unknown://bucket/path")]
+	fn test_object_store_url_must_be_valid(#[case] url: &str) {
 		let config = ServerConfig {
-			object_store_url: "not a url".into(),
-			..ServerConfig::default()
-		};
-
-		let err = config.validate().unwrap_err();
-		assert!(matches!(err, ConfigError::InvalidObjectStoreUrl(_)));
-	}
-
-	#[test]
-	fn test_object_store_url_must_use_supported_scheme() {
-		let config = ServerConfig {
-			object_store_url: "unknown://bucket/path".into(),
+			object_store_url: url.into(),
 			..ServerConfig::default()
 		};
 
