@@ -33,6 +33,9 @@ tooling.
 - Keep changes scoped to the relevant crate or command path.
 - Use `cargo fmt`/`just fmt` formatting.
 - Keep Clippy clean under the repository's configured checks.
+- Prefer `use` imports over repetitive fully-qualified paths.
+- Avoid unnecessary full-path prefixes (for example, prefer imported
+  `iter::empty` style over `std::iter::empty` when context is clear).
 - Prefer typed errors and explicit result handling over panics in production
   paths.
 - Use the configured logging facade instead of direct stdout/stderr output.
