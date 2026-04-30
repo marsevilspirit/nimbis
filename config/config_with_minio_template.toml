@@ -1,0 +1,65 @@
+# Nimbis Configuration Template with MinIO
+
+# Host and port to bind to
+host = "127.0.0.1"
+port = 6379
+
+# Log level/filter expression (EnvFilter syntax).
+# Examples:
+# - "info"
+# - "nimbis=debug,storage=debug,resp=info,slatedb=warn,tokio=warn,info"
+log_level = "info"
+
+# Log output mode: "terminal" or "file"
+# When set to "file", logs are written to nimbis.log in the current working
+# directory. With log_rotation = "never", logs stay in that single file; other
+# rotation modes create time-rotated files according to log_rotation.
+log_output = "terminal"
+
+# File log rotation: "minutely", "hourly", "daily", or "never"
+# Only used when log_output = "file". Defaulting to "daily" avoids unbounded
+# log growth while keeping files with the same base name.
+log_rotation = "daily"
+
+# Enable fastrace collection and OpenTelemetry export
+trace_enabled = false
+
+# OpenTelemetry endpoint for exporting traces.
+# Required when trace_enabled = true, and must be an http or https URL with a host.
+trace_endpoint = ""
+
+# Trace sampling ratio between 0.0 and 1.0.
+# - 0.0 disables collection of command spans while keeping trace context wiring enabled.
+# - 1.0 samples everything.
+# Default is 0.0001 (0.01%) for production safety.
+trace_sampling_ratio = 0.0001
+
+# OTLP transport protocol: "grpc", "http_binary", or "http_json".
+trace_protocol = "grpc"
+
+# Export timeout in seconds for each OTLP push.
+trace_export_timeout_seconds = 10
+
+# Collector report interval in milliseconds.
+# Smaller values flush more frequently and reduce batch size pressure.
+trace_report_interval_ms = 1000
+
+# Number of worker threads (default: number of CPU cores)
+# worker_threads = 8
+
+# Object store root URL for SlateDB data.
+# For local MinIO, create the bucket "nimbis" before starting the server.
+object_store_url = "s3://nimbis/dev"
+
+# Placeholder for Redis compatibility (immutable)
+save = ""
+appendonly = "no"
+
+# MinIO options for the object_store crate.
+[object_store_options]
+aws_region = "us-east-1"
+aws_endpoint = "http://127.0.0.1:9000"
+aws_access_key_id = "minioadmin"
+aws_secret_access_key = "minioadmin"
+aws_virtual_hosted_style_request = "false"
+aws_allow_http = "true"
