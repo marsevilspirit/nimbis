@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct ZRangeCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for ZRangeCmd {
 			meta: CmdMeta {
 				name: "ZRANGE".to_string(),
 				arity: -4, // ZRANGE key start stop [WITHSCORES]
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

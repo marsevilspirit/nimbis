@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct HSetCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for HSetCmd {
 			meta: CmdMeta {
 				name: "HSET".to_string(),
 				arity: -4, // HSET key field value [field value ...] -> min 3 args + command = 4
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

@@ -105,6 +105,36 @@ var _ = Describe("Get/Set Commands", func() {
 		Expect(val).To(Equal("Hello World"))
 	})
 
+	It("should MSET and MGET values across workers", func() {
+		key1, key2 := findCrossShardKeys(2)
+		missing := "mget_missing_key"
+		Expect(rdb.Del(ctx, key1, key2, missing).Err()).To(Succeed())
+
+		err := rdb.MSet(ctx, key1, "v1", key2, "v2").Err()
+		Expect(err).NotTo(HaveOccurred())
+
+		values, err := rdb.MGet(ctx, key1, key2, missing).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(values).To(Equal([]interface{}{"v1", "v2", nil}))
+	})
+
+	It("should MSETNX all-or-none across workers", func() {
+		key1, key2 := findCrossShardKeys(2)
+		Expect(rdb.Del(ctx, key1, key2).Err()).To(Succeed())
+
+		written, err := rdb.MSetNX(ctx, key1, "v1", key2, "v2").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(written).To(BeTrue())
+
+		written, err = rdb.MSetNX(ctx, key1, "new1", key2, "new2").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(written).To(BeFalse())
+
+		values, err := rdb.MGet(ctx, key1, key2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(values).To(Equal([]interface{}{"v1", "v2"}))
+	})
+
 	It("should handle concurrent APPENDs without data loss", func() {
 		key := "concurrent_append_key"
 		var wg sync.WaitGroup

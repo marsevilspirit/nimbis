@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct ZAddCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for ZAddCmd {
 			meta: CmdMeta {
 				name: "ZADD".to_string(),
 				arity: -4, // ZADD key score member [score member ...]
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

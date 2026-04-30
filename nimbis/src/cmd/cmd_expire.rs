@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 #[derive(Debug, Clone)]
 pub struct ExpireCmd {
@@ -18,6 +19,7 @@ impl Default for ExpireCmd {
 			meta: CmdMeta {
 				name: "EXPIRE".to_string(),
 				arity: 3, // EXPIRE key seconds
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

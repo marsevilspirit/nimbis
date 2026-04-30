@@ -6,6 +6,11 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::ParsedCmd;
+use super::RoutingPolicy;
+use crate::coordinator::AggregatePolicy;
+use crate::coordinator::CommandPlan;
+use crate::coordinator::ScatterRequest;
 
 pub struct DelCmd {
 	meta: CmdMeta,
@@ -16,7 +21,8 @@ impl Default for DelCmd {
 		Self {
 			meta: CmdMeta {
 				name: "DEL".to_string(),
-				arity: 2, // Exactly 1 key
+				arity: -2,
+				routing: RoutingPolicy::MultiKey,
 			},
 		}
 	}
@@ -28,9 +34,24 @@ impl Cmd for DelCmd {
 		&self.meta
 	}
 
+	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
+		Ok(CommandPlan::Scatter {
+			subrequests: args
+				.iter()
+				.map(|key| ScatterRequest {
+					route_key: key.clone(),
+					request: ParsedCmd {
+						name: self.meta.name.clone(),
+						args: vec![key.clone()],
+					},
+					output_index: None,
+				})
+				.collect(),
+			aggregate: AggregatePolicy::IntegerSum,
+		})
+	}
+
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		// TODO: Support multi-key deletion via scatter-gather across workers
-		// (similar to FLUSHDB broadcast pattern, not MGET/MSET which are for get/set)
 		if let Some(key) = args.first() {
 			match storage.del(key.clone()).await {
 				Ok(true) => RespValue::Integer(1),

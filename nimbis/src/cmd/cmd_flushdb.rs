@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct FlushDbCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for FlushDbCmd {
 			meta: CmdMeta {
 				name: "FLUSHDB".to_string(),
 				arity: 0,
+				routing: RoutingPolicy::Broadcast,
 			},
 		}
 	}

@@ -38,6 +38,26 @@ impl Storage {
 	}
 
 	#[fastrace::trace]
+	pub async fn mset(&self, pairs: Vec<(Bytes, Bytes)>) -> Result<(), StorageError> {
+		for (key, value) in pairs {
+			self.set(key, value).await?;
+		}
+		Ok(())
+	}
+
+	#[fastrace::trace]
+	pub async fn msetnx(&self, pairs: Vec<(Bytes, Bytes)>) -> Result<bool, StorageError> {
+		for (key, _) in &pairs {
+			if self.exists(key.clone()).await? {
+				return Ok(false);
+			}
+		}
+
+		self.mset(pairs).await?;
+		Ok(true)
+	}
+
+	#[fastrace::trace]
 	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
 		let user_key = key;
 		let key = StringKey::new(user_key.clone());
@@ -273,6 +293,62 @@ mod tests {
 			.unwrap();
 		let result = storage.get(Bytes::from("key_overwrite")).await.unwrap();
 		assert_eq!(result, Some(Bytes::from("val2")));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_mset() {
+		let (storage, path) = get_storage().await;
+
+		storage
+			.mset(vec![
+				(Bytes::from("mset:k1"), Bytes::from("v1")),
+				(Bytes::from("mset:k2"), Bytes::from("v2")),
+			])
+			.await
+			.unwrap();
+
+		assert_eq!(
+			storage.get(Bytes::from("mset:k1")).await.unwrap(),
+			Some(Bytes::from("v1"))
+		);
+		assert_eq!(
+			storage.get(Bytes::from("mset:k2")).await.unwrap(),
+			Some(Bytes::from("v2"))
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_msetnx_all_or_none() {
+		let (storage, path) = get_storage().await;
+
+		assert!(
+			storage
+				.msetnx(vec![
+					(Bytes::from("msetnx:k1"), Bytes::from("v1")),
+					(Bytes::from("msetnx:k2"), Bytes::from("v2")),
+				])
+				.await
+				.unwrap()
+		);
+		assert!(
+			!storage
+				.msetnx(vec![
+					(Bytes::from("msetnx:k1"), Bytes::from("new1")),
+					(Bytes::from("msetnx:k3"), Bytes::from("new3")),
+				])
+				.await
+				.unwrap()
+		);
+
+		assert_eq!(
+			storage.get(Bytes::from("msetnx:k1")).await.unwrap(),
+			Some(Bytes::from("v1"))
+		);
+		assert_eq!(storage.get(Bytes::from("msetnx:k3")).await.unwrap(), None);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

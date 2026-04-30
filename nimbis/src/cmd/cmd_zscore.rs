@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct ZScoreCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for ZScoreCmd {
 			meta: CmdMeta {
 				name: "ZSCORE".to_string(),
 				arity: 3, // ZSCORE key member
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

@@ -18,6 +18,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 use crate::cmd::CmdContext;
+use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
 use crate::dispatcher::CommandDispatcher;
 use crate::worker::WorkerMessage;
@@ -96,11 +97,12 @@ impl ClientConnection {
 	pub fn new(
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		cmd_table: Arc<CmdTable>,
 		ctx: CmdContext,
 	) -> Self {
 		Self {
 			socket,
-			dispatcher: CommandDispatcher::new(peers, ctx),
+			dispatcher: CommandDispatcher::new(peers, cmd_table, ctx),
 			parser: RespParser::new(),
 		}
 	}

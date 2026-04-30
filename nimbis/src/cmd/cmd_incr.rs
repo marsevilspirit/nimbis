@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct IncrCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for IncrCmd {
 			meta: CmdMeta {
 				name: "INCR".to_string(),
 				arity: 2,
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

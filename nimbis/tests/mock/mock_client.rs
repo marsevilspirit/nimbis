@@ -89,6 +89,32 @@ impl MockNimbisClient {
 		}
 	}
 
+	pub fn mget(&mut self, keys: &[&str]) -> Vec<String> {
+		let mut args = vec!["MGET"];
+		args.extend_from_slice(keys);
+		resp_to_strings(self.execute(&args))
+	}
+
+	pub fn mset(&mut self, pairs: &[(&str, &str)]) -> String {
+		let mut args = vec!["MSET"];
+		for (key, value) in pairs {
+			args.extend([*key, *value]);
+		}
+		self.execute(&args)
+			.to_string_lossy()
+			.expect("unexpected MSET response")
+	}
+
+	pub fn msetnx(&mut self, pairs: &[(&str, &str)]) -> i64 {
+		let mut args = vec!["MSETNX"];
+		for (key, value) in pairs {
+			args.extend([*key, *value]);
+		}
+		self.execute(&args)
+			.as_integer()
+			.expect("MSETNX should return integer")
+	}
+
 	#[allow(dead_code)]
 	pub fn flushdb(&mut self) -> bool {
 		matches!(
@@ -99,8 +125,10 @@ impl MockNimbisClient {
 
 	// -- string commands --
 
-	pub fn del(&mut self, key: &str) -> i64 {
-		self.execute(&["DEL", key])
+	pub fn del(&mut self, keys: &[&str]) -> i64 {
+		let mut args = vec!["DEL"];
+		args.extend_from_slice(keys);
+		self.execute(&args)
 			.as_integer()
 			.expect("DEL should return integer")
 	}
@@ -110,6 +138,14 @@ impl MockNimbisClient {
 			.as_integer()
 			.expect("EXISTS should return integer")
 			== 1
+	}
+
+	pub fn exists_count(&mut self, keys: &[&str]) -> i64 {
+		let mut args = vec!["EXISTS"];
+		args.extend_from_slice(keys);
+		self.execute(&args)
+			.as_integer()
+			.expect("EXISTS should return integer")
 	}
 
 	pub fn incr(&mut self, key: &str) -> i64 {
@@ -244,6 +280,24 @@ impl MockNimbisClient {
 		self.execute(&["SCARD", key])
 			.as_integer()
 			.expect("SCARD should return integer")
+	}
+
+	pub fn sunion(&mut self, keys: &[&str]) -> Vec<String> {
+		let mut args = vec!["SUNION"];
+		args.extend_from_slice(keys);
+		resp_to_strings(self.execute(&args))
+	}
+
+	pub fn sinter(&mut self, keys: &[&str]) -> Vec<String> {
+		let mut args = vec!["SINTER"];
+		args.extend_from_slice(keys);
+		resp_to_strings(self.execute(&args))
+	}
+
+	pub fn sdiff(&mut self, keys: &[&str]) -> Vec<String> {
+		let mut args = vec!["SDIFF"];
+		args.extend_from_slice(keys);
+		resp_to_strings(self.execute(&args))
 	}
 
 	// -- sorted set commands --

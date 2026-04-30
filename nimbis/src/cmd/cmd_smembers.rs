@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct SmembersCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for SmembersCmd {
 			meta: CmdMeta {
 				name: "SMEMBERS".to_string(),
 				arity: 2,
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

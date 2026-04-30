@@ -8,6 +8,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 use crate::GCTX;
 
 /// Client command implementation.
@@ -29,6 +30,7 @@ impl Default for ClientCmd {
 			meta: CmdMeta {
 				name: "CLIENT".to_string(),
 				arity: -2,
+				routing: RoutingPolicy::Local,
 			},
 			sub_cmds,
 		}
@@ -60,6 +62,7 @@ impl Default for ClientIdCmd {
 			meta: CmdMeta {
 				name: "ID".to_string(),
 				arity: 1,
+				routing: RoutingPolicy::Local,
 			},
 		}
 	}
@@ -86,6 +89,7 @@ impl Default for ClientSetNameCmd {
 			meta: CmdMeta {
 				name: "SETNAME".to_string(),
 				arity: 2,
+				routing: RoutingPolicy::Local,
 			},
 		}
 	}
@@ -116,6 +120,7 @@ impl Default for ClientGetNameCmd {
 			meta: CmdMeta {
 				name: "GETNAME".to_string(),
 				arity: 1,
+				routing: RoutingPolicy::Local,
 			},
 		}
 	}
@@ -145,6 +150,7 @@ impl Default for ClientListCmd {
 			meta: CmdMeta {
 				name: "LIST".to_string(),
 				arity: 1,
+				routing: RoutingPolicy::Local,
 			},
 		}
 	}

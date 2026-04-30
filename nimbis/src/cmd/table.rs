@@ -23,15 +23,21 @@ use super::LLenCmd;
 use super::LPopCmd;
 use super::LPushCmd;
 use super::LRangeCmd;
+use super::MGetCmd;
+use super::MSetCmd;
+use super::MSetNxCmd;
 use super::PingCmd;
 use super::RPopCmd;
 use super::RPushCmd;
 use super::SaddCmd;
 use super::ScardCmd;
+use super::SdiffCmd;
 use super::SetCmd;
+use super::SinterCmd;
 use super::SismemberCmd;
 use super::SmembersCmd;
 use super::SremCmd;
+use super::SunionCmd;
 use super::TtlCmd;
 use super::ZAddCmd;
 use super::ZCardCmd;
@@ -58,6 +64,9 @@ impl CmdTable {
 		// string type cmd
 		inner.insert("SET", Arc::new(SetCmd::default()));
 		inner.insert("GET", Arc::new(GetCmd::default()));
+		inner.insert("MGET", Arc::new(MGetCmd::default()));
+		inner.insert("MSET", Arc::new(MSetCmd::default()));
+		inner.insert("MSETNX", Arc::new(MSetNxCmd::default()));
 		inner.insert("DEL", Arc::new(DelCmd::default()));
 		inner.insert("EXISTS", Arc::new(ExistsCmd::default()));
 		inner.insert("INCR", Arc::new(IncrCmd::default()));
@@ -85,6 +94,9 @@ impl CmdTable {
 		// set type cmd
 		inner.insert("SADD", Arc::new(SaddCmd::default()));
 		inner.insert("SMEMBERS", Arc::new(SmembersCmd::default()));
+		inner.insert("SUNION", Arc::new(SunionCmd::default()));
+		inner.insert("SINTER", Arc::new(SinterCmd::default()));
+		inner.insert("SDIFF", Arc::new(SdiffCmd::default()));
 		inner.insert("SISMEMBER", Arc::new(SismemberCmd::default()));
 		inner.insert("SREM", Arc::new(SremCmd::default()));
 		inner.insert("SCARD", Arc::new(ScardCmd::default()));

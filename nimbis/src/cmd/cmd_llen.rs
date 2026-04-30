@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
+use crate::cmd::RoutingPolicy;
 
 pub struct LLenCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for LLenCmd {
 			meta: CmdMeta {
 				name: "LLEN".to_string(),
 				arity: 2, // LLEN key
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

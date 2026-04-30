@@ -2,12 +2,41 @@ package tests
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/marsevilspirit/nimbis/e2e-test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/redis/go-redis/v9"
 )
+
+func hashKey(key string) uint64 {
+	var hasher uint64 = 0xcbf29ce484222325
+	for i := 0; i < len(key); i++ {
+		hasher ^= uint64(key[i])
+		hasher *= 0x100000001b3
+	}
+	return hasher
+}
+
+func findCrossShardKeys(workerCount int) (string, string) {
+	seen := map[int]string{}
+	for i := 0; i < 2000; i++ {
+		key := fmt.Sprintf("e2e:route:key:%d", i)
+		worker := int(hashKey(key) % uint64(workerCount))
+		if existing, ok := seen[worker]; ok && existing != key {
+			for otherWorker, otherKey := range seen {
+				if otherWorker != worker {
+					return otherKey, key
+				}
+			}
+		}
+		if _, ok := seen[worker]; !ok {
+			seen[worker] = key
+		}
+	}
+	panic("failed to find cross-shard keys")
+}
 
 var _ = Describe("DEL Commands", func() {
 	var rdb *redis.Client
@@ -65,5 +94,24 @@ var _ = Describe("DEL Commands", func() {
 		// DEL nonexistent
 		deleted := rdb.Del(ctx, "nonexistent").Val()
 		Expect(deleted).To(Equal(int64(0)), "Should delete 0 keys")
+	})
+
+	It("should support multi-key DEL and EXISTS across shards", func() {
+		key1, key2 := findCrossShardKeys(2)
+		Expect(rdb.Set(ctx, key1, "v1", 0).Err()).To(Succeed())
+		Expect(rdb.Set(ctx, key2, "v2", 0).Err()).To(Succeed())
+
+		exists := rdb.Exists(ctx, key1, key2, "missing").Val()
+		Expect(exists).To(Equal(int64(2)))
+
+		deleted := rdb.Del(ctx, key1, key2).Val()
+		Expect(deleted).To(Equal(int64(2)))
+
+		deleted = rdb.Del(ctx, "missing1", "missing2").Val()
+		Expect(deleted).To(Equal(int64(0)))
+
+		Expect(rdb.Set(ctx, key1, "v1", 0).Err()).To(Succeed())
+		deleted = rdb.Del(ctx, key1, "missing3").Val()
+		Expect(deleted).To(Equal(int64(1)))
 	})
 })
