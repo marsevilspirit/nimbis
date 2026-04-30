@@ -155,8 +155,9 @@ impl ServerConfig {
 	fn validate(&self) -> Result<(), ConfigError> {
 		nimbis_telemetry::logger::validate_log_level(&self.log_level)?;
 
-		nimbis_storage::validate_object_store_url(&self.object_store_url)
-			.map_err(|_| ConfigError::InvalidObjectStoreUrl(self.object_store_url.clone()))?;
+		nimbis_storage::validate_object_store_url(&self.object_store_url).map_err(|err| {
+			ConfigError::InvalidObjectStoreUrl(format!("{} ({})", self.object_store_url, err))
+		})?;
 
 		if self.trace_enabled {
 			validate_trace_endpoint(&self.trace_endpoint)?;

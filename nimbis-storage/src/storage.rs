@@ -35,20 +35,17 @@ fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStor
 }
 
 fn local_path_url(path: &std::path::Path) -> Result<String, StorageError> {
-	if path.is_absolute() {
-		return url::Url::from_file_path(path)
-			.map(|url| url.to_string())
-			.map_err(|_| StorageError::ObjectStoreConfig {
-				message: format!("failed to convert path '{}' to file URL", path.display()),
-			});
-	}
-
-	let path = path.display().to_string();
-	if path.starts_with('.') {
-		Ok(format!("file:{}", path))
+	let abs_path = if path.is_absolute() {
+		path.to_path_buf()
 	} else {
-		Ok(format!("file:./{}", path))
-	}
+		std::env::current_dir()?.join(path)
+	};
+
+	url::Url::from_file_path(&abs_path)
+		.map(|url| url.to_string())
+		.map_err(|_| StorageError::ObjectStoreConfig {
+			message: format!("failed to convert path '{}' to file URL", abs_path.display()),
+		})
 }
 
 pub fn validate_object_store_url(url: &str) -> Result<(), StorageError> {
