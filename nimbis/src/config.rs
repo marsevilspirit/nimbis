@@ -155,10 +155,12 @@ impl ServerConfig {
 	fn validate(&self) -> Result<(), ConfigError> {
 		nimbis_telemetry::logger::validate_log_level(&self.log_level)?;
 
+		nimbis_storage::validate_object_store_url(&self.object_store_url)
+			.map_err(|_| ConfigError::InvalidObjectStoreUrl(self.object_store_url.clone()))?;
+
 		if self.trace_enabled {
 			validate_trace_endpoint(&self.trace_endpoint)?;
 		}
-		validate_object_store_url(&self.object_store_url)?;
 
 		if !(0.0..=1.0).contains(&self.trace_sampling_ratio) {
 			return Err(ConfigError::InvalidTraceSamplingRatio(
@@ -418,12 +420,6 @@ fn validate_trace_endpoint(endpoint: &str) -> Result<(), ConfigError> {
 		return Err(ConfigError::InvalidTraceEndpoint(endpoint.to_string()));
 	}
 
-	Ok(())
-}
-
-fn validate_object_store_url(object_store_url: &str) -> Result<(), ConfigError> {
-	nimbis_storage::validate_object_store_url(object_store_url)
-		.map_err(|_| ConfigError::InvalidObjectStoreUrl(object_store_url.to_string()))?;
 	Ok(())
 }
 
