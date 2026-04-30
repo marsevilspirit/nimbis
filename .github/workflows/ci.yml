@@ -99,8 +99,8 @@ jobs:
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
 
-  build_release_e2e:
-    name: Build Release and E2E Test
+  build_release:
+    name: Build Release
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -123,6 +123,39 @@ jobs:
     - name: Install just
       uses: taiki-e/install-action@just
 
+    - name: Build Release
+      run: just build --release
+
+    - name: Upload Unix Release Binary
+      if: runner.os != 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: nimbis-release-${{ matrix.os }}
+        path: target/release/nimbis
+        if-no-files-found: error
+
+    - name: Upload Windows Release Binary
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: nimbis-release-${{ matrix.os }}
+        path: target/release/nimbis.exe
+        if-no-files-found: error
+
+  e2e_local:
+    name: E2E Test (Local Filesystem)
+    needs: build_release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install just
+      uses: taiki-e/install-action@just
+
     - name: Setup Go
       uses: actions/setup-go@v6
       with:
@@ -130,8 +163,76 @@ jobs:
         cache: true
         cache-dependency-path: e2e-test/go.sum
 
-    - name: Build Release
-      run: just build --release
+    - name: Download Release Binary
+      uses: actions/download-artifact@v4
+      with:
+        name: nimbis-release-${{ matrix.os }}
+        path: target/release
+
+    - name: Make Release Binary Executable
+      if: runner.os != 'Windows'
+      run: chmod +x target/release/nimbis
 
     - name: Run E2E Test
+      run: just e2e-test
+
+  e2e_minio:
+    name: E2E Test (MinIO)
+    needs: build_release
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install just
+      uses: taiki-e/install-action@just
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+        cache: true
+        cache-dependency-path: e2e-test/go.sum
+
+    - name: Download Release Binary
+      uses: actions/download-artifact@v4
+      with:
+        name: nimbis-release-ubuntu-latest
+        path: target/release
+
+    - name: Make Release Binary Executable
+      run: chmod +x target/release/nimbis
+
+    - name: Start MinIO
+      run: |
+        docker run -d \
+          --name nimbis-minio \
+          -p 9000:9000 \
+          -e MINIO_ROOT_USER=minioadmin \
+          -e MINIO_ROOT_PASSWORD=minioadmin \
+          quay.io/minio/minio server /data --address :9000
+        for i in {1..30}; do
+          if curl -fsS http://127.0.0.1:9000/minio/health/ready; then
+            exit 0
+          fi
+          sleep 1
+        done
+        docker logs nimbis-minio
+        exit 1
+
+    - name: Create MinIO bucket
+      run: |
+        docker run --rm --network host \
+          -e MC_HOST_local=http://minioadmin:minioadmin@127.0.0.1:9000 \
+          quay.io/minio/mc mb --ignore-existing local/nimbis
+
+    - name: Run E2E Test Against MinIO
+      env:
+        NIMBIS_OBJECT_STORE_URL: s3://nimbis/nimbis-ci-${{ github.run_id }}
+        NIMBIS_OBJECT_STORE_OPTION_AWS_REGION: us-east-1
+        NIMBIS_OBJECT_STORE_OPTION_AWS_ENDPOINT: http://127.0.0.1:9000
+        NIMBIS_OBJECT_STORE_OPTION_AWS_ACCESS_KEY_ID: minioadmin
+        NIMBIS_OBJECT_STORE_OPTION_AWS_SECRET_ACCESS_KEY: minioadmin
+        NIMBIS_OBJECT_STORE_OPTION_AWS_VIRTUAL_HOSTED_STYLE_REQUEST: "false"
+        NIMBIS_OBJECT_STORE_OPTION_AWS_ALLOW_HTTP: "true"
       run: just e2e-test

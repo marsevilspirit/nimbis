@@ -309,8 +309,8 @@ The `handle_client` loop parses multiple RESP values and groups them into batche
 
 ### 3.7 Storage Sharding
 
-Each worker owns its own `Storage` instance, which maps to a unique subdirectory:
-`{data_path}/shard-{id}/`
+Each worker owns its own `Storage` instance, rooted under the configured object store URL path:
+`{object_store_url path}/shard-{id}/`
 
 This ensures:
 - **Zero contention**: No cross-shard locks or shared SlateDB instances.

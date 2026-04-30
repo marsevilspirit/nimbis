@@ -25,16 +25,17 @@ impl Server {
 	// Create a new server instance
 	#[trace]
 	pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-		// Ensure data directory exists
-		let data_path = &server_config!(data_path);
-		std::fs::create_dir_all(data_path)?;
-
 		let client_sessions = Arc::new(ClientSessions::new());
 		init_global_context(client_sessions.clone());
 		let cmd_table = Arc::new(CmdTable::new());
 
 		// Determine number of workers from config
-		let workers_num = server_config!(worker_threads);
+		let config = crate::config::SERVER_CONF.load();
+		let workers_num = config.worker_threads;
+		let object_store_url = config.object_store_url.clone();
+		let object_store_options = config.object_store_options.0.clone();
+		drop(config);
+
 		let mut workers = Vec::with_capacity(workers_num);
 
 		// First pass: create channels
@@ -55,8 +56,17 @@ impl Server {
 			let my_tx = senders.get(&i).unwrap().clone();
 
 			// SHARDED STORAGE: Create a unique Storage instance for this worker
-			// Data will be in .../nimbis_store/shard-{i}/...
-			let storage = Arc::new(Storage::open(data_path, Some(i)).await?);
+			// Data will be rooted at {object_store_url path}/shard-{i}/...
+			let storage = Arc::new(
+				Storage::open_object_store(
+					&object_store_url,
+					object_store_options
+						.iter()
+						.map(|(key, value)| (key.as_str(), value.as_str())),
+					Some(i),
+				)
+				.await?,
+			);
 
 			// workers need the full map of senders to route commands to the appropriate
 			// worker based on consistent hashing of the command's key

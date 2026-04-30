@@ -25,7 +25,8 @@ pub struct Storage {
 }
 ```
 
-`Storage::open(path, shard_id)` creates `path/shard-{id}/` when a shard id is provided and opens all five DBs under that directory.
+Each data type has its own database instance for isolation and predictable performance.
+`Storage::open(path, shard_id)` and `Storage::open_object_store(url, options, shard_id)` open all five DBs per shard.
 
 ## Key Encoding
 
@@ -109,7 +110,7 @@ Expiration for all top-level keys is driven by `string_db` metadata TTL:
 Per worker shard, files are organized under:
 
 ```text
-{data_path}/shard-{id}/
+{object_store_url path}/shard-{id}/
   string/
   hash/
   list/
@@ -118,3 +119,17 @@ Per worker shard, files are organized under:
 ```
 
 This enables per-worker isolation and avoids cross-shard lock contention.
+
+## Storage Initialization
+
+Server workers initialize storage from the configured object store URL and options:
+
+```rust
+let storage = Storage::open_object_store(
+    "file:nimbis_store",
+    std::iter::empty::<(&str, &str)>(),
+    Some(shard_id),
+).await?;
+```
+
+This flow parses the URL/options into an object store backend, then opens the five per-shard SlateDB instances under `shard-{id}`.

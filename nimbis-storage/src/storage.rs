@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -7,7 +6,10 @@ use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
+use slatedb::object_store::ObjectStoreScheme;
 use slatedb::object_store::local::LocalFileSystem;
+use slatedb::object_store::parse_url_opts;
+use slatedb::object_store::path::Path as ObjectStorePath;
 
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
@@ -23,6 +25,81 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
+}
+
+fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
+	match shard_id {
+		Some(id) => base_path.child(format!("shard-{}", id)),
+		None => base_path,
+	}
+}
+
+fn local_path_url(path: &std::path::Path) -> Result<String, StorageError> {
+	let abs_path = if path.is_absolute() {
+		path.to_path_buf()
+	} else {
+		std::env::current_dir()?.join(path)
+	};
+
+	url::Url::from_file_path(&abs_path)
+		.map(|url| url.to_string())
+		.map_err(|_| StorageError::ObjectStoreConfig {
+			message: format!(
+				"failed to convert path '{}' to file URL",
+				abs_path.display()
+			),
+		})
+}
+
+pub fn validate_object_store_url(url: &str) -> Result<(), StorageError> {
+	let url = url::Url::parse(url)?;
+	ObjectStoreScheme::parse(&url).map_err(|err| StorageError::ObjectStoreConfig {
+		message: err.to_string(),
+	})?;
+	Ok(())
+}
+
+fn local_file_root(raw_url: &str, url: &url::Url) -> Result<std::path::PathBuf, StorageError> {
+	let Some(path) = raw_url.strip_prefix("file:") else {
+		return Ok(std::path::PathBuf::from(url.path()));
+	};
+
+	if path.is_empty() {
+		Ok(std::path::PathBuf::from("."))
+	} else if path.starts_with("//") {
+		url.to_file_path()
+			.map_err(|_| StorageError::ObjectStoreConfig {
+				message: format!("invalid absolute file URL: {raw_url}"),
+			})
+	} else {
+		Ok(std::path::PathBuf::from(path))
+	}
+}
+
+async fn build_object_store<I, K, V>(
+	raw_url: &str,
+	url: &url::Url,
+	options: I,
+) -> Result<(Arc<dyn ObjectStore>, ObjectStorePath), StorageError>
+where
+	I: IntoIterator<Item = (K, V)>,
+	K: AsRef<str>,
+	V: Into<String>,
+{
+	let (scheme, _) =
+		ObjectStoreScheme::parse(url).map_err(|err| StorageError::ObjectStoreConfig {
+			message: err.to_string(),
+		})?;
+
+	if matches!(scheme, ObjectStoreScheme::Local) {
+		let root = local_file_root(raw_url, url)?;
+		tokio::fs::create_dir_all(&root).await?;
+		let store = LocalFileSystem::new_with_prefix(root)?;
+		return Ok((Arc::new(store), ObjectStorePath::from("")));
+	}
+
+	let (object_store, base_path) = parse_url_opts(url, options)?;
+	Ok((Arc::from(object_store), base_path))
 }
 
 impl Storage {
@@ -44,19 +121,43 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn open(
-		path: impl AsRef<Path>,
+		path: impl AsRef<std::path::Path>,
 		shard_id: Option<usize>,
 	) -> Result<Self, StorageError> {
-		let mut path_buf = path.as_ref().to_path_buf();
-		if let Some(id) = shard_id {
-			path_buf.push(format!("shard-{}", id));
-		}
-		let path = path_buf.as_path();
+		let url = local_path_url(path.as_ref())?;
+		Self::open_object_store(&url, std::iter::empty::<(&str, &str)>(), shard_id).await
+	}
 
-		// Ensure shard directory exists
-		tokio::fs::create_dir_all(path).await?;
+	#[fastrace::trace]
+	pub async fn open_object_store<I, K, V>(
+		url: &str,
+		options: I,
+		shard_id: Option<usize>,
+	) -> Result<Self, StorageError>
+	where
+		I: IntoIterator<Item = (K, V)>,
+		K: AsRef<str>,
+		V: Into<String>,
+	{
+		let raw_url = url;
+		let url = url::Url::parse(raw_url)?;
+		let (object_store, base_path) = build_object_store(raw_url, &url, options).await?;
+		let root_path = shard_path(base_path, shard_id);
 
-		let object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(path)?);
+		Self::open_with_object_store(object_store, root_path).await
+	}
+
+	async fn open_with_object_store(
+		object_store: Arc<dyn ObjectStore>,
+		root_path: ObjectStorePath,
+	) -> Result<Self, StorageError> {
+		let child_path = |name: &'static str| root_path.child(name);
+
+		let marker = child_path(".nimbis");
+		object_store
+			.put(&marker, bytes::Bytes::new().into())
+			.await
+			.map_err(StorageError::from)?;
 
 		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
@@ -64,7 +165,7 @@ impl Storage {
 		// Open string_db — no custom compaction filter needed;
 		// SlateDB's built-in TTL mechanism handles expiration during compaction.
 		let string_db = {
-			let db_path = slatedb::object_store::path::Path::from("/string");
+			let db_path = child_path("string");
 			let db = Db::builder(db_path, object_store.clone())
 				.with_db_cache(cache.clone())
 				.build()
@@ -78,8 +179,8 @@ impl Storage {
 			let store = object_store.clone();
 			let cache = cache.clone();
 			let string_db = string_db.clone();
+			let db_path = child_path(name);
 			async move {
-				let db_path = slatedb::object_store::path::Path::from(name);
 				let compactor_builder =
 					slatedb::CompactorBuilder::new(db_path.clone(), store.clone())
 						.with_compaction_filter_supplier(Arc::new(
@@ -98,10 +199,10 @@ impl Storage {
 		};
 
 		let (hash_db, list_db, set_db, zset_db) = tokio::try_join!(
-			open_db_with_collection_filter("/hash", DataType::Hash),
-			open_db_with_collection_filter("/list", DataType::List),
-			open_db_with_collection_filter("/set", DataType::Set),
-			open_db_with_collection_filter("/zset", DataType::ZSet)
+			open_db_with_collection_filter("hash", DataType::Hash),
+			open_db_with_collection_filter("list", DataType::List),
+			open_db_with_collection_filter("set", DataType::Set),
+			open_db_with_collection_filter("zset", DataType::ZSet)
 		)?;
 
 		Ok(Self::new(
@@ -243,6 +344,26 @@ mod tests {
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
 		TestContext { storage, path }
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn test_open_object_store_uses_url_path_and_shard_prefix() {
+		let timestamp = ulid::Ulid::new().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_test_object_store_{}", timestamp));
+		let url = local_path_url(path.as_path()).unwrap();
+
+		let storage = Storage::open_object_store(&url, std::iter::empty::<(&str, &str)>(), Some(3))
+			.await
+			.unwrap();
+		storage
+			.set(Bytes::from("key"), Bytes::from("value"))
+			.await
+			.unwrap();
+		storage.close().await.unwrap();
+
+		assert!(path.join("shard-3").exists());
+		let _ = std::fs::remove_dir_all(path);
 	}
 
 	#[rstest]

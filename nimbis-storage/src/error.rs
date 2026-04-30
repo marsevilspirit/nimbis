@@ -58,6 +58,10 @@ pub enum StorageError {
 	/// Data inconsistency detected
 	#[error("Data inconsistency detected: {message}")]
 	DataInconsistency { message: String },
+
+	/// Object store configuration failed
+	#[error("Object store configuration failed: {message}")]
+	ObjectStoreConfig { message: String },
 }
 
 impl StorageError {
@@ -69,6 +73,7 @@ impl StorageError {
 			Self::DecodeError { .. } => "E1002",
 			Self::IoError { .. } => "E1003",
 			Self::DataInconsistency { .. } => "E1004",
+			Self::ObjectStoreConfig { .. } => "E1005",
 		}
 	}
 
@@ -135,6 +140,14 @@ impl From<slatedb::object_store::Error> for StorageError {
 	fn from(err: slatedb::object_store::Error) -> Self {
 		Self::DatabaseError {
 			source: Box::new(err),
+		}
+	}
+}
+
+impl From<url::ParseError> for StorageError {
+	fn from(err: url::ParseError) -> Self {
+		Self::ObjectStoreConfig {
+			message: err.to_string(),
 		}
 	}
 }
@@ -226,6 +239,11 @@ mod tests {
 			message: "test".into(),
 		};
 		assert_eq!(inconsistency_err.code(), "E1004");
+
+		let object_store_err = StorageError::ObjectStoreConfig {
+			message: "test".into(),
+		};
+		assert_eq!(object_store_err.code(), "E1005");
 	}
 
 	#[test]
@@ -246,7 +264,7 @@ mod tests {
 
 	#[test]
 	fn test_storage_error_codes_unique() {
-		let codes = ["E1000", "E1001", "E1002", "E1003", "E1004"];
+		let codes = ["E1000", "E1001", "E1002", "E1003", "E1004", "E1005"];
 		let unique_codes: std::collections::HashSet<_> = codes.iter().collect();
 		assert_eq!(
 			codes.len(),
