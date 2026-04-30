@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/marsevilspirit/nimbis/e2e-test/util"
@@ -241,5 +242,142 @@ var _ = Describe("Concurrency Tests", func() {
 		existsCount, err = client.Exists(ctx, key1, key2).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(existsCount).To(Equal(int64(0)))
+	})
+
+	It("should preserve strict multi-key invariants under high-concurrency mixed commands", func() {
+		const numGoroutines = 32
+		const numIterations = 60
+		const msetnxGroups = 8
+
+		var wg sync.WaitGroup
+		winners := make([]int, msetnxGroups)
+		var winnersMu sync.Mutex
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				defer GinkgoRecover()
+
+				localClient := util.NewClient()
+				defer localClient.Close()
+
+				for j := 0; j < numIterations; j++ {
+					prefix := fmt.Sprintf("mixed:%d:%d", id, j)
+					key1 := prefix + ":k1"
+					key2 := prefix + ":k2"
+					missing := prefix + ":missing"
+					value1 := fmt.Sprintf("v1-%d-%d", id, j)
+					value2 := fmt.Sprintf("v2-%d-%d", id, j)
+
+					Expect(localClient.MSet(ctx, key1, value1, key2, value2).Err()).NotTo(HaveOccurred())
+
+					values, err := localClient.MGet(ctx, key1, key2, missing).Result()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(values).To(Equal([]interface{}{value1, value2, nil}))
+
+					existsCount, err := localClient.Exists(ctx, key1, key2, missing).Result()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(existsCount).To(Equal(int64(2)))
+
+					deletedCount, err := localClient.Del(ctx, key1, key2, missing).Result()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(deletedCount).To(Equal(int64(2)))
+
+					existsCount, err = localClient.Exists(ctx, key1, key2, missing).Result()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(existsCount).To(Equal(int64(0)))
+
+					set1 := prefix + ":set1"
+					set2 := prefix + ":set2"
+					Expect(localClient.SAdd(ctx, set1, "a", "b", "c").Err()).NotTo(HaveOccurred())
+					Expect(localClient.SAdd(ctx, set2, "b", "c", "d").Err()).NotTo(HaveOccurred())
+
+					union, err := localClient.SUnion(ctx, set1, set2).Result()
+					Expect(err).NotTo(HaveOccurred())
+					sort.Strings(union)
+					Expect(union).To(Equal([]string{"a", "b", "c", "d"}))
+
+					inter, err := localClient.SInter(ctx, set1, set2).Result()
+					Expect(err).NotTo(HaveOccurred())
+					sort.Strings(inter)
+					Expect(inter).To(Equal([]string{"b", "c"}))
+
+					diff, err := localClient.SDiff(ctx, set1, set2).Result()
+					Expect(err).NotTo(HaveOccurred())
+					sort.Strings(diff)
+					Expect(diff).To(Equal([]string{"a"}))
+
+					group := (id + j) % msetnxGroups
+					lockKey1 := fmt.Sprintf("mixed:msetnx:%d:k1", group)
+					lockKey2 := fmt.Sprintf("mixed:msetnx:%d:k2", group)
+					written, err := localClient.MSetNX(
+						ctx,
+						lockKey1, fmt.Sprintf("winner-%d-%d-a", id, j),
+						lockKey2, fmt.Sprintf("winner-%d-%d-b", id, j),
+					).Result()
+					Expect(err).NotTo(HaveOccurred())
+
+					if written {
+						winnersMu.Lock()
+						winners[group]++
+						winnersMu.Unlock()
+					}
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		for group, winnerCount := range winners {
+			Expect(winnerCount).To(Equal(1), fmt.Sprintf("MSETNX group %d should have exactly one winner", group))
+			lockKey1 := fmt.Sprintf("mixed:msetnx:%d:k1", group)
+			lockKey2 := fmt.Sprintf("mixed:msetnx:%d:k2", group)
+			values, err := client.MGet(ctx, lockKey1, lockKey2).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(values[0]).NotTo(BeNil())
+			Expect(values[1]).NotTo(BeNil())
+		}
+	})
+
+	It("should allow only one concurrent MSETNX winner for the same keys", func() {
+		key1, key2 := findCrossShardKeys(2)
+		Expect(client.Del(ctx, key1, key2).Err()).NotTo(HaveOccurred())
+
+		const numGoroutines = 40
+		var wg sync.WaitGroup
+		results := make(chan bool, numGoroutines)
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				defer GinkgoRecover()
+
+				written, err := client.MSetNX(
+					ctx,
+					key1, fmt.Sprintf("v1-%d", id),
+					key2, fmt.Sprintf("v2-%d", id),
+				).Result()
+				Expect(err).NotTo(HaveOccurred())
+				results <- written
+			}(i)
+		}
+
+		wg.Wait()
+		close(results)
+
+		winners := 0
+		for written := range results {
+			if written {
+				winners++
+			}
+		}
+		Expect(winners).To(Equal(1))
+
+		values, err := client.MGet(ctx, key1, key2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(values[0]).NotTo(BeNil())
+		Expect(values[1]).NotTo(BeNil())
 	})
 })

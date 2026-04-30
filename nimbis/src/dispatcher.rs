@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use fastrace::trace;
 use log::debug;
 use log::error;
@@ -15,44 +14,11 @@ use tokio::sync::oneshot;
 use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
-use crate::cmd::RoutingPolicy;
+use crate::coordinator::MultiKeyCoordinator;
+#[cfg(test)]
+use crate::coordinator::hash_key;
 use crate::worker::CmdRequest;
 use crate::worker::WorkerMessage;
-
-/// Simple FNV-1a 64-bit hash for key-based worker routing
-/// See: https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
-#[inline]
-fn hash_key(key: &[u8]) -> u64 {
-	// FNV-1a 64-bit offset basis (standard constant)
-	let mut hasher: u64 = 0xcbf29ce484222325;
-	for &byte in key {
-		hasher ^= byte as u64;
-		// FNV-1a 64-bit prime (standard constant)
-		hasher = hasher.wrapping_mul(0x100000001b3);
-	}
-	hasher
-}
-
-/// Helper to aggregate FLUSHDB responses from all workers
-#[trace]
-async fn aggregate_flushdb_responses(
-	flush_rxs: Vec<oneshot::Receiver<RespValue>>,
-	final_tx: oneshot::Sender<RespValue>,
-) {
-	let mut success = true;
-	for rx in flush_rxs {
-		match rx.await {
-			Ok(RespValue::SimpleString(s)) if s == b"OK".as_slice() => {}
-			_ => success = false,
-		}
-	}
-	let result = if success {
-		RespValue::SimpleString(Bytes::from_static(b"OK"))
-	} else {
-		RespValue::Error(Bytes::from("Failed to flush all shards"))
-	};
-	final_tx.send(result).ok();
-}
 
 /// Command dispatcher for managing command routing and response collection
 pub struct CommandDispatcher {
@@ -83,7 +49,7 @@ impl CommandDispatcher {
 		self.ordered_responses.clear();
 	}
 
-	/// Core dispatch logic - routes commands based on type
+	/// Core dispatch logic - builds command plans and delegates execution.
 	pub fn dispatch(&mut self, cmd: ParsedCmd) {
 		let Some(cmd_def) = self.cmd_table.get_cmd(&cmd.name) else {
 			self.push_immediate_response(RespValue::error(format!(
@@ -93,14 +59,24 @@ impl CommandDispatcher {
 			return;
 		};
 
-		match cmd_def.routing() {
-			RoutingPolicy::Local => self.route_local(cmd),
-			RoutingPolicy::SingleKey => self.route_single_key(cmd),
-			RoutingPolicy::MultiKey => self.route_multi_key(cmd),
-			RoutingPolicy::Broadcast => self.broadcast_cmd(cmd),
+		if let Err(err) = cmd_def.meta().validate_arity(cmd.args.len() + 1) {
+			self.push_immediate_response(RespValue::error(err));
+			return;
+		}
+
+		match cmd_def.plan(&cmd.args) {
+			Ok(plan) => MultiKeyCoordinator::new(
+				&self.peers,
+				self.ctx,
+				&mut self.batches,
+				&mut self.ordered_responses,
+			)
+			.execute(plan),
+			Err(resp) => self.push_immediate_response(resp),
 		}
 	}
 
+	#[cfg(test)]
 	fn worker_for_key(&self, key: &[u8]) -> usize {
 		(hash_key(key) as usize) % self.peers.len()
 	}
@@ -110,126 +86,6 @@ impl CommandDispatcher {
 		if tx.send(resp).is_ok() {
 			self.ordered_responses.push(rx);
 		}
-	}
-
-	fn push_worker_request(&mut self, worker_idx: usize, cmd: ParsedCmd) {
-		let (resp_tx, resp_rx) = oneshot::channel();
-		self.ordered_responses.push(resp_rx);
-
-		let req = CmdRequest {
-			cmd_name: cmd.name,
-			args: cmd.args,
-			ctx: self.ctx,
-			resp_tx,
-		};
-		self.batches.entry(worker_idx).or_default().push(req);
-	}
-
-	/// Route local command to worker 0 for now.
-	fn route_local(&mut self, cmd: ParsedCmd) {
-		self.push_worker_request(0, cmd);
-	}
-
-	/// Broadcast command to all workers (FLUSHDB)
-	fn broadcast_cmd(&mut self, cmd: ParsedCmd) {
-		let (final_tx, final_rx) = oneshot::channel();
-		self.ordered_responses.push(final_rx);
-
-		let mut flush_rxs = Vec::with_capacity(self.peers.len());
-		for &worker_idx in self.peers.keys() {
-			let (tx, rx) = oneshot::channel();
-			flush_rxs.push(rx);
-			let req = CmdRequest {
-				cmd_name: "FLUSHDB".to_string(),
-				args: cmd.args.clone(),
-				ctx: self.ctx,
-				resp_tx: tx,
-			};
-			self.batches.entry(worker_idx).or_default().push(req);
-		}
-
-		tokio::spawn(aggregate_flushdb_responses(flush_rxs, final_tx));
-	}
-
-	/// Route command to single worker based on first key's hash.
-	fn route_single_key(&mut self, cmd: ParsedCmd) {
-		let Some(key) = cmd.args.first() else {
-			self.push_immediate_response(RespValue::error(format!(
-				"ERR wrong number of arguments for '{}' command",
-				cmd.name.to_lowercase()
-			)));
-			return;
-		};
-
-		let target_worker_idx = self.worker_for_key(key);
-		self.push_worker_request(target_worker_idx, cmd);
-	}
-
-	fn route_multi_key(&mut self, cmd: ParsedCmd) {
-		match cmd.name.as_str() {
-			"DEL" | "EXISTS" => self.route_multi_key_sum_integer(cmd),
-			_ => self.push_immediate_response(RespValue::error(format!(
-				"ERR command '{}' does not support multi-key routing yet",
-				cmd.name.to_lowercase()
-			))),
-		}
-	}
-
-	fn route_multi_key_sum_integer(&mut self, cmd: ParsedCmd) {
-		if cmd.args.is_empty() {
-			self.push_immediate_response(RespValue::error(format!(
-				"ERR wrong number of arguments for '{}' command",
-				cmd.name.to_lowercase()
-			)));
-			return;
-		}
-
-		let (final_tx, final_rx) = oneshot::channel();
-		self.ordered_responses.push(final_rx);
-
-		let mut sub_rxs = Vec::with_capacity(cmd.args.len());
-		for key in cmd.args {
-			let worker_idx = self.worker_for_key(&key);
-			let (resp_tx, resp_rx) = oneshot::channel();
-			sub_rxs.push(resp_rx);
-
-			let req = CmdRequest {
-				cmd_name: cmd.name.clone(),
-				args: vec![key],
-				ctx: self.ctx,
-				resp_tx,
-			};
-			self.batches.entry(worker_idx).or_default().push(req);
-		}
-
-		tokio::spawn(async move {
-			let mut sum = 0_i64;
-			for rx in sub_rxs {
-				match rx.await {
-					Ok(RespValue::Integer(value)) => sum += value,
-					Ok(RespValue::Error(err)) => {
-						final_tx.send(RespValue::Error(err)).ok();
-						return;
-					}
-					Ok(other) => {
-						final_tx
-							.send(RespValue::error(format!(
-								"ERR unexpected response in multi-key aggregation: {:?}",
-								other
-							)))
-							.ok();
-						return;
-					}
-					Err(_) => {
-						final_tx
-							.send(RespValue::error("ERR worker dropped multi-key request"))
-							.ok();
-						return;
-					}
-				}
-			}
-			final_tx.send(RespValue::Integer(sum)).ok();
-		});
 	}
 
 	/// Send all batches to respective workers

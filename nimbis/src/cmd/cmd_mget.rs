@@ -12,15 +12,15 @@ use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
 use crate::coordinator::ScatterRequest;
 
-pub struct ExistsCmd {
+pub struct MGetCmd {
 	meta: CmdMeta,
 }
 
-impl Default for ExistsCmd {
+impl Default for MGetCmd {
 	fn default() -> Self {
 		Self {
 			meta: CmdMeta {
-				name: "EXISTS".to_string(),
+				name: "MGET".to_string(),
 				arity: -2,
 				routing: RoutingPolicy::MultiKey,
 			},
@@ -29,7 +29,7 @@ impl Default for ExistsCmd {
 }
 
 #[async_trait]
-impl Cmd for ExistsCmd {
+impl Cmd for MGetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
 	}
@@ -38,27 +38,29 @@ impl Cmd for ExistsCmd {
 		Ok(CommandPlan::Scatter {
 			subrequests: args
 				.iter()
-				.map(|key| ScatterRequest {
+				.enumerate()
+				.map(|(idx, key)| ScatterRequest {
 					route_key: key.clone(),
 					request: ParsedCmd {
-						name: self.meta.name.clone(),
+						name: "GET".to_string(),
 						args: vec![key.clone()],
 					},
-					output_index: None,
+					output_index: Some(idx),
 				})
 				.collect(),
-			aggregate: AggregatePolicy::IntegerSum,
+			aggregate: AggregatePolicy::OrderedArray,
 		})
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		if let Some(key) = args.first() {
-			match storage.exists(key.clone()).await {
-				Ok(exists) => RespValue::Integer(if exists { 1 } else { 0 }),
-				Err(e) => RespValue::Error(Bytes::from(e.to_string())),
+		let mut values = Vec::with_capacity(args.len());
+		for key in args {
+			match storage.get(key.clone()).await {
+				Ok(Some(value)) => values.push(RespValue::BulkString(value)),
+				Ok(None) => values.push(RespValue::Null),
+				Err(e) => return RespValue::error(format!("ERR {}", e)),
 			}
-		} else {
-			RespValue::Integer(0)
 		}
+		RespValue::Array(values)
 	}
 }

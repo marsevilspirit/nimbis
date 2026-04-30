@@ -35,6 +35,11 @@ fn find_cross_shard_keys(worker_count: usize) -> (String, String) {
 	panic!("failed to find cross-shard keys");
 }
 
+fn sorted(mut values: Vec<String>) -> Vec<String> {
+	values.sort();
+	values
+}
+
 #[test]
 #[serial]
 fn test_string_command() {
@@ -115,6 +120,58 @@ fn test_multi_key_del_and_exists_across_shards() {
 
 	assert_eq!(client.set(&key1, "v1"), "OK");
 	assert_eq!(client.del(&[&key1, "it:missing:3"]), 1);
+}
+
+#[test]
+#[serial]
+fn test_mget_mset_across_shards() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let (key1, key2) = find_cross_shard_keys(2);
+
+	assert_eq!(client.mset(&[(&key1, "v1"), (&key2, "v2")]), "OK");
+	assert_eq!(client.get(&key1), "v1");
+	assert_eq!(client.get(&key2), "v2");
+	assert_eq!(
+		client.mget(&[&key1, &key2, "it:mget:missing"]),
+		vec!["v1", "v2", ""]
+	);
+}
+
+#[test]
+#[serial]
+fn test_msetnx_across_shards_all_or_none() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let (key1, key2) = find_cross_shard_keys(2);
+
+	assert_eq!(client.msetnx(&[(&key1, "v1"), (&key2, "v2")]), 1);
+	assert_eq!(client.mget(&[&key1, &key2]), vec!["v1", "v2"]);
+
+	assert_eq!(client.msetnx(&[(&key1, "new1"), (&key2, "new2")]), 0);
+	assert_eq!(client.mget(&[&key1, &key2]), vec!["v1", "v2"]);
+}
+
+#[test]
+#[serial]
+fn test_multi_key_set_ops_across_shards() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let (key1, key2) = find_cross_shard_keys(2);
+
+	assert_eq!(client.sadd(&key1, &["a", "b", "c"]), 3);
+	assert_eq!(client.sadd(&key2, &["b", "c", "d"]), 3);
+
+	assert_eq!(
+		sorted(client.sunion(&[&key1, &key2])),
+		vec!["a", "b", "c", "d"]
+	);
+	assert_eq!(sorted(client.sinter(&[&key1, &key2])), vec!["b", "c"]);
+	assert_eq!(sorted(client.sdiff(&[&key1, &key2])), vec!["a"]);
+	assert_eq!(
+		client.sinter(&[&key1, "it:set:missing"]),
+		Vec::<String>::new()
+	);
 }
 
 #[test]

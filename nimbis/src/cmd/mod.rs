@@ -3,6 +3,8 @@ use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
+use crate::coordinator::CommandPlan;
+
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RoutingPolicy {
@@ -64,6 +66,34 @@ pub trait Cmd: Send + Sync {
 		&self.meta().routing
 	}
 
+	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
+		let request = ParsedCmd {
+			name: self.meta().name.clone(),
+			args: args.to_vec(),
+		};
+
+		match self.routing() {
+			RoutingPolicy::Local => Ok(CommandPlan::Local { request }),
+			RoutingPolicy::SingleKey => {
+				let Some(key) = args.first() else {
+					return Err(RespValue::error(format!(
+						"ERR wrong number of arguments for '{}' command",
+						self.meta().name.to_lowercase()
+					)));
+				};
+				Ok(CommandPlan::SingleKey {
+					key: key.clone(),
+					request,
+				})
+			}
+			RoutingPolicy::Broadcast => Ok(CommandPlan::Broadcast { request }),
+			RoutingPolicy::MultiKey => Err(RespValue::error(format!(
+				"ERR command '{}' does not support multi-key routing yet",
+				self.meta().name.to_lowercase()
+			))),
+		}
+	}
+
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue;
 
 	/// Execute command with request context.
@@ -77,6 +107,7 @@ pub trait Cmd: Send + Sync {
 }
 
 /// Parsed command structure (renamed from Cmd to avoid conflict)
+#[derive(Debug, Clone)]
 pub struct ParsedCmd {
 	pub name: String,
 	pub args: Vec<Bytes>,
@@ -135,15 +166,21 @@ mod cmd_llen;
 mod cmd_lpop;
 mod cmd_lpush;
 mod cmd_lrange;
+mod cmd_mget;
+mod cmd_mset;
+mod cmd_msetnx;
 mod cmd_ping;
 mod cmd_rpop;
 mod cmd_rpush;
 mod cmd_sadd;
 mod cmd_scard;
+mod cmd_sdiff;
 mod cmd_set;
+mod cmd_sinter;
 mod cmd_sismember;
 mod cmd_smembers;
 mod cmd_srem;
+mod cmd_sunion;
 mod cmd_ttl;
 mod cmd_zadd;
 mod cmd_zcard;
@@ -173,15 +210,21 @@ pub use cmd_llen::LLenCmd;
 pub use cmd_lpop::LPopCmd;
 pub use cmd_lpush::LPushCmd;
 pub use cmd_lrange::LRangeCmd;
+pub use cmd_mget::MGetCmd;
+pub use cmd_mset::MSetCmd;
+pub use cmd_msetnx::MSetNxCmd;
 pub use cmd_ping::PingCmd;
 pub use cmd_rpop::RPopCmd;
 pub use cmd_rpush::RPushCmd;
 pub use cmd_sadd::SaddCmd;
 pub use cmd_scard::ScardCmd;
+pub use cmd_sdiff::SdiffCmd;
 pub use cmd_set::SetCmd;
+pub use cmd_sinter::SinterCmd;
 pub use cmd_sismember::SismemberCmd;
 pub use cmd_smembers::SmembersCmd;
 pub use cmd_srem::SremCmd;
+pub use cmd_sunion::SunionCmd;
 pub use cmd_ttl::TtlCmd;
 pub use cmd_zadd::ZAddCmd;
 pub use cmd_zcard::ZCardCmd;

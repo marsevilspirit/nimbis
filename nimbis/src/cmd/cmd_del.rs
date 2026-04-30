@@ -6,7 +6,11 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::ParsedCmd;
 use super::RoutingPolicy;
+use crate::coordinator::AggregatePolicy;
+use crate::coordinator::CommandPlan;
+use crate::coordinator::ScatterRequest;
 
 pub struct DelCmd {
 	meta: CmdMeta,
@@ -28,6 +32,23 @@ impl Default for DelCmd {
 impl Cmd for DelCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
+	}
+
+	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
+		Ok(CommandPlan::Scatter {
+			subrequests: args
+				.iter()
+				.map(|key| ScatterRequest {
+					route_key: key.clone(),
+					request: ParsedCmd {
+						name: self.meta.name.clone(),
+						args: vec![key.clone()],
+					},
+					output_index: None,
+				})
+				.collect(),
+			aggregate: AggregatePolicy::IntegerSum,
+		})
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
