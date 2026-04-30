@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
+use crate::cmd::RoutingPolicy;
 
 pub struct RPushCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for RPushCmd {
 			meta: CmdMeta {
 				name: "RPUSH".to_string(),
 				arity: -3, // RPUSH key element [element ...]
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

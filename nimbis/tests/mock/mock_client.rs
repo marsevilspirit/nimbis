@@ -99,8 +99,10 @@ impl MockNimbisClient {
 
 	// -- string commands --
 
-	pub fn del(&mut self, key: &str) -> i64 {
-		self.execute(&["DEL", key])
+	pub fn del(&mut self, keys: &[&str]) -> i64 {
+		let mut args = vec!["DEL"];
+		args.extend_from_slice(keys);
+		self.execute(&args)
 			.as_integer()
 			.expect("DEL should return integer")
 	}
@@ -110,6 +112,14 @@ impl MockNimbisClient {
 			.as_integer()
 			.expect("EXISTS should return integer")
 			== 1
+	}
+
+	pub fn exists_count(&mut self, keys: &[&str]) -> i64 {
+		let mut args = vec!["EXISTS"];
+		args.extend_from_slice(keys);
+		self.execute(&args)
+			.as_integer()
+			.expect("EXISTS should return integer")
 	}
 
 	pub fn incr(&mut self, key: &str) -> i64 {

@@ -4,10 +4,21 @@ use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
 /// Command metadata containing immutable information about a command
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RoutingPolicy {
+	#[default]
+	Local,
+	SingleKey,
+	MultiKey,
+	Broadcast,
+}
+
+/// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Default)]
 pub struct CmdMeta {
 	pub name: String,
 	pub arity: i16,
+	pub routing: RoutingPolicy,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -48,6 +59,10 @@ impl CmdMeta {
 pub trait Cmd: Send + Sync {
 	/// Get command metadata
 	fn meta(&self) -> &CmdMeta;
+
+	fn routing(&self) -> &RoutingPolicy {
+		&self.meta().routing
+	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue;
 

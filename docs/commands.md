@@ -9,12 +9,20 @@ Command implementation lives in `nimbis/src/cmd/`.
 Core types in `nimbis/src/cmd/mod.rs`:
 
 - `CmdMeta { name, arity }`
+- `RoutingPolicy { Local, SingleKey, MultiKey, Broadcast }`
 - `CmdContext { client_id }`
 - `Cmd` trait (`meta`, `do_cmd`, `execute`)
 - `ParsedCmd`
 - `CmdTable`
 
 `Cmd::execute` performs arity validation first, then calls `do_cmd`.
+
+Dispatcher routing in `nimbis/src/dispatcher.rs` is metadata-driven via `CmdMeta.routing`:
+
+- `Local`: routes to worker `0` (current behavior for local commands)
+- `SingleKey`: hashes `args[0]` and routes to one worker
+- `MultiKey`: split and aggregate command-specific multi-key requests
+- `Broadcast`: fan-out to all workers and aggregate
 
 ## Arity Rules
 
@@ -116,3 +124,8 @@ Nimbis is Redis-compatible for the implemented subset, but does **not** yet impl
 
 When adding new commands or options, update both `nimbis/src/cmd/table.rs` and this document together.
 
+## Multi-Key Routing Notes
+
+- `DEL key [key ...]` and `EXISTS key [key ...]` are handled with scatter-gather in the dispatcher.
+- Each key is routed as an internal shard-local single-key request.
+- Final response is the sum of integer results from all shard-local requests.

@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct ExistsCmd {
 	meta: CmdMeta,
@@ -16,7 +17,8 @@ impl Default for ExistsCmd {
 		Self {
 			meta: CmdMeta {
 				name: "EXISTS".to_string(),
-				arity: 2, // Exactly 1 key (multi-key requires scatter-gather across workers)
+				arity: -2,
+				routing: RoutingPolicy::MultiKey,
 			},
 		}
 	}
@@ -29,7 +31,6 @@ impl Cmd for ExistsCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		// TODO: Support multi-key existence check via scatter-gather across workers
 		if let Some(key) = args.first() {
 			match storage.exists(key.clone()).await {
 				Ok(exists) => RespValue::Integer(if exists { 1 } else { 0 }),

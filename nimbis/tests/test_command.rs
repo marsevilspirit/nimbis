@@ -1,9 +1,39 @@
 mod mock;
 
+use std::collections::HashMap;
+
 use mock::MockNimbisServer;
 use mock::utils::resp_error;
 use nimbis_resp::RespValue;
 use serial_test::serial;
+
+fn hash_key(key: &[u8]) -> u64 {
+	let mut hasher: u64 = 0xcbf29ce484222325;
+	for &byte in key {
+		hasher ^= byte as u64;
+		hasher = hasher.wrapping_mul(0x100000001b3);
+	}
+	hasher
+}
+
+fn find_cross_shard_keys(worker_count: usize) -> (String, String) {
+	let mut seen_by_worker: HashMap<usize, String> = HashMap::new();
+	for i in 0..2000usize {
+		let key = format!("it:route:key:{}", i);
+		let worker = (hash_key(key.as_bytes()) as usize) % worker_count;
+		if let Some(existing) = seen_by_worker.get(&worker)
+			&& existing != &key
+		{
+			for (other_worker, other_key) in &seen_by_worker {
+				if *other_worker != worker {
+					return (other_key.clone(), key);
+				}
+			}
+		}
+		seen_by_worker.entry(worker).or_insert(key);
+	}
+	panic!("failed to find cross-shard keys");
+}
 
 #[test]
 #[serial]
@@ -63,10 +93,57 @@ fn test_del_and_exists() {
 
 	client.set("it:del:key", "hello");
 	assert!(client.exists("it:del:key"));
-	assert_eq!(client.del("it:del:key"), 1);
+	assert_eq!(client.del(&["it:del:key"]), 1);
 	assert!(!client.exists("it:del:key"));
-	assert_eq!(client.del("it:del:key"), 0);
+	assert_eq!(client.del(&["it:del:key"]), 0);
 	assert_eq!(client.get("it:del:key"), "");
+}
+
+#[test]
+#[serial]
+fn test_multi_key_del_and_exists_across_shards() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let (key1, key2) = find_cross_shard_keys(2);
+
+	assert_eq!(client.set(&key1, "v1"), "OK");
+	assert_eq!(client.set(&key2, "v2"), "OK");
+
+	assert_eq!(client.exists_count(&[&key1, &key2, "it:missing:key"]), 2);
+	assert_eq!(client.del(&[&key1, &key2]), 2);
+	assert_eq!(client.del(&["it:missing:1", "it:missing:2"]), 0);
+
+	assert_eq!(client.set(&key1, "v1"), "OK");
+	assert_eq!(client.del(&[&key1, "it:missing:3"]), 1);
+}
+
+#[test]
+#[serial]
+fn test_sequence_order_with_multi_key_between_single_key() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let (key1, key2) = find_cross_shard_keys(2);
+
+	assert_eq!(
+		client.execute(&["SET", &key1, "v1"]),
+		RespValue::simple_string("OK")
+	);
+	assert_eq!(
+		client.execute(&["SET", &key2, "v2"]),
+		RespValue::simple_string("OK")
+	);
+	assert_eq!(
+		client.execute(&["DEL", &key1, &key2]),
+		RespValue::Integer(2)
+	);
+	assert_eq!(
+		client.execute(&["EXISTS", &key1, &key2]),
+		RespValue::Integer(0)
+	);
+	assert_eq!(
+		client.execute(&["PING"]),
+		RespValue::SimpleString("PONG".into())
+	);
 }
 
 #[test]
@@ -302,11 +379,11 @@ fn test_del_across_types() {
 	client.sadd("it:cross:set", &["m"]);
 	client.zadd("it:cross:zset", &[("1", "z")]);
 
-	assert_eq!(client.del("it:cross:str"), 1);
-	assert_eq!(client.del("it:cross:hash"), 1);
-	assert_eq!(client.del("it:cross:list"), 1);
-	assert_eq!(client.del("it:cross:set"), 1);
-	assert_eq!(client.del("it:cross:zset"), 1);
+	assert_eq!(client.del(&["it:cross:str"]), 1);
+	assert_eq!(client.del(&["it:cross:hash"]), 1);
+	assert_eq!(client.del(&["it:cross:list"]), 1);
+	assert_eq!(client.del(&["it:cross:set"]), 1);
+	assert_eq!(client.del(&["it:cross:zset"]), 1);
 
 	assert!(!client.exists("it:cross:str"));
 	assert!(!client.exists("it:cross:hash"));

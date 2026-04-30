@@ -185,4 +185,61 @@ var _ = Describe("Concurrency Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cardVal).To(Equal(int64(totalUniqueItems)), "Set cardinality mismatch")
 	})
+
+	It("should keep multi-key DEL/EXISTS consistent under concurrent mixed commands", func() {
+		key1, key2 := findCrossShardKeys(2)
+		Expect(client.Set(ctx, key1, "seed1", 0).Err()).NotTo(HaveOccurred())
+		Expect(client.Set(ctx, key2, "seed2", 0).Err()).NotTo(HaveOccurred())
+
+		const numGoroutines = 40
+		const numIterations = 200
+
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				defer GinkgoRecover()
+
+				for j := 0; j < numIterations; j++ {
+					existsCount, err := client.Exists(ctx, key1, key2).Result()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(existsCount).To(BeNumerically(">=", 0))
+					Expect(existsCount).To(BeNumerically("<=", 2))
+
+					deletedCount, err := client.Del(ctx, key1, key2).Result()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(deletedCount).To(BeNumerically(">=", 0))
+					Expect(deletedCount).To(BeNumerically("<=", 2))
+
+					// Recreate keys to interleave write/read/delete across shards.
+					if (id+j)%2 == 0 {
+						Expect(client.Set(ctx, key1, fmt.Sprintf("v1-%d-%d", id, j), 0).Err()).NotTo(HaveOccurred())
+					}
+					if (id+j)%3 == 0 {
+						Expect(client.Set(ctx, key2, fmt.Sprintf("v2-%d-%d", id, j), 0).Err()).NotTo(HaveOccurred())
+					}
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Deterministic final check after concurrent phase.
+		Expect(client.Set(ctx, key1, "final1", 0).Err()).NotTo(HaveOccurred())
+		Expect(client.Set(ctx, key2, "final2", 0).Err()).NotTo(HaveOccurred())
+
+		existsCount, err := client.Exists(ctx, key1, key2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(existsCount).To(Equal(int64(2)))
+
+		deletedCount, err := client.Del(ctx, key1, key2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deletedCount).To(Equal(int64(2)))
+
+		existsCount, err = client.Exists(ctx, key1, key2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(existsCount).To(Equal(int64(0)))
+	})
 })

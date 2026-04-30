@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct AppendCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for AppendCmd {
 			meta: CmdMeta {
 				name: "APPEND".to_string(),
 				arity: 3,
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

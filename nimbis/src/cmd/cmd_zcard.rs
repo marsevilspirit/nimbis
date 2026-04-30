@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 pub struct ZCardCmd {
 	meta: CmdMeta,
@@ -17,6 +18,7 @@ impl Default for ZCardCmd {
 			meta: CmdMeta {
 				name: "ZCARD".to_string(),
 				arity: 2, // ZCARD key
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

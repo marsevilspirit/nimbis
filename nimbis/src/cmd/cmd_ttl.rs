@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 #[derive(Debug, Clone)]
 pub struct TtlCmd {
@@ -18,6 +19,7 @@ impl Default for TtlCmd {
 			meta: CmdMeta {
 				name: "TTL".to_string(),
 				arity: 2, // TTL key
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}

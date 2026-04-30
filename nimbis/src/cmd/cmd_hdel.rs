@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::RoutingPolicy;
 
 #[derive(Debug)]
 pub struct HDelCmd {
@@ -18,6 +19,7 @@ impl Default for HDelCmd {
 			meta: CmdMeta {
 				name: "HDEL".to_string(),
 				arity: -3,
+				routing: RoutingPolicy::SingleKey,
 			},
 		}
 	}
