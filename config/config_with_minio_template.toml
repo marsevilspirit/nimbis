@@ -51,10 +51,6 @@ trace_report_interval_ms = 1000
 # For local MinIO, create the bucket "nimbis" before starting the server.
 object_store_url = "s3://nimbis/dev"
 
-# Placeholder for Redis compatibility (immutable)
-save = ""
-appendonly = "no"
-
 # MinIO options for the object_store crate.
 [object_store_options]
 aws_region = "us-east-1"
@@ -63,3 +59,8 @@ aws_access_key_id = "minioadmin"
 aws_secret_access_key = "minioadmin"
 aws_virtual_hosted_style_request = "false"
 aws_allow_http = "true"
+
+# Placeholder for Redis compatibility (immutable)
+save = ""
+appendonly = "no"
+
