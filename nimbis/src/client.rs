@@ -12,6 +12,7 @@ use nimbis_resp::RespEncoder;
 use nimbis_resp::RespParseResult;
 use nimbis_resp::RespParser;
 use nimbis_resp::RespValue;
+use nimbis_storage::Storage;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -98,11 +99,12 @@ impl ClientConnection {
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 		cmd_table: Arc<CmdTable>,
+		storage: Arc<Storage>,
 		ctx: CmdContext,
 	) -> Self {
 		Self {
 			socket,
-			dispatcher: CommandDispatcher::new(peers, cmd_table, ctx),
+			dispatcher: CommandDispatcher::new(peers, cmd_table, storage, ctx),
 			parser: RespParser::new(),
 		}
 	}

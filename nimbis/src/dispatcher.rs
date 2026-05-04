@@ -6,6 +6,7 @@ use log::debug;
 use log::error;
 use nimbis_resp::RespEncoder;
 use nimbis_resp::RespValue;
+use nimbis_storage::Storage;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -14,6 +15,7 @@ use tokio::sync::oneshot;
 use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
+use crate::coordinator::CommandPlan;
 use crate::coordinator::MultiKeyCoordinator;
 #[cfg(test)]
 use crate::coordinator::hash_key;
@@ -24,6 +26,7 @@ use crate::worker::WorkerMessage;
 pub struct CommandDispatcher {
 	peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 	cmd_table: Arc<CmdTable>,
+	storage: Arc<Storage>,
 	ctx: CmdContext,
 	batches: HashMap<usize, Vec<CmdRequest>>,
 	ordered_responses: Vec<oneshot::Receiver<RespValue>>,
@@ -33,11 +36,13 @@ impl CommandDispatcher {
 	pub fn new(
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 		cmd_table: Arc<CmdTable>,
+		storage: Arc<Storage>,
 		ctx: CmdContext,
 	) -> Self {
 		Self {
 			peers,
 			cmd_table,
+			storage,
 			ctx,
 			batches: HashMap::new(),
 			ordered_responses: Vec::new(),
@@ -65,6 +70,7 @@ impl CommandDispatcher {
 		}
 
 		match cmd_def.plan(&cmd.args) {
+			Ok(CommandPlan::Local { request }) => self.execute_local(request),
 			Ok(plan) => MultiKeyCoordinator::new(
 				&self.peers,
 				self.ctx,
@@ -74,6 +80,25 @@ impl CommandDispatcher {
 			.execute(plan),
 			Err(resp) => self.push_immediate_response(resp),
 		}
+	}
+
+	fn execute_local(&mut self, request: ParsedCmd) {
+		let (tx, rx) = oneshot::channel();
+		self.ordered_responses.push(rx);
+
+		let cmd_table = self.cmd_table.clone();
+		let storage = self.storage.clone();
+		let ctx = self.ctx;
+		tokio::spawn(async move {
+			let response = match cmd_table.get_cmd(&request.name) {
+				Some(cmd) => cmd.execute(&storage, &request.args, &ctx).await,
+				None => RespValue::error(format!(
+					"ERR unknown command '{}'",
+					request.name.to_lowercase()
+				)),
+			};
+			tx.send(response).ok();
+		});
 	}
 
 	#[cfg(test)]
@@ -137,10 +162,14 @@ impl CommandDispatcher {
 #[cfg(test)]
 mod tests {
 	use std::collections::HashMap;
+	use std::env;
 	use std::sync::Arc;
+	use std::time::SystemTime;
+	use std::time::UNIX_EPOCH;
 
 	use bytes::Bytes;
 	use nimbis_resp::RespValue;
+	use nimbis_storage::Storage;
 	use tokio::sync::mpsc;
 
 	use super::CommandDispatcher;
@@ -150,7 +179,20 @@ mod tests {
 	use crate::worker::CmdRequest;
 	use crate::worker::WorkerMessage;
 
-	fn setup_dispatcher() -> (
+	async fn create_test_storage() -> Arc<Storage> {
+		let unique = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.expect("system time before epoch")
+			.as_nanos();
+		let path = env::temp_dir().join(format!("nimbis-dispatcher-test-{unique}"));
+		Arc::new(
+			Storage::open(&path, Some(0))
+				.await
+				.expect("create test storage"),
+		)
+	}
+
+	async fn setup_dispatcher() -> (
 		CommandDispatcher,
 		HashMap<usize, mpsc::UnboundedReceiver<WorkerMessage>>,
 	) {
@@ -161,9 +203,11 @@ mod tests {
 			peers.insert(idx, tx);
 			receivers.insert(idx, rx);
 		}
+		let storage = create_test_storage().await;
 		let dispatcher = CommandDispatcher::new(
 			Arc::new(peers),
 			Arc::new(CmdTable::new()),
+			storage,
 			CmdContext { client_id: 42 },
 		);
 		(dispatcher, receivers)
@@ -176,9 +220,9 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn worker_for_key_is_deterministic() {
-		let (dispatcher, _) = setup_dispatcher();
+	#[tokio::test]
+	async fn worker_for_key_is_deterministic() {
+		let (dispatcher, _) = setup_dispatcher().await;
 		let key = b"route:key:1";
 		let first = dispatcher.worker_for_key(key);
 		let second = dispatcher.worker_for_key(key);
@@ -188,7 +232,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn route_single_key_enqueues_to_expected_worker() {
-		let (mut dispatcher, mut receivers) = setup_dispatcher();
+		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 		let key = Bytes::from_static(b"single:key");
 		let expected_worker = dispatcher.worker_for_key(&key);
 
@@ -222,7 +266,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn multi_key_sum_aggregates_integer_responses() {
-		let (mut dispatcher, mut receivers) = setup_dispatcher();
+		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 		let keys = vec![
 			Bytes::from_static(b"mk:a"),
 			Bytes::from_static(b"mk:b"),
@@ -262,7 +306,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn multi_key_sum_propagates_error() {
-		let (mut dispatcher, mut receivers) = setup_dispatcher();
+		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 		let keys = vec![Bytes::from_static(b"err:a"), Bytes::from_static(b"err:b")];
 
 		dispatcher.dispatch(ParsedCmd {
@@ -305,7 +349,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn response_order_preserved_with_multi_key_between_single_key() {
-		let (mut dispatcher, mut receivers) = setup_dispatcher();
+		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 
 		dispatcher.dispatch(ParsedCmd {
 			name: "SET".to_string(),
@@ -372,5 +416,36 @@ mod tests {
 		assert_eq!(first, RespValue::simple_string("OK"));
 		assert_eq!(second, RespValue::Integer(2));
 		assert_eq!(third, RespValue::bulk_string("v4"));
+	}
+
+	#[tokio::test]
+	async fn local_command_does_not_enqueue_worker_batch() {
+		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
+
+		dispatcher.dispatch(ParsedCmd {
+			name: "PING".to_string(),
+			args: vec![],
+		});
+		dispatcher
+			.dispatch_batches()
+			.await
+			.expect("dispatch batches");
+
+		for idx in 0..2usize {
+			let rx = receivers
+				.get_mut(&idx)
+				.expect("receiver for worker should exist");
+			assert!(
+				rx.try_recv().is_err(),
+				"local command should not be routed to worker {idx}"
+			);
+		}
+
+		let resp = dispatcher
+			.ordered_responses
+			.remove(0)
+			.await
+			.expect("local response");
+		assert_eq!(resp, RespValue::simple_string("PONG"));
 	}
 }

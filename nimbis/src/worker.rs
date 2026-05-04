@@ -78,11 +78,17 @@ impl Worker {
 							WorkerMessage::NewConnection(socket) => {
 								let peers = peers.clone();
 								let cmd_table = cmd_table.clone();
+								let storage = storage.clone();
 								tokio::spawn(async move {
 									let client_id = next_client_session_id();
 									let ctx = CmdContext { client_id };
-									let mut session =
-										ClientConnection::new(socket, peers, cmd_table, ctx);
+									let mut session = ClientConnection::new(
+										socket,
+										peers,
+										cmd_table,
+										storage.clone(),
+										ctx,
+									);
 									GCTX!(client_sessions).register(client_id);
 									if let Err(e) = session.run().await {
 										debug!("Client session error: {}", e);
