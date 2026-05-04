@@ -72,10 +72,13 @@ Available recipes:
     [test]
     bench       # Run storage benchmark target
     e2e-test    # Run e2e tests
+    redis-bench # Run redis-benchmark through xtask against a running Nimbis server
     test        # Run unit tests
 ```
 
 Default configuration path is `config/config.toml`. Legacy `conf/config.toml` is still supported as a fallback.
+
+Redis protocol benchmarks are documented in [Redis Benchmark](docs/redis-benchmark.md).
 
 ### Object Store Configuration
 

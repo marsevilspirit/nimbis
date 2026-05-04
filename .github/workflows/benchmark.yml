@@ -140,32 +140,32 @@ jobs:
           cargo build --release
           ./target/release/nimbis &
           NIMBIS_PID=$!
+          trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
           echo "Nimbis (Main) started with PID $NIMBIS_PID"
           sleep 10 # Wait for server start
-          
-          echo "Warmup on Main..."
-          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on Main..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_main.txt || true
-          
-          kill $NIMBIS_PID
+          N=100000 C=100 R=100000 D=512 P=1 OUTPUT_DIR=../benchmark_main_suites \
+            cargo run --manifest-path ../pr_branch/Cargo.toml --package xtask -- redis-benchmark --profile comparison \
+            > ../benchmark_main.txt
+
+          kill $NIMBIS_PID >/dev/null 2>&1 || true
 
       - name: Build and Run Main with Pipeline
         working-directory: main_branch
         run: |
           ./target/release/nimbis &
           NIMBIS_PID=$!
+          trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
           echo "Nimbis (Main) started with PID $NIMBIS_PID"
           sleep 10 # Wait for server start
-          
-          echo "Warmup on Main (Pipeline)..."
-          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on Main (Pipeline)..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > ../benchmark_main_pipeline.txt || true
-          
-          kill $NIMBIS_PID
+          N=100000 C=100 R=100000 D=512 P=50 OUTPUT_DIR=../benchmark_main_pipeline_suites \
+            cargo run --manifest-path ../pr_branch/Cargo.toml --package xtask -- redis-benchmark --profile comparison \
+            > ../benchmark_main_pipeline.txt
+
+          kill $NIMBIS_PID >/dev/null 2>&1 || true
 
       - name: Build and Run PR
         working-directory: pr_branch
@@ -173,32 +173,32 @@ jobs:
           cargo build --release
           ./target/release/nimbis &
           NIMBIS_PID=$!
+          trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
           echo "Nimbis (PR) started with PID $NIMBIS_PID"
           sleep 10 # Wait for server start
-          
-          echo "Warmup on PR..."
-          redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on PR..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_pr.txt || true
-          
-          kill $NIMBIS_PID
+          N=100000 C=100 R=100000 D=512 P=1 OUTPUT_DIR=../benchmark_pr_suites \
+            cargo xtask redis-benchmark --profile comparison \
+            > ../benchmark_pr.txt
+
+          kill $NIMBIS_PID >/dev/null 2>&1 || true
 
       - name: Build and Run PR with Pipeline
         working-directory: pr_branch
         run: |
           ./target/release/nimbis &
           NIMBIS_PID=$!
+          trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
           echo "Nimbis (PR) started with PID $NIMBIS_PID"
           sleep 10 # Wait for server start
-          
-          echo "Warmup on PR (Pipeline)..."
-          redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
 
           echo "Running Benchmark on PR (Pipeline)..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > ../benchmark_pr_pipeline.txt || true
-          
-          kill $NIMBIS_PID
+          N=100000 C=100 R=100000 D=512 P=50 OUTPUT_DIR=../benchmark_pr_pipeline_suites \
+            cargo xtask redis-benchmark --profile comparison \
+            > ../benchmark_pr_pipeline.txt
+
+          kill $NIMBIS_PID >/dev/null 2>&1 || true
 
       - name: Compare Results
         id: compare

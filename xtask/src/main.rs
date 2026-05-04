@@ -4,6 +4,7 @@ use clap::Parser;
 use clap::Subcommand;
 use xtask::benchmarks;
 use xtask::checks;
+use xtask::redis_benchmark;
 use xtask::write_stderr_line;
 
 #[derive(Parser, Debug)]
@@ -23,6 +24,8 @@ enum Command {
 	CheckNumberedComments,
 	/// Compare benchmark outputs and print a Markdown report.
 	CompareBenchmarks(benchmarks::Args),
+	/// Run redis-benchmark against a running Nimbis server.
+	RedisBenchmark(redis_benchmark::Args),
 }
 
 fn main() {
@@ -36,6 +39,7 @@ fn main() {
 		Command::CheckCodeFmt => checks::check_code_fmt(workspace_root),
 		Command::CheckNumberedComments => checks::check_numbered_comments(workspace_root),
 		Command::CompareBenchmarks(args) => benchmarks::compare_benchmarks(args),
+		Command::RedisBenchmark(args) => redis_benchmark::run(args, workspace_root),
 	};
 
 	if let Err(error) = result {
