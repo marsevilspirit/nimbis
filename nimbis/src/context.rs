@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -25,31 +27,65 @@ impl GlobalContext {
 
 #[derive(Debug, Default)]
 pub struct KeyLockManager {
-	locks: DashMap<Bytes, Arc<Mutex<()>>>,
+	locks: DashMap<Bytes, Arc<KeyLockEntry>>,
 }
 
 #[derive(Debug)]
-pub struct MultiKeyGuard {
-	_guards: Vec<OwnedMutexGuard<()>>,
+struct KeyLockEntry {
+	mutex: Arc<Mutex<()>>,
+	refs: AtomicUsize,
+}
+
+#[derive(Debug)]
+pub struct MultiKeyGuard<'a> {
+	manager: &'a KeyLockManager,
+	locked_keys: Vec<(Bytes, Arc<KeyLockEntry>)>,
+	guards: Vec<OwnedMutexGuard<()>>,
 }
 
 impl KeyLockManager {
-	pub async fn lock_keys(&self, keys: &[Bytes]) -> MultiKeyGuard {
+	pub async fn lock_keys(&self, keys: &[Bytes]) -> MultiKeyGuard<'_> {
 		let mut keys = keys.to_vec();
 		keys.sort();
 		keys.dedup();
 
 		let mut guards = Vec::with_capacity(keys.len());
+		let mut locked_keys = Vec::with_capacity(keys.len());
 		for key in keys {
-			let lock = self
-				.locks
-				.entry(key)
-				.or_insert_with(|| Arc::new(Mutex::new(())))
-				.clone();
-			guards.push(lock.lock_owned().await);
+			let entry = {
+				let entry_ref = self.locks.entry(key.clone()).or_insert_with(|| {
+					Arc::new(KeyLockEntry {
+						mutex: Arc::new(Mutex::new(())),
+						refs: AtomicUsize::new(0),
+					})
+				});
+				entry_ref.refs.fetch_add(1, Ordering::SeqCst);
+				entry_ref.clone()
+			};
+			let guard = entry.mutex.clone().lock_owned().await;
+			guards.push(guard);
+			locked_keys.push((key, entry));
 		}
 
-		MultiKeyGuard { _guards: guards }
+		MultiKeyGuard {
+			manager: self,
+			locked_keys,
+			guards,
+		}
+	}
+}
+
+impl Drop for MultiKeyGuard<'_> {
+	fn drop(&mut self) {
+		drop(std::mem::take(&mut self.guards));
+
+		for (key, entry) in self.locked_keys.drain(..) {
+			if entry.refs.fetch_sub(1, Ordering::SeqCst) == 1 {
+				self.manager.locks.remove_if(&key, |_, current| {
+					Arc::ptr_eq(current, &entry) && entry.refs.load(Ordering::SeqCst) == 0
+				});
+			}
+		}
 	}
 }
 
@@ -83,13 +119,47 @@ mod tests {
 	#[tokio::test]
 	async fn key_lock_manager_deduplicates_repeated_keys() {
 		let locks = KeyLockManager::default();
-		let _guard = locks
-			.lock_keys(&[
-				Bytes::from_static(b"k1"),
-				Bytes::from_static(b"k1"),
-				Bytes::from_static(b"k2"),
-			])
-			.await;
+		{
+			let _guard = locks
+				.lock_keys(&[
+					Bytes::from_static(b"k1"),
+					Bytes::from_static(b"k1"),
+					Bytes::from_static(b"k2"),
+				])
+				.await;
+			assert_eq!(locks.locks.len(), 2);
+		}
+		assert!(locks.locks.is_empty());
+	}
+
+	#[tokio::test]
+	async fn key_lock_manager_removes_idle_locks() {
+		let locks = KeyLockManager::default();
+		for idx in 0..16 {
+			let key = Bytes::from(format!("temporary:{idx}"));
+			let _guard = locks.lock_keys(&[key]).await;
+			assert_eq!(locks.locks.len(), 1);
+		}
+		assert!(locks.locks.is_empty());
+	}
+
+	#[tokio::test]
+	async fn key_lock_manager_keeps_locks_with_waiters() {
+		let locks = Arc::new(KeyLockManager::default());
+		let key = Bytes::from_static(b"shared-waiter");
+		let guard = locks.lock_keys(std::slice::from_ref(&key)).await;
+
+		let waiter_locks = locks.clone();
+		let waiter_key = key.clone();
+		let waiter = tokio::spawn(async move {
+			let _guard = waiter_locks.lock_keys(&[waiter_key]).await;
+		});
+
+		tokio::time::sleep(Duration::from_millis(2)).await;
+		assert_eq!(locks.locks.len(), 1);
+		drop(guard);
+		waiter.await.expect("waiter should complete");
+		assert!(locks.locks.is_empty());
 	}
 
 	#[tokio::test]
@@ -118,6 +188,7 @@ mod tests {
 			task.await.expect("lock task should complete");
 		}
 		assert_eq!(max_seen.load(Ordering::SeqCst), 1);
+		assert!(locks.locks.is_empty());
 	}
 
 	#[tokio::test]
@@ -145,5 +216,6 @@ mod tests {
 			task.await.expect("lock task should complete");
 		}
 		assert!(max_seen.load(Ordering::SeqCst) > 1);
+		assert!(locks.locks.is_empty());
 	}
 }

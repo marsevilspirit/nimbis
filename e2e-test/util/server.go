@@ -12,6 +12,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const WorkerThreads = 4
+
 var serverCmd *exec.Cmd
 
 // findProjectRoot searches upward from the current directory
@@ -78,7 +80,7 @@ func StartServer() error {
 	dataPath := filepath.Join(projectRoot, "nimbis_store")
 	_ = os.RemoveAll(dataPath)
 
-	serverCmd = exec.Command(binPath)
+	serverCmd = exec.Command(binPath, "--worker-threads", fmt.Sprint(WorkerThreads))
 	serverCmd.Dir = projectRoot // Resolve relative object_store_url values from the project root.
 	// Redirect stdout/stderr for debugging
 	serverCmd.Stdout = os.Stdout

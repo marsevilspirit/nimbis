@@ -72,6 +72,14 @@ fn test_raw_command_helpers() {
 		resp_error(client.execute(&["GET"])),
 		"ERR wrong number of arguments for 'get' command"
 	);
+	assert_eq!(
+		resp_error(client.execute(&["MSET", "key", "value", "dangling"])),
+		"ERR wrong number of arguments for 'mset' command"
+	);
+	assert_eq!(
+		resp_error(client.execute(&["MSETNX", "key", "value", "dangling"])),
+		"ERR wrong number of arguments for 'msetnx' command"
+	);
 }
 
 #[test]

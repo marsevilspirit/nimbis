@@ -4,6 +4,7 @@ use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
 use crate::coordinator::CommandPlan;
+use crate::coordinator::CoordinatedCommandPlan;
 
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,7 +67,7 @@ pub trait Cmd: Send + Sync {
 		&self.meta().routing
 	}
 
-	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
+	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
 		let request = ParsedCmd {
 			name: self.meta().name.clone(),
 			args: args.to_vec(),
@@ -81,12 +82,13 @@ pub trait Cmd: Send + Sync {
 						self.meta().name.to_lowercase()
 					)));
 				};
-				Ok(CommandPlan::SingleKey {
+				Ok(CoordinatedCommandPlan::SingleKey {
 					key: key.clone(),
 					request,
-				})
+				}
+				.into())
 			}
-			RoutingPolicy::Broadcast => Ok(CommandPlan::Broadcast { request }),
+			RoutingPolicy::Broadcast => Ok(CoordinatedCommandPlan::Broadcast { request }.into()),
 			RoutingPolicy::MultiKey => Err(RespValue::error(format!(
 				"ERR command '{}' does not support multi-key routing yet",
 				self.meta().name.to_lowercase()

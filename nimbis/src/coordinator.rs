@@ -27,9 +27,12 @@ pub(crate) fn hash_key(key: &[u8]) -> u64 {
 
 #[derive(Debug, Clone)]
 pub enum CommandPlan {
-	Local {
-		request: ParsedCmd,
-	},
+	Local { request: ParsedCmd },
+	Coordinated(CoordinatedCommandPlan),
+}
+
+#[derive(Debug, Clone)]
+pub enum CoordinatedCommandPlan {
 	SingleKey {
 		key: Bytes,
 		request: ParsedCmd,
@@ -45,6 +48,12 @@ pub enum CommandPlan {
 		keys: Vec<Bytes>,
 		execution: LockedExecution,
 	},
+}
+
+impl From<CoordinatedCommandPlan> for CommandPlan {
+	fn from(plan: CoordinatedCommandPlan) -> Self {
+		Self::Coordinated(plan)
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -66,16 +75,7 @@ pub enum AggregatePolicy {
 
 #[derive(Debug, Clone)]
 pub enum LockedExecution {
-	SameCommandOnOwner {
-		request: ParsedCmd,
-	},
-	GroupedByShard {
-		requests: Vec<ScatterRequest>,
-		aggregate: AggregatePolicy,
-	},
-	MSetNx {
-		pairs: Vec<(Bytes, Bytes)>,
-	},
+	MSetNx { pairs: Vec<(Bytes, Bytes)> },
 }
 
 /// Executes command plans while leaving command semantics out of the
@@ -106,19 +106,20 @@ impl<'a> MultiKeyCoordinator<'a> {
 		(hash_key(key) as usize) % self.peers.len()
 	}
 
-	pub fn execute(&mut self, plan: CommandPlan) {
+	pub fn execute(&mut self, plan: CoordinatedCommandPlan) {
 		match plan {
-			CommandPlan::Local { request } => self.push_worker_request(0, request),
-			CommandPlan::SingleKey { key, request } => {
+			CoordinatedCommandPlan::SingleKey { key, request } => {
 				let worker_idx = self.worker_for_key(&key);
 				self.push_worker_request(worker_idx, request);
 			}
-			CommandPlan::Broadcast { request } => self.broadcast(request),
-			CommandPlan::Scatter {
+			CoordinatedCommandPlan::Broadcast { request } => self.broadcast(request),
+			CoordinatedCommandPlan::Scatter {
 				subrequests,
 				aggregate,
 			} => self.scatter(subrequests, aggregate),
-			CommandPlan::LockedMultiKey { keys, execution } => self.locked(keys, execution),
+			CoordinatedCommandPlan::LockedMultiKey { keys, execution } => {
+				self.locked(keys, execution);
+			}
 		}
 	}
 
@@ -200,23 +201,6 @@ async fn execute_locked(
 	execution: LockedExecution,
 ) -> RespValue {
 	match execution {
-		LockedExecution::SameCommandOnOwner { request } => {
-			let worker_idx = worker_for_key(peers, request.args.first().map_or(&[], Bytes::as_ref));
-			send_worker_request(peers, worker_idx, request, ctx).await
-		}
-		LockedExecution::GroupedByShard {
-			requests,
-			aggregate,
-		} => {
-			let mut rxs = Vec::with_capacity(requests.len());
-			for request in requests {
-				let worker_idx = worker_for_key(peers, &request.route_key);
-				let output_index = request.output_index;
-				let rx = send_worker_request_rx(peers, worker_idx, request.request, ctx);
-				rxs.push((output_index, rx));
-			}
-			aggregate_responses(rxs, aggregate).await
-		}
 		LockedExecution::MSetNx { pairs } => execute_locked_msetnx(peers, ctx, pairs).await,
 	}
 }
@@ -302,10 +286,11 @@ fn send_worker_request_rx(
 	ctx: CmdContext,
 ) -> oneshot::Receiver<RespValue> {
 	let (resp_tx, resp_rx) = oneshot::channel();
-	let response_on_send_error = RespValue::error(format!("ERR worker {} unavailable", worker_idx));
 
 	match peers.get(&worker_idx) {
 		Some(sender) => {
+			let response_on_send_error =
+				RespValue::error(format!("ERR worker {} unavailable", worker_idx));
 			let req = CmdRequest {
 				cmd_name: cmd.name,
 				args: cmd.args,
@@ -313,43 +298,24 @@ fn send_worker_request_rx(
 				resp_tx,
 			};
 			if let Err(err) = sender.send(WorkerMessage::CmdBatch(vec![req])) {
-				let req = err.0.into_cmd_batch().into_iter().next();
-				if let Some(req) = req {
-					req.resp_tx.send(response_on_send_error).ok();
+				match err.0 {
+					WorkerMessage::CmdBatch(mut batch) => {
+						if let Some(req) = batch.pop() {
+							req.resp_tx.send(response_on_send_error).ok();
+						}
+					}
+					WorkerMessage::NewConnection(_) => {}
 				}
 			}
 		}
 		None => {
+			let response_on_send_error =
+				RespValue::error(format!("ERR worker {} unavailable", worker_idx));
 			resp_tx.send(response_on_send_error).ok();
 		}
 	}
 
 	resp_rx
-}
-
-async fn send_worker_request(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	worker_idx: usize,
-	cmd: ParsedCmd,
-	ctx: CmdContext,
-) -> RespValue {
-	match send_worker_request_rx(peers, worker_idx, cmd, ctx).await {
-		Ok(resp) => resp,
-		Err(_) => RespValue::error("ERR worker dropped multi-key request"),
-	}
-}
-
-trait IntoCmdBatch {
-	fn into_cmd_batch(self) -> Vec<CmdRequest>;
-}
-
-impl IntoCmdBatch for WorkerMessage {
-	fn into_cmd_batch(self) -> Vec<CmdRequest> {
-		match self {
-			WorkerMessage::CmdBatch(batch) => batch,
-			WorkerMessage::NewConnection(_) => Vec::new(),
-		}
-	}
 }
 
 async fn aggregate_responses(

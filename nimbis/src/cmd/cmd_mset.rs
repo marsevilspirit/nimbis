@@ -12,6 +12,7 @@ use super::ParsedCmd;
 use super::RoutingPolicy;
 use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
+use crate::coordinator::CoordinatedCommandPlan;
 use crate::coordinator::ScatterRequest;
 use crate::coordinator::hash_key;
 
@@ -37,22 +38,22 @@ impl Cmd for MSetCmd {
 		&self.meta
 	}
 
-	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
+	fn plan(&self, args: &[Bytes], worker_count: usize) -> Result<CommandPlan, RespValue> {
 		if !args.len().is_multiple_of(2) {
-			return Err(RespValue::error("ERR syntax error"));
+			return Err(RespValue::error(
+				"ERR wrong number of arguments for 'mset' command",
+			));
 		}
 
-		let mut grouped: HashMap<u64, Vec<Bytes>> = HashMap::new();
+		let mut grouped: HashMap<usize, Vec<Bytes>> = HashMap::new();
 		for pair in args.chunks_exact(2) {
 			let key = pair[0].clone();
 			let value = pair[1].clone();
-			grouped
-				.entry(hash_key(&key))
-				.or_default()
-				.extend([key, value]);
+			let worker_idx = (hash_key(&key) as usize) % worker_count;
+			grouped.entry(worker_idx).or_default().extend([key, value]);
 		}
 
-		Ok(CommandPlan::Scatter {
+		Ok(CoordinatedCommandPlan::Scatter {
 			subrequests: grouped
 				.into_values()
 				.map(|args| ScatterRequest {
@@ -65,12 +66,13 @@ impl Cmd for MSetCmd {
 				})
 				.collect(),
 			aggregate: AggregatePolicy::AllOk,
-		})
+		}
+		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		if !args.len().is_multiple_of(2) {
-			return RespValue::error("ERR syntax error");
+			return RespValue::error("ERR wrong number of arguments for 'mset' command");
 		}
 
 		match storage.mset(pairs_from_args(args)).await {

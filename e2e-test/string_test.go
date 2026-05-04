@@ -106,7 +106,7 @@ var _ = Describe("Get/Set Commands", func() {
 	})
 
 	It("should MSET and MGET values across workers", func() {
-		key1, key2 := findCrossShardKeys(2)
+		key1, key2 := findCrossShardKeys(util.WorkerThreads)
 		missing := "mget_missing_key"
 		Expect(rdb.Del(ctx, key1, key2, missing).Err()).To(Succeed())
 
@@ -119,7 +119,7 @@ var _ = Describe("Get/Set Commands", func() {
 	})
 
 	It("should MSETNX all-or-none across workers", func() {
-		key1, key2 := findCrossShardKeys(2)
+		key1, key2 := findCrossShardKeys(util.WorkerThreads)
 		Expect(rdb.Del(ctx, key1, key2).Err()).To(Succeed())
 
 		written, err := rdb.MSetNX(ctx, key1, "v1", key2, "v2").Result()

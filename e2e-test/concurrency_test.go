@@ -188,7 +188,7 @@ var _ = Describe("Concurrency Tests", func() {
 	})
 
 	It("should keep multi-key DEL/EXISTS consistent under concurrent mixed commands", func() {
-		key1, key2 := findCrossShardKeys(2)
+		key1, key2 := findCrossShardKeys(util.WorkerThreads)
 		Expect(client.Set(ctx, key1, "seed1", 0).Err()).NotTo(HaveOccurred())
 		Expect(client.Set(ctx, key2, "seed2", 0).Err()).NotTo(HaveOccurred())
 
@@ -341,7 +341,7 @@ var _ = Describe("Concurrency Tests", func() {
 	})
 
 	It("should allow only one concurrent MSETNX winner for the same keys", func() {
-		key1, key2 := findCrossShardKeys(2)
+		key1, key2 := findCrossShardKeys(util.WorkerThreads)
 		Expect(client.Del(ctx, key1, key2).Err()).NotTo(HaveOccurred())
 
 		const numGoroutines = 40

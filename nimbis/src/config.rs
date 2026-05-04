@@ -88,6 +88,9 @@ pub enum ConfigError {
 	#[error("trace_report_interval_ms must be greater than 0")]
 	InvalidTraceReportInterval,
 
+	#[error("worker_threads must be greater than 0")]
+	InvalidWorkerThreads,
+
 	#[error("Invalid environment variable {key}: {value}")]
 	InvalidEnvVar { key: String, value: String },
 
@@ -184,6 +187,10 @@ impl ServerConfig {
 
 		if self.trace_report_interval_ms == 0 {
 			return Err(ConfigError::InvalidTraceReportInterval);
+		}
+
+		if self.worker_threads == 0 {
+			return Err(ConfigError::InvalidWorkerThreads);
 		}
 
 		Ok(())
@@ -667,6 +674,17 @@ worker_threads: 4
 	#[test]
 	fn test_default_trace_sampling_ratio() {
 		assert_eq!(ServerConfig::default().trace_sampling_ratio, 0.0001);
+	}
+
+	#[test]
+	fn test_worker_threads_must_be_positive() {
+		let config = ServerConfig {
+			worker_threads: 0,
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidWorkerThreads));
 	}
 
 	#[rstest]

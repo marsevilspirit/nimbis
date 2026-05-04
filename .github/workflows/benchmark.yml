@@ -144,10 +144,16 @@ jobs:
           echo "Nimbis (Main) started with PID $NIMBIS_PID"
           sleep 10 # Wait for server start
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on Main..."
-          N=100000 C=100 R=100000 D=512 P=1 OUTPUT_DIR=../benchmark_main_suites \
-            cargo run --manifest-path ../pr_branch/Cargo.toml --package xtask -- redis-benchmark --profile comparison \
-            > ../benchmark_main.txt
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 > ../benchmark_main.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 HGET bench:hash field1 >> ../benchmark_main.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 SREM bench:set:srem member:__rand_int__ >> ../benchmark_main.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 ZREM bench:zset:zrem member:__rand_int__ >> ../benchmark_main.txt || true
 
       - name: Build and Run Main with Pipeline
         working-directory: main_branch
@@ -158,10 +164,16 @@ jobs:
           echo "Nimbis (Main) started with PID $NIMBIS_PID"
           sleep 10 # Wait for server start
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on Main (Pipeline)..."
-          N=100000 C=100 R=100000 D=512 P=50 OUTPUT_DIR=../benchmark_main_pipeline_suites \
-            cargo run --manifest-path ../pr_branch/Cargo.toml --package xtask -- redis-benchmark --profile comparison \
-            > ../benchmark_main_pipeline.txt
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 -P 50 > ../benchmark_main_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 HGET bench:hash field1 >> ../benchmark_main_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 SREM bench:set:srem member:__rand_int__ >> ../benchmark_main_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 ZREM bench:zset:zrem member:__rand_int__ >> ../benchmark_main_pipeline.txt || true
 
       - name: Build and Run PR
         working-directory: pr_branch

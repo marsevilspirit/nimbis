@@ -10,6 +10,7 @@ use super::ParsedCmd;
 use super::RoutingPolicy;
 use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
+use crate::coordinator::CoordinatedCommandPlan;
 use crate::coordinator::ScatterRequest;
 
 pub struct DelCmd {
@@ -34,8 +35,8 @@ impl Cmd for DelCmd {
 		&self.meta
 	}
 
-	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
-		Ok(CommandPlan::Scatter {
+	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
+		Ok(CoordinatedCommandPlan::Scatter {
 			subrequests: args
 				.iter()
 				.map(|key| ScatterRequest {
@@ -48,7 +49,8 @@ impl Cmd for DelCmd {
 				})
 				.collect(),
 			aggregate: AggregatePolicy::IntegerSum,
-		})
+		}
+		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {

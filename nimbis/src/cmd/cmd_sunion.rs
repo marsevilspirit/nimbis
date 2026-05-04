@@ -10,6 +10,7 @@ use super::ParsedCmd;
 use super::RoutingPolicy;
 use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
+use crate::coordinator::CoordinatedCommandPlan;
 use crate::coordinator::ScatterRequest;
 
 pub struct SunionCmd {
@@ -34,11 +35,12 @@ impl Cmd for SunionCmd {
 		&self.meta
 	}
 
-	fn plan(&self, args: &[Bytes]) -> Result<CommandPlan, RespValue> {
-		Ok(CommandPlan::Scatter {
+	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
+		Ok(CoordinatedCommandPlan::Scatter {
 			subrequests: set_member_subrequests(args),
 			aggregate: AggregatePolicy::SetUnion,
-		})
+		}
+		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {

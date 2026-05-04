@@ -100,7 +100,7 @@ var _ = Describe("Set Commands", func() {
 	})
 
 	It("should support SUNION, SINTER, and SDIFF across workers", func() {
-		key1, key2 := findCrossShardKeys(2)
+		key1, key2 := findCrossShardKeys(util.WorkerThreads)
 		Expect(rdb.Del(ctx, key1, key2).Err()).To(Succeed())
 
 		_, err := rdb.SAdd(ctx, key1, "a", "b", "c").Result()

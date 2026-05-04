@@ -16,13 +16,14 @@ Core types in `nimbis/src/cmd/mod.rs`:
 - `ParsedCmd`
 - `CmdTable`
 
-`Cmd::execute` performs arity validation first, then calls `do_cmd` on a worker.
+`Cmd::execute` performs arity validation first, then calls `do_cmd` with the
+storage selected by the dispatcher or worker execution path.
 The dispatcher validates arity, asks the command for a `CommandPlan`, and passes
 that plan to the multi-key coordinator.
 
 Routing policy remains coarse command metadata:
 
-- `Local`: routes to worker `0` (current behavior for local commands)
+- `Local`: executes inline in the `CommandDispatcher` for the client session
 - `SingleKey`: default plan hashes `args[0]` and routes to one worker
 - `MultiKey`: command must explicitly return a scatter or locked multi-key plan
 - `Broadcast`: fan-out to all workers and aggregate
