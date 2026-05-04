@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use chrono::Utc;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::Ttl;
 use slatedb::config::WriteOptions;
@@ -39,21 +40,67 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn mset(&self, pairs: Vec<(Bytes, Bytes)>) -> Result<(), StorageError> {
-		for (key, value) in pairs {
-			self.set(key, value).await?;
+		if pairs.is_empty() {
+			return Ok(());
 		}
+
+		let mut batch = WriteBatch::new();
+		let put_opts = PutOptions::default();
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+
+		for (key, value) in pairs {
+			batch.put_with_options(
+				StringKey::new(key).encode(),
+				StringValue::new(value).encode(),
+				&put_opts,
+			);
+		}
+
+		self.string_db
+			.write_with_options(batch, &write_opts)
+			.await?;
 		Ok(())
 	}
 
 	#[fastrace::trace]
 	pub async fn msetnx(&self, pairs: Vec<(Bytes, Bytes)>) -> Result<bool, StorageError> {
-		for (key, _) in &pairs {
-			if self.exists(key.clone()).await? {
+		if pairs.is_empty() {
+			return Ok(true);
+		}
+
+		let encoded_pairs: Vec<_> = pairs
+			.into_iter()
+			.map(|(key, value)| {
+				(
+					StringKey::new(key).encode(),
+					StringValue::new(value).encode(),
+				)
+			})
+			.collect();
+
+		for (encoded_key, _) in &encoded_pairs {
+			if let Some(kv) = self.string_db.get_key_value(encoded_key.clone()).await?
+				&& !is_expired(kv.expire_ts)
+			{
 				return Ok(false);
 			}
 		}
 
-		self.mset(pairs).await?;
+		let mut batch = WriteBatch::new();
+		let put_opts = PutOptions::default();
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+
+		for (key, value) in encoded_pairs {
+			batch.put_with_options(key, value, &put_opts);
+		}
+
+		self.string_db
+			.write_with_options(batch, &write_opts)
+			.await?;
 		Ok(true)
 	}
 
@@ -315,6 +362,26 @@ mod tests {
 		);
 		assert_eq!(
 			storage.get(Bytes::from("mset:k2")).await.unwrap(),
+			Some(Bytes::from("v2"))
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_mset_duplicate_key_last_wins() {
+		let (storage, path) = get_storage().await;
+
+		storage
+			.mset(vec![
+				(Bytes::from("mset:dup"), Bytes::from("v1")),
+				(Bytes::from("mset:dup"), Bytes::from("v2")),
+			])
+			.await
+			.unwrap();
+
+		assert_eq!(
+			storage.get(Bytes::from("mset:dup")).await.unwrap(),
 			Some(Bytes::from("v2"))
 		);
 
