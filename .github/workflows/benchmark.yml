@@ -149,8 +149,6 @@ jobs:
             cargo run --manifest-path ../pr_branch/Cargo.toml --package xtask -- redis-benchmark --profile comparison \
             > ../benchmark_main.txt
 
-          kill $NIMBIS_PID >/dev/null 2>&1 || true
-
       - name: Build and Run Main with Pipeline
         working-directory: main_branch
         run: |
@@ -164,8 +162,6 @@ jobs:
           N=100000 C=100 R=100000 D=512 P=50 OUTPUT_DIR=../benchmark_main_pipeline_suites \
             cargo run --manifest-path ../pr_branch/Cargo.toml --package xtask -- redis-benchmark --profile comparison \
             > ../benchmark_main_pipeline.txt
-
-          kill $NIMBIS_PID >/dev/null 2>&1 || true
 
       - name: Build and Run PR
         working-directory: pr_branch
@@ -182,8 +178,6 @@ jobs:
             cargo xtask redis-benchmark --profile comparison \
             > ../benchmark_pr.txt
 
-          kill $NIMBIS_PID >/dev/null 2>&1 || true
-
       - name: Build and Run PR with Pipeline
         working-directory: pr_branch
         run: |
@@ -197,8 +191,6 @@ jobs:
           N=100000 C=100 R=100000 D=512 P=50 OUTPUT_DIR=../benchmark_pr_pipeline_suites \
             cargo xtask redis-benchmark --profile comparison \
             > ../benchmark_pr_pipeline.txt
-
-          kill $NIMBIS_PID >/dev/null 2>&1 || true
 
       - name: Compare Results
         id: compare
