@@ -6,17 +6,17 @@ use crate::lock_manager::KeyLockManager;
 
 #[derive(Debug)]
 pub struct GlobalContext {
-    pub client_sessions: Arc<ClientSessions>,
-    pub key_locks: Arc<KeyLockManager>,
+	pub client_sessions: Arc<ClientSessions>,
+	pub key_locks: Arc<KeyLockManager>,
 }
 
 impl GlobalContext {
-    pub fn new(client_sessions: Arc<ClientSessions>) -> Self {
-        Self {
-            client_sessions,
-            key_locks: Arc::new(KeyLockManager::default()),
-        }
-    }
+	pub fn new(client_sessions: Arc<ClientSessions>) -> Self {
+		Self {
+			client_sessions,
+			key_locks: Arc::new(KeyLockManager::default()),
+		}
+	}
 }
 
 pub static GCTX: OnceLock<GlobalContext> = OnceLock::new();

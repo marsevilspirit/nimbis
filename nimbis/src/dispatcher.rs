@@ -164,6 +164,7 @@ mod tests {
 	use std::collections::HashMap;
 	use std::env;
 	use std::sync::Arc;
+	use std::time::Duration;
 	use std::time::SystemTime;
 	use std::time::UNIX_EPOCH;
 
@@ -173,9 +174,11 @@ mod tests {
 	use tokio::sync::mpsc;
 
 	use super::CommandDispatcher;
+	use crate::client::ClientSessions;
 	use crate::cmd::CmdContext;
 	use crate::cmd::CmdTable;
 	use crate::cmd::ParsedCmd;
+	use crate::context::init_global_context;
 	use crate::worker::CmdRequest;
 	use crate::worker::WorkerMessage;
 
@@ -196,6 +199,7 @@ mod tests {
 		CommandDispatcher,
 		HashMap<usize, mpsc::UnboundedReceiver<WorkerMessage>>,
 	) {
+		init_global_context(Arc::new(ClientSessions::new()));
 		let mut peers = HashMap::new();
 		let mut receivers = HashMap::new();
 		for idx in 0..2_usize {
@@ -295,29 +299,43 @@ mod tests {
 			name: "MSET".to_string(),
 			args: expected_args.clone(),
 		});
-		dispatcher
-			.dispatch_batches()
-			.await
-			.expect("dispatch batches");
 
-		let mut total_reqs = 0usize;
+		let msg = tokio::time::timeout(
+			Duration::from_millis(100),
+			receivers
+				.get_mut(&expected_worker)
+				.expect("receiver for expected worker should exist")
+				.recv(),
+		)
+		.await
+		.expect("locked MSET should reach expected worker")
+		.expect("worker message should exist");
+		let mut batch = take_batch(msg);
+		assert_eq!(batch.len(), 1);
+		assert_eq!(batch[0].cmd_name, "MSET");
+		assert_eq!(batch[0].args.as_slice(), expected_args.as_slice());
+		batch
+			.pop()
+			.expect("mset request")
+			.resp_tx
+			.send(RespValue::simple_string("OK"))
+			.expect("send mset response");
+
 		for idx in 0..2usize {
-			let rx = receivers
-				.get_mut(&idx)
-				.expect("receiver for worker should exist");
-			if let Ok(msg) = rx.try_recv() {
-				let batch = take_batch(msg);
-				total_reqs += batch.len();
-				if idx == expected_worker {
-					assert_eq!(batch.len(), 1);
-					assert_eq!(batch[0].cmd_name, "MSET");
-					assert_eq!(batch[0].args.as_slice(), expected_args.as_slice());
-				} else {
-					assert!(batch.is_empty());
-				}
+			if idx != expected_worker {
+				let rx = receivers
+					.get_mut(&idx)
+					.expect("receiver for worker should exist");
+				assert!(rx.try_recv().is_err());
 			}
 		}
-		assert_eq!(total_reqs, 1);
+
+		let response = dispatcher
+			.ordered_responses
+			.remove(0)
+			.await
+			.expect("locked MSET response");
+		assert_eq!(response, RespValue::simple_string("OK"));
 	}
 
 	#[tokio::test]

@@ -380,4 +380,38 @@ var _ = Describe("Concurrency Tests", func() {
 		Expect(values[0]).NotTo(BeNil())
 		Expect(values[1]).NotTo(BeNil())
 	})
+
+	It("should keep concurrent cross-shard MSET writes as complete batches", func() {
+		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+		Expect(client.Del(ctx, key1, key2).Err()).NotTo(HaveOccurred())
+
+		const numGoroutines = 50
+		const numIterations = 40
+
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				defer GinkgoRecover()
+
+				localClient := util.NewClient()
+				defer localClient.Close()
+
+				for j := 0; j < numIterations; j++ {
+					value := fmt.Sprintf("mset-batch-%d-%d", id, j)
+					Expect(localClient.MSet(ctx, key1, value, key2, value).Err()).NotTo(HaveOccurred())
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		values, err := client.MGet(ctx, key1, key2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(values[0]).NotTo(BeNil())
+		Expect(values[1]).NotTo(BeNil())
+		Expect(values[0]).To(Equal(values[1]), "MSET should not leave cross-shard keys from different batches")
+	})
 })

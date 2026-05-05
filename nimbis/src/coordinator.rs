@@ -75,6 +75,7 @@ pub enum AggregatePolicy {
 
 #[derive(Debug, Clone)]
 pub enum LockedExecution {
+	MSet { pairs: Vec<(Bytes, Bytes)> },
 	MSetNx { pairs: Vec<(Bytes, Bytes)> },
 }
 
@@ -201,8 +202,30 @@ async fn execute_locked(
 	execution: LockedExecution,
 ) -> RespValue {
 	match execution {
+		LockedExecution::MSet { pairs } => execute_locked_mset(peers, ctx, pairs).await,
 		LockedExecution::MSetNx { pairs } => execute_locked_msetnx(peers, ctx, pairs).await,
 	}
+}
+
+async fn execute_locked_mset(
+	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+	ctx: CmdContext,
+	pairs: Vec<(Bytes, Bytes)>,
+) -> RespValue {
+	let grouped = group_pairs_by_worker(peers, pairs);
+	let mut write_rxs = Vec::with_capacity(grouped.len());
+	for (worker_idx, args) in grouped {
+		let request = ParsedCmd {
+			name: "MSET".to_string(),
+			args,
+		};
+		write_rxs.push((
+			None,
+			send_worker_request_rx(peers, worker_idx, request, ctx),
+		));
+	}
+
+	aggregate_responses(write_rxs, AggregatePolicy::AllOk).await
 }
 
 async fn execute_locked_msetnx(
@@ -235,20 +258,7 @@ async fn execute_locked_msetnx(
 		}
 	}
 
-	let grouped = group_pairs_by_worker(peers, pairs);
-	let mut write_rxs = Vec::with_capacity(grouped.len());
-	for (worker_idx, args) in grouped {
-		let request = ParsedCmd {
-			name: "MSET".to_string(),
-			args,
-		};
-		write_rxs.push((
-			None,
-			send_worker_request_rx(peers, worker_idx, request, ctx),
-		));
-	}
-
-	match aggregate_responses(write_rxs, AggregatePolicy::AllOk).await {
+	match execute_locked_mset(peers, ctx, pairs).await {
 		RespValue::SimpleString(ok) if ok == b"OK".as_slice() => RespValue::Integer(1),
 		err @ RespValue::Error(_) => err,
 		other => RespValue::error(format!(

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use nimbis_resp::RespValue;
@@ -8,13 +6,10 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::ParsedCmd;
 use super::RoutingPolicy;
-use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
 use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::ScatterRequest;
-use crate::coordinator::hash_key;
+use crate::coordinator::LockedExecution;
 
 pub struct MSetCmd {
 	meta: CmdMeta,
@@ -38,34 +33,18 @@ impl Cmd for MSetCmd {
 		&self.meta
 	}
 
-	fn plan(&self, args: &[Bytes], worker_count: usize) -> Result<CommandPlan, RespValue> {
+	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
 		if !args.len().is_multiple_of(2) {
 			return Err(RespValue::error(
 				"ERR wrong number of arguments for 'mset' command",
 			));
 		}
 
-		let mut grouped: HashMap<usize, Vec<Bytes>> = HashMap::new();
-		for pair in args.chunks_exact(2) {
-			let key = pair[0].clone();
-			let value = pair[1].clone();
-			let worker_idx = (hash_key(&key) as usize) % worker_count;
-			grouped.entry(worker_idx).or_default().extend([key, value]);
-		}
-
-		Ok(CoordinatedCommandPlan::Scatter {
-			subrequests: grouped
-				.into_values()
-				.map(|args| ScatterRequest {
-					route_key: args[0].clone(),
-					request: ParsedCmd {
-						name: self.meta.name.clone(),
-						args,
-					},
-					output_index: None,
-				})
-				.collect(),
-			aggregate: AggregatePolicy::AllOk,
+		let pairs = pairs_from_args(args);
+		let keys = pairs.iter().map(|(key, _)| key.clone()).collect();
+		Ok(CoordinatedCommandPlan::LockedMultiKey {
+			keys,
+			execution: LockedExecution::MSet { pairs },
 		}
 		.into())
 	}
@@ -86,4 +65,48 @@ pub(super) fn pairs_from_args(args: &[Bytes]) -> Vec<(Bytes, Bytes)> {
 	args.chunks_exact(2)
 		.map(|pair| (pair[0].clone(), pair[1].clone()))
 		.collect()
+}
+
+#[cfg(test)]
+mod tests {
+	use bytes::Bytes;
+
+	use super::MSetCmd;
+	use crate::cmd::Cmd;
+	use crate::coordinator::CommandPlan;
+	use crate::coordinator::CoordinatedCommandPlan;
+	use crate::coordinator::LockedExecution;
+
+	#[test]
+	fn mset_plan_uses_locked_multi_key_execution() {
+		let cmd = MSetCmd::default();
+		let args = vec![
+			Bytes::from_static(b"k1"),
+			Bytes::from_static(b"v1"),
+			Bytes::from_static(b"k2"),
+			Bytes::from_static(b"v2"),
+		];
+
+		let plan = cmd.plan(&args, 2).expect("mset plan");
+
+		match plan {
+			CommandPlan::Coordinated(CoordinatedCommandPlan::LockedMultiKey {
+				keys,
+				execution: LockedExecution::MSet { pairs },
+			}) => {
+				assert_eq!(
+					keys,
+					vec![Bytes::from_static(b"k1"), Bytes::from_static(b"k2")]
+				);
+				assert_eq!(
+					pairs,
+					vec![
+						(Bytes::from_static(b"k1"), Bytes::from_static(b"v1")),
+						(Bytes::from_static(b"k2"), Bytes::from_static(b"v2")),
+					]
+				);
+			}
+			other => panic!("unexpected MSET plan: {:?}", other),
+		}
+	}
 }

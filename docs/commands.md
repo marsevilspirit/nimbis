@@ -142,9 +142,9 @@ When adding new commands or options, update both `nimbis/src/cmd/table.rs` and t
   shard-local integer responses.
 - `MGET key [key ...]` uses scatter-gather and preserves the input key order in
   the final array.
-- `MSET key value [key value ...]` scatters shard-local writes and returns `OK`
-  after all shards acknowledge. It does not provide cross-shard rollback.
+- `MSET key value [key value ...]` uses the multi-key lock coordinator, groups
+  writes by shard, and returns `OK` after all shards acknowledge.
 - `MSETNX key value [key value ...]` uses the multi-key lock coordinator to keep
-  concurrent `MSETNX` operations all-or-none across shards.
+  concurrent `MSETNX` and locked `MSET` operations ordered across shards.
 - `SUNION`, `SINTER`, and `SDIFF` scatter `SMEMBERS` subrequests and aggregate
   the returned sets.
