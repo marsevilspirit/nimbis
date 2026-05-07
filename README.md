@@ -76,46 +76,20 @@ Available recipes:
     test        # Run unit tests
 ```
 
-Default configuration path is `config/config.toml`. Legacy `conf/config.toml` is still supported as a fallback.
+### Pre-commit Hooks
 
-Redis protocol benchmarks are documented in [Redis Benchmark](docs/redis-benchmark.md).
-
-### Object Store Configuration
-
-Nimbis stores data through the `object_store` crate. Local development uses a file-backed object store by default:
-
-```toml
-object_store_url = "file:nimbis_store"
-```
-
-For an in-memory object store (mainly for short-lived tests), no extra options are required:
-
-```toml
-object_store_url = "memory:///nimbis/dev"
-```
-
-S3-compatible services such as MinIO use the same setting plus object store options:
-
-```toml
-object_store_url = "s3://nimbis/dev"
-
-[object_store_options]
-aws_region = "us-east-1"
-aws_endpoint = "http://127.0.0.1:9000"
-aws_access_key_id = "minioadmin"
-aws_secret_access_key = "minioadmin"
-aws_virtual_hosted_style_request = "false"
-aws_allow_http = "true"
-```
-
-The same MinIO setup can be provided via environment variables:
+Hook configuration lives in `prek.toml`, the TOML configuration file discovered by `prek`.
+The configured local hook runs `just check` without passing filenames, so it validates the
+same workspace checks developers run manually.
 
 ```bash
-NIMBIS_OBJECT_STORE_URL=s3://nimbis/dev
-NIMBIS_OBJECT_STORE_OPTION_AWS_REGION=us-east-1
-NIMBIS_OBJECT_STORE_OPTION_AWS_ENDPOINT=http://127.0.0.1:9000
-NIMBIS_OBJECT_STORE_OPTION_AWS_ACCESS_KEY_ID=minioadmin
-NIMBIS_OBJECT_STORE_OPTION_AWS_SECRET_ACCESS_KEY=minioadmin
-NIMBIS_OBJECT_STORE_OPTION_AWS_VIRTUAL_HOSTED_STYLE_REQUEST=false
-NIMBIS_OBJECT_STORE_OPTION_AWS_ALLOW_HTTP=true
+# Install the hook runner and Git hook shim.
+cargo install --locked prek
+prek install
+
+# Verify the configuration and execute the configured hook on the whole repository.
+prek run --all-files
 ```
+
+For a quick config-only smoke test, run `prek list`; this confirms that `prek.toml` is
+discoverable and that the `just-check` hook is registered without executing `just check`.
