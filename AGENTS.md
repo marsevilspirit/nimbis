@@ -60,8 +60,7 @@ tooling.
 
 # Constraints
 
-- Nimbis is in early development; do not preserve backward compatibility unless
-  a change explicitly requires it.
+- Nimbis is in early development; prioritize clean design over backward compatibility.
 - Preserve Redis protocol compatibility unless a change explicitly updates the
   supported behavior.
 - Preserve object-storage persistence semantics.
