@@ -75,4 +75,20 @@ Available recipes:
     test        # Run unit tests
 ```
 
-Default configuration path is `config/config.toml`. For detailed configuration options, please refer to [Configuration](docs/config_toml.md).
+### Pre-commit Hooks
+
+Hook configuration lives in `prek.toml`, the TOML configuration file discovered by `prek`.
+The configured local hook runs `just check` without passing filenames, so it validates the
+same workspace checks developers run manually.
+
+```bash
+# Install the hook runner and Git hook shim.
+cargo install --locked prek
+prek install
+
+# Verify the configuration and execute the configured hook on the whole repository.
+prek run --all-files
+```
+
+For a quick config-only smoke test, run `prek list`; this confirms that `prek.toml` is
+discoverable and that the `just-check` hook is registered without executing `just check`.
