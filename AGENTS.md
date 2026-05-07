@@ -60,11 +60,12 @@ tooling.
 
 # Constraints
 
+- Nimbis is in early development; prioritize clean design over backward compatibility.
 - Preserve Redis protocol compatibility unless a change explicitly updates the
   supported behavior.
 - Preserve object-storage persistence semantics.
 - Avoid broad refactors that are unrelated to the requested change.
-- Keep configuration defaults and documented paths compatible.
+- Keep configuration defaults and documented paths intentional and documented.
 - Treat storage, protocol parsing, and telemetry lifecycle changes as
   high-care areas.
 
