@@ -75,4 +75,4 @@ Available recipes:
     test        # Run unit tests
 ```
 
-Default configuration path is `config/config.toml`. For detailed configuration options, please refer to [Object Store Configuration](docs/config_yaml.md).
+Default configuration path is `config/config.toml`. For detailed configuration options, please refer to [Configuration](docs/config_toml.md).
