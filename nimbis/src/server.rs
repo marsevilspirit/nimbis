@@ -88,7 +88,7 @@ impl Server {
 
 	#[trace]
 	pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-		let addr = format!("{}:{}", &server_config!(host), server_config!(port));
+		let addr = format!("{}:{}", server_config!(host), server_config!(port));
 		let listener = TcpListener::bind(&addr).await?;
 		info!("Nimbis server listening on {}", addr);
 
