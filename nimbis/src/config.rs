@@ -356,7 +356,7 @@ fn read_non_empty_env(key: &str) -> Option<String> {
 
 fn resolve_default_config_path_from_base(base: &Path) -> Option<PathBuf> {
 	let path = base.join("config").join("config.toml");
-	path.exists().then_some(path)
+	path.is_file().then_some(path)
 }
 
 fn resolve_config_path(explicit: Option<&Path>, base: &Path) -> Option<PathBuf> {
