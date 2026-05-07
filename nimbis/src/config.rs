@@ -355,10 +355,8 @@ fn read_non_empty_env(key: &str) -> Option<String> {
 }
 
 fn resolve_default_config_path_from_base(base: &Path) -> Option<PathBuf> {
-	["config/config.toml", "conf/config.toml"]
-		.into_iter()
-		.map(|p| base.join(p))
-		.find(|p| p.exists())
+	let path = base.join("config/config.toml");
+	path.exists().then_some(path)
 }
 
 fn resolve_config_path(explicit: Option<&Path>, base: &Path) -> Option<PathBuf> {
@@ -820,28 +818,14 @@ log_level = "nimbis=verbose"
 	}
 
 	#[test]
-	fn test_default_config_prefers_config_dir() {
+	fn test_default_config_uses_config_dir() {
 		let dir = tempfile::tempdir().unwrap();
-		let preferred_dir = dir.path().join("config");
-		let legacy_dir = dir.path().join("conf");
-		std::fs::create_dir_all(&preferred_dir).unwrap();
-		std::fs::create_dir_all(&legacy_dir).unwrap();
-		std::fs::write(preferred_dir.join("config.toml"), "host = \"127.0.0.2\"").unwrap();
-		std::fs::write(legacy_dir.join("config.toml"), "host = \"127.0.0.3\"").unwrap();
+		let config_dir = dir.path().join("config");
+		std::fs::create_dir_all(&config_dir).unwrap();
+		std::fs::write(config_dir.join("config.toml"), "host = \"127.0.0.2\"").unwrap();
 
 		let path = resolve_default_config_path_from_base(dir.path()).unwrap();
-		assert_eq!(path, preferred_dir.join("config.toml"));
-	}
-
-	#[test]
-	fn test_default_config_falls_back_to_legacy_conf_dir() {
-		let dir = tempfile::tempdir().unwrap();
-		let legacy_dir = dir.path().join("conf");
-		std::fs::create_dir_all(&legacy_dir).unwrap();
-		std::fs::write(legacy_dir.join("config.toml"), "host = \"127.0.0.3\"").unwrap();
-
-		let path = resolve_default_config_path_from_base(dir.path()).unwrap();
-		assert_eq!(path, legacy_dir.join("config.toml"));
+		assert_eq!(path, config_dir.join("config.toml"));
 	}
 
 	#[test]

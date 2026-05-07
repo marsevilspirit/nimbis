@@ -75,7 +75,7 @@ Available recipes:
     test        # Run unit tests
 ```
 
-Default configuration path is `config/config.toml`. Legacy `conf/config.toml` is still supported as a fallback.
+Default configuration path is `config/config.toml`.
 
 ### Object Store Configuration
 
