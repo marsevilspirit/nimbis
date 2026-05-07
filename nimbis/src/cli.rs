@@ -7,7 +7,7 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
 	/// Configuration file path (TOML, JSON, or YAML).
-	/// Defaults to config/config.toml if present.
+	/// If not provided, nimbis only checks `config/config.toml`, if present.
 	#[arg(short, long, value_hint = clap::ValueHint::FilePath)]
 	pub config: Option<PathBuf>,
 

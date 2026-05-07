@@ -1,6 +1,6 @@
 # Nimbis Configuration Guide
 
-Nimbis uses a central configuration file. By default, it looks for `config/config.toml` (with a fallback to `conf/config.toml`). A full template is provided in `config/config_template.toml`.
+Nimbis uses a central configuration file. By default, it looks for `config/config.toml`. A full template is provided in `config/config_template.toml`.
 
 Below is a breakdown of all available configurations.
 
