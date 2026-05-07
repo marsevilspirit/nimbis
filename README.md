@@ -92,5 +92,3 @@ prek run --all-files
 
 For a quick config-only smoke test, run `prek list`; this confirms that `prek.toml` is
 discoverable and that the `just-check` hook is registered without executing `just check`.
-
-Default configuration path is `config/config.toml`. For detailed configuration options, please refer to [Configuration](docs/config_toml.md).
