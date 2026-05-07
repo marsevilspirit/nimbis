@@ -26,8 +26,8 @@ use crate::worker::WorkerMessage;
 pub struct CommandDispatcher {
 	peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
 	cmd_table: Arc<CmdTable>,
-	storage: Arc<Storage>,
 	ctx: CmdContext,
+	local_tx: mpsc::UnboundedSender<(ParsedCmd, oneshot::Sender<RespValue>)>,
 	batches: HashMap<usize, Vec<CmdRequest>>,
 	ordered_responses: Vec<oneshot::Receiver<RespValue>>,
 }
@@ -39,11 +39,29 @@ impl CommandDispatcher {
 		storage: Arc<Storage>,
 		ctx: CmdContext,
 	) -> Self {
+		let (local_tx, mut local_rx) =
+			mpsc::unbounded_channel::<(ParsedCmd, oneshot::Sender<RespValue>)>();
+		let cmd_table_clone = cmd_table.clone();
+		let storage_clone = storage.clone();
+
+		tokio::spawn(async move {
+			while let Some((cmd, tx)) = local_rx.recv().await {
+				let response = match cmd_table_clone.get_cmd(&cmd.name) {
+					Some(cmd_def) => cmd_def.execute(&storage_clone, &cmd.args, &ctx).await,
+					None => RespValue::error(format!(
+						"ERR unknown command '{}'",
+						cmd.name.to_lowercase()
+					)),
+				};
+				tx.send(response).ok();
+			}
+		});
+
 		Self {
 			peers,
 			cmd_table,
-			storage,
 			ctx,
+			local_tx,
 			batches: HashMap::new(),
 			ordered_responses: Vec::new(),
 		}
@@ -85,20 +103,7 @@ impl CommandDispatcher {
 	fn execute_local(&mut self, request: ParsedCmd) {
 		let (tx, rx) = oneshot::channel();
 		self.ordered_responses.push(rx);
-
-		let cmd_table = self.cmd_table.clone();
-		let storage = self.storage.clone();
-		let ctx = self.ctx;
-		tokio::spawn(async move {
-			let response = match cmd_table.get_cmd(&request.name) {
-				Some(cmd) => cmd.execute(&storage, &request.args, &ctx).await,
-				None => RespValue::error(format!(
-					"ERR unknown command '{}'",
-					request.name.to_lowercase()
-				)),
-			};
-			tx.send(response).ok();
-		});
+		self.local_tx.send((request, tx)).ok();
 	}
 
 	#[cfg(test)]
