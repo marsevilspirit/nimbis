@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use crate::client::ClientSessions;
-use crate::lock_manager::KeyLockManager;
+use crate::key_lock_manager::KeyLockManager;
 
 #[derive(Debug)]
 pub struct GlobalContext {
