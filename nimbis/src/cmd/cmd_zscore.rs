@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 pub struct ZScoreCmd {
 	meta: CmdMeta,
@@ -20,7 +19,6 @@ impl Default for ZScoreCmd {
 			meta: CmdMeta {
 				name: "ZSCORE".to_string(),
 				arity: 3, // ZSCORE key member
-				routing: RoutingPolicy::SingleKey,
 				key_spec: KeySpec::First,
 				kind: CommandKind::Read,
 			},

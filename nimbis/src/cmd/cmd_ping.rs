@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 /// PING command implementation
 pub struct PingCmd {
@@ -21,7 +20,6 @@ impl Default for PingCmd {
 			meta: CmdMeta {
 				name: "PING".to_string(),
 				arity: -1, // Allow 0 or 1 argument
-				routing: RoutingPolicy::Local,
 				key_spec: KeySpec::None,
 				kind: CommandKind::Local,
 			},

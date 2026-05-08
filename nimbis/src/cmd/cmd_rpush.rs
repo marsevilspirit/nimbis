@@ -8,7 +8,6 @@ use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
 use crate::cmd::CommandKind;
 use crate::cmd::KeySpec;
-use crate::cmd::RoutingPolicy;
 
 pub struct RPushCmd {
 	meta: CmdMeta,
@@ -20,7 +19,6 @@ impl Default for RPushCmd {
 			meta: CmdMeta {
 				name: "RPUSH".to_string(),
 				arity: -3, // RPUSH key element [element ...]
-				routing: RoutingPolicy::SingleKey,
 				key_spec: KeySpec::First,
 				kind: CommandKind::Write,
 			},

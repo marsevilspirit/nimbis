@@ -9,7 +9,6 @@ use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
 use super::ParsedCmd;
-use super::RoutingPolicy;
 use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
 use crate::coordinator::CoordinatedCommandPlan;
@@ -25,7 +24,6 @@ impl Default for ExistsCmd {
 			meta: CmdMeta {
 				name: "EXISTS".to_string(),
 				arity: -2,
-				routing: RoutingPolicy::MultiKey,
 				key_spec: KeySpec::All,
 				kind: CommandKind::Read,
 			},

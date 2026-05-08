@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 pub struct HGetCmd {
 	meta: CmdMeta,
@@ -20,7 +19,6 @@ impl Default for HGetCmd {
 			meta: CmdMeta {
 				name: "HGET".to_string(),
 				arity: 3, // HGET key field
-				routing: RoutingPolicy::SingleKey,
 				key_spec: KeySpec::First,
 				kind: CommandKind::Read,
 			},

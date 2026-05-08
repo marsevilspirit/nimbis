@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 use super::cmd_sunion::set_member_subrequests;
 use crate::coordinator::AggregatePolicy;
 use crate::coordinator::CommandPlan;
@@ -24,7 +23,6 @@ impl Default for SdiffCmd {
 			meta: CmdMeta {
 				name: "SDIFF".to_string(),
 				arity: -2,
-				routing: RoutingPolicy::MultiKey,
 				key_spec: KeySpec::All,
 				kind: CommandKind::Read,
 			},

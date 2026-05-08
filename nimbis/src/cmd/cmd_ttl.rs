@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 #[derive(Debug, Clone)]
 pub struct TtlCmd {
@@ -21,7 +20,6 @@ impl Default for TtlCmd {
 			meta: CmdMeta {
 				name: "TTL".to_string(),
 				arity: 2, // TTL key
-				routing: RoutingPolicy::SingleKey,
 				key_spec: KeySpec::First,
 				kind: CommandKind::Read,
 			},

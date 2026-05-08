@@ -7,16 +7,6 @@ use crate::coordinator::CommandPlan;
 use crate::coordinator::CoordinatedCommandPlan;
 use crate::coordinator::hash_key;
 
-/// Command metadata containing immutable information about a command
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RoutingPolicy {
-	#[default]
-	Local,
-	SingleKey,
-	MultiKey,
-	Broadcast,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandKind {
 	Read,
@@ -44,7 +34,6 @@ pub enum KeySpec {
 pub struct CmdMeta {
 	pub name: String,
 	pub arity: i16,
-	pub routing: RoutingPolicy,
 	pub key_spec: KeySpec,
 	pub kind: CommandKind,
 }
@@ -121,33 +110,16 @@ pub trait Cmd: Send + Sync {
 	/// Get command metadata
 	fn meta(&self) -> &CmdMeta;
 
-	fn routing(&self) -> &RoutingPolicy {
-		&self.meta().routing
-	}
-
 	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
 		let request = ParsedCmd {
 			name: self.meta().name.clone(),
 			args: args.to_vec(),
 		};
 
-		match self.routing() {
-			RoutingPolicy::Local => Ok(CommandPlan::Local { request }),
-			RoutingPolicy::SingleKey => {
-				let Some(key) = self.meta().keys(args)?.into_iter().next() else {
-					return Err(RespValue::error(format!(
-						"ERR wrong number of arguments for '{}' command",
-						self.meta().name.to_lowercase()
-					)));
-				};
-				Ok(CoordinatedCommandPlan::SingleKey {
-					key: key.clone(),
-					request,
-				}
-				.into())
-			}
-			RoutingPolicy::Broadcast => Ok(CoordinatedCommandPlan::Broadcast { request }.into()),
-			RoutingPolicy::MultiKey if self.meta().is_write() => {
+		match self.meta().kind {
+			CommandKind::Local => Ok(CommandPlan::Local { request }),
+			CommandKind::Admin => Ok(CoordinatedCommandPlan::Broadcast { request }.into()),
+			CommandKind::Read | CommandKind::Write => {
 				let keys = self.meta().keys(args)?;
 				let Some(first_key) = keys.first().cloned() else {
 					return Err(RespValue::error(format!(
@@ -156,11 +128,11 @@ pub trait Cmd: Send + Sync {
 					)));
 				};
 
-				let first_worker = worker_for_key(&first_key, _worker_count);
-				if keys
-					.iter()
-					.any(|key| worker_for_key(key, _worker_count) != first_worker)
-				{
+				if self.meta().is_write()
+					&& keys.iter().any(|key| {
+						worker_for_key(key, _worker_count)
+							!= worker_for_key(&first_key, _worker_count)
+					}) {
 					return Err(RespValue::error(
 						"ERR cross-shard write command is not supported",
 					));
@@ -172,10 +144,6 @@ pub trait Cmd: Send + Sync {
 				}
 				.into())
 			}
-			RoutingPolicy::MultiKey => Err(RespValue::error(format!(
-				"ERR command '{}' does not support multi-key routing yet",
-				self.meta().name.to_lowercase()
-			))),
 		}
 	}
 
@@ -241,13 +209,11 @@ mod tests {
 	use super::CmdMeta;
 	use super::CommandKind;
 	use super::KeySpec;
-	use super::RoutingPolicy;
 
 	fn meta(key_spec: KeySpec) -> CmdMeta {
 		CmdMeta {
 			name: "TEST".to_string(),
 			arity: -1,
-			routing: RoutingPolicy::SingleKey,
 			key_spec,
 			kind: CommandKind::Read,
 		}

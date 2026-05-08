@@ -8,7 +8,6 @@ use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
 use crate::cmd::CommandKind;
 use crate::cmd::KeySpec;
-use crate::cmd::RoutingPolicy;
 use crate::cmd::utils;
 
 pub struct LPopCmd {
@@ -21,7 +20,6 @@ impl Default for LPopCmd {
 			meta: CmdMeta {
 				name: "LPOP".to_string(),
 				arity: -2, // LPOP key [count]
-				routing: RoutingPolicy::SingleKey,
 				key_spec: KeySpec::First,
 				kind: CommandKind::Write,
 			},

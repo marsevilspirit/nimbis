@@ -8,8 +8,9 @@ Command implementation lives in `nimbis/src/cmd/`.
 
 Core types in `nimbis/src/cmd/mod.rs`:
 
-- `CmdMeta { name, arity, routing }`
-- `RoutingPolicy { Local, SingleKey, MultiKey, Broadcast }`
+- `CmdMeta { name, arity, key_spec, kind }`
+- `CommandKind { Read, Write, Admin, Local }`
+- `KeySpec { None, First, All, Step, Positions }`
 - `CmdContext { client_id }`
 - `Cmd` trait (`meta`, `plan`, `do_cmd`, `execute`)
 - `CommandPlan` and multi-key aggregation types in `nimbis/src/coordinator.rs`
@@ -21,12 +22,13 @@ storage selected by the dispatcher or worker execution path.
 The dispatcher validates arity, asks the command for a `CommandPlan`, and passes
 that plan to the multi-key coordinator.
 
-Routing policy remains coarse command metadata:
+Command metadata is the routing source of truth:
 
-- `Local`: executes inline in the `CommandDispatcher` for the client session
-- `SingleKey`: default plan hashes `args[0]` and routes to one worker
-- `MultiKey`: command must explicitly return a scatter or locked multi-key plan
-- `Broadcast`: fan-out to all workers and aggregate
+- `CommandKind::Local`: executes inline in the `CommandDispatcher` for the client session
+- `CommandKind::Admin`: broadcasts to all workers
+- `CommandKind::Read`: hashes extracted keys and defaults to one worker; multi-key reads can override `plan` for scatter-gather
+- `CommandKind::Write`: hashes extracted keys, rejects cross-shard writes by default, and is locked by key in the worker execution path
+- `KeySpec` defines how keys are extracted from command arguments before routing or locking
 
 ## Arity Rules
 

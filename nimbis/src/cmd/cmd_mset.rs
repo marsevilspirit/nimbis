@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 pub struct MSetCmd {
 	meta: CmdMeta,
@@ -20,7 +19,6 @@ impl Default for MSetCmd {
 			meta: CmdMeta {
 				name: "MSET".to_string(),
 				arity: -3,
-				routing: RoutingPolicy::MultiKey,
 				key_spec: KeySpec::Step { first: 0, step: 2 },
 				kind: CommandKind::Write,
 			},

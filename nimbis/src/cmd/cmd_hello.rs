@@ -10,7 +10,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 /// HELLO command implementation
 pub struct HelloCmd {
@@ -23,7 +22,6 @@ impl Default for HelloCmd {
 			meta: CmdMeta {
 				name: "HELLO".to_string(),
 				arity: -1, // HELLO [protover]
-				routing: RoutingPolicy::Local,
 				key_spec: KeySpec::None,
 				kind: CommandKind::Local,
 			},

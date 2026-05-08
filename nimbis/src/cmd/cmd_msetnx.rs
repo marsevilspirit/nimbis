@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 use super::cmd_mset::pairs_from_args;
 
 pub struct MSetNxCmd {
@@ -21,7 +20,6 @@ impl Default for MSetNxCmd {
 			meta: CmdMeta {
 				name: "MSETNX".to_string(),
 				arity: -3,
-				routing: RoutingPolicy::MultiKey,
 				key_spec: KeySpec::Step { first: 0, step: 2 },
 				kind: CommandKind::Write,
 			},

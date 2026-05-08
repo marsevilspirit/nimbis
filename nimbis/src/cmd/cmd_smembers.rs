@@ -8,7 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::RoutingPolicy;
 
 pub struct SmembersCmd {
 	meta: CmdMeta,
@@ -20,7 +19,6 @@ impl Default for SmembersCmd {
 			meta: CmdMeta {
 				name: "SMEMBERS".to_string(),
 				arity: 2,
-				routing: RoutingPolicy::SingleKey,
 				key_spec: KeySpec::First,
 				kind: CommandKind::Read,
 			},
