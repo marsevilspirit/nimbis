@@ -78,8 +78,8 @@ var _ = Describe("CONFIG Commands", func() {
 			// host, port, object_store_url, object_store_options, save, appendonly,
 			// log_level, log_output, log_rotation, trace_enabled, trace_endpoint,
 			// trace_sampling_ratio, trace_protocol, trace_export_timeout_seconds,
-			// trace_report_interval_ms, worker_threads
-			Expect(result).To(HaveLen(16))
+			// trace_report_interval_ms, worker_threads, worker_runtime_threads
+			Expect(result).To(HaveLen(17))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
 			Expect(result).To(HaveKey("object_store_url"))
@@ -101,6 +101,11 @@ var _ = Describe("CONFIG Commands", func() {
 			workerThreadsInt, convErr := strconv.Atoi(workerThreads)
 			Expect(convErr).NotTo(HaveOccurred())
 			Expect(workerThreadsInt).To(BeNumerically(">", 0))
+			workerRuntimeThreads, ok := result["worker_runtime_threads"]
+			Expect(ok).To(BeTrue())
+			workerRuntimeThreadsInt, convErr := strconv.Atoi(workerRuntimeThreads)
+			Expect(convErr).NotTo(HaveOccurred())
+			Expect(workerRuntimeThreadsInt).To(BeNumerically(">", 0))
 		})
 
 		It("should match fields with prefix wildcard", func() {
