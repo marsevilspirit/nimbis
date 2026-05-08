@@ -35,6 +35,21 @@ fn find_cross_shard_keys(worker_count: usize) -> (String, String) {
 	panic!("failed to find cross-shard keys");
 }
 
+fn find_same_shard_keys(worker_count: usize) -> (String, String) {
+	let mut seen_by_worker: HashMap<usize, String> = HashMap::new();
+	for i in 0..2000usize {
+		let key = format!("it:route:same:key:{}", i);
+		let worker = (hash_key(key.as_bytes()) as usize) % worker_count;
+		if let Some(existing) = seen_by_worker.get(&worker)
+			&& existing != &key
+		{
+			return (existing.clone(), key);
+		}
+		seen_by_worker.entry(worker).or_insert(key);
+	}
+	panic!("failed to find same-shard keys");
+}
+
 fn sorted(mut values: Vec<String>) -> Vec<String> {
 	values.sort();
 	values
@@ -137,7 +152,12 @@ fn test_mget_mset_across_shards() {
 	let mut client = server.get_client();
 	let (key1, key2) = find_cross_shard_keys(2);
 
-	assert_eq!(client.mset(&[(&key1, "v1"), (&key2, "v2")]), "OK");
+	assert_eq!(
+		resp_error(client.execute(&["MSET", &key1, "v1", &key2, "v2"])),
+		"ERR cross-shard write command is not supported"
+	);
+	assert_eq!(client.set(&key1, "v1"), "OK");
+	assert_eq!(client.set(&key2, "v2"), "OK");
 	assert_eq!(client.get(&key1), "v1");
 	assert_eq!(client.get(&key2), "v2");
 	assert_eq!(
@@ -153,11 +173,33 @@ fn test_msetnx_across_shards_all_or_none() {
 	let mut client = server.get_client();
 	let (key1, key2) = find_cross_shard_keys(2);
 
-	assert_eq!(client.msetnx(&[(&key1, "v1"), (&key2, "v2")]), 1);
+	assert_eq!(
+		resp_error(client.execute(&["MSETNX", &key1, "v1", &key2, "v2"])),
+		"ERR cross-shard write command is not supported"
+	);
+	assert_eq!(client.msetnx(&[(&key1, "v1")]), 1);
+	assert_eq!(client.msetnx(&[(&key2, "v2")]), 1);
 	assert_eq!(client.mget(&[&key1, &key2]), vec!["v1", "v2"]);
 
-	assert_eq!(client.msetnx(&[(&key1, "new1"), (&key2, "new2")]), 0);
+	assert_eq!(client.msetnx(&[(&key1, "new1")]), 0);
+	assert_eq!(client.msetnx(&[(&key2, "new2")]), 0);
 	assert_eq!(client.mget(&[&key1, &key2]), vec!["v1", "v2"]);
+}
+
+#[test]
+#[serial]
+fn test_same_shard_mset_and_msetnx() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let (key1, key2) = find_same_shard_keys(2);
+
+	assert_eq!(client.mset(&[(&key1, "v1"), (&key2, "v2")]), "OK");
+	assert_eq!(client.mget(&[&key1, &key2]), vec!["v1", "v2"]);
+
+	assert_eq!(client.del(&[&key1, &key2]), 2);
+	assert_eq!(client.msetnx(&[(&key1, "nx1"), (&key2, "nx2")]), 1);
+	assert_eq!(client.msetnx(&[(&key1, "new1"), (&key2, "new2")]), 0);
+	assert_eq!(client.mget(&[&key1, &key2]), vec!["nx1", "nx2"]);
 }
 
 #[test]

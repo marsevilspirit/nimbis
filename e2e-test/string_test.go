@@ -105,8 +105,8 @@ var _ = Describe("Get/Set Commands", func() {
 		Expect(val).To(Equal("Hello World"))
 	})
 
-	It("should MSET and MGET values across workers", func() {
-		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+	It("should MSET and MGET values on the same worker", func() {
+		key1, key2 := findSameShardKeys(util.WorkerThreads)
 		missing := "mget_missing_key"
 		Expect(rdb.Del(ctx, key1, key2, missing).Err()).To(Succeed())
 
@@ -118,8 +118,20 @@ var _ = Describe("Get/Set Commands", func() {
 		Expect(values).To(Equal([]interface{}{"v1", "v2", nil}))
 	})
 
-	It("should MSETNX all-or-none across workers", func() {
+	It("should reject cross-worker MSET and MSETNX writes", func() {
 		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+		Expect(rdb.Del(ctx, key1, key2).Err()).To(Succeed())
+
+		err := rdb.MSet(ctx, key1, "v1", key2, "v2").Err()
+		Expect(err).To(MatchError(ContainSubstring("ERR cross-shard write command is not supported")))
+
+		written, err := rdb.MSetNX(ctx, key1, "v1", key2, "v2").Result()
+		Expect(written).To(BeFalse())
+		Expect(err).To(MatchError(ContainSubstring("ERR cross-shard write command is not supported")))
+	})
+
+	It("should MSETNX all-or-none on the same worker", func() {
+		key1, key2 := findSameShardKeys(util.WorkerThreads)
 		Expect(rdb.Del(ctx, key1, key2).Err()).To(Succeed())
 
 		written, err := rdb.MSetNX(ctx, key1, "v1", key2, "v2").Result()

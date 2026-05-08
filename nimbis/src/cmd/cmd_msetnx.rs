@@ -6,11 +6,10 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 use super::cmd_mset::pairs_from_args;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::LockedExecution;
 
 pub struct MSetNxCmd {
 	meta: CmdMeta,
@@ -23,6 +22,8 @@ impl Default for MSetNxCmd {
 				name: "MSETNX".to_string(),
 				arity: -3,
 				routing: RoutingPolicy::MultiKey,
+				key_spec: KeySpec::Step { first: 0, step: 2 },
+				kind: CommandKind::Write,
 			},
 		}
 	}
@@ -32,22 +33,6 @@ impl Default for MSetNxCmd {
 impl Cmd for MSetNxCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
-	}
-
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		if !args.len().is_multiple_of(2) {
-			return Err(RespValue::error(
-				"ERR wrong number of arguments for 'msetnx' command",
-			));
-		}
-
-		let pairs = pairs_from_args(args);
-		let keys = pairs.iter().map(|(key, _)| key.clone()).collect();
-		Ok(CoordinatedCommandPlan::LockedMultiKey {
-			keys,
-			execution: LockedExecution::MSetNx { pairs },
-		}
-		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {

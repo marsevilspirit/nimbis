@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::ParsedCmd;
 use super::RoutingPolicy;
 use crate::coordinator::AggregatePolicy;
@@ -24,6 +26,8 @@ impl Default for ExistsCmd {
 				name: "EXISTS".to_string(),
 				arity: -2,
 				routing: RoutingPolicy::MultiKey,
+				key_spec: KeySpec::All,
+				kind: CommandKind::Read,
 			},
 		}
 	}
@@ -54,13 +58,14 @@ impl Cmd for ExistsCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		if let Some(key) = args.first() {
+		let mut count = 0;
+		for key in args {
 			match storage.exists(key.clone()).await {
-				Ok(exists) => RespValue::Integer(if exists { 1 } else { 0 }),
-				Err(e) => RespValue::Error(Bytes::from(e.to_string())),
+				Ok(true) => count += 1,
+				Ok(false) => {}
+				Err(e) => return RespValue::Error(Bytes::from(e.to_string())),
 			}
-		} else {
-			RespValue::Integer(0)
 		}
+		RespValue::Integer(count)
 	}
 }

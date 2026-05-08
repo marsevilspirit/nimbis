@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::ParsedCmd;
 use super::RoutingPolicy;
 use crate::coordinator::AggregatePolicy;
@@ -24,6 +26,8 @@ impl Default for SunionCmd {
 				name: "SUNION".to_string(),
 				arity: -2,
 				routing: RoutingPolicy::MultiKey,
+				key_spec: KeySpec::All,
+				kind: CommandKind::Read,
 			},
 		}
 	}

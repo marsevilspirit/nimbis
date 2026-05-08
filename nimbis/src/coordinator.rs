@@ -7,7 +7,6 @@ use nimbis_resp::RespValue;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use crate::GCTX;
 use crate::cmd::CmdContext;
 use crate::cmd::ParsedCmd;
 use crate::worker::CmdRequest;
@@ -44,10 +43,6 @@ pub enum CoordinatedCommandPlan {
 		subrequests: Vec<ScatterRequest>,
 		aggregate: AggregatePolicy,
 	},
-	LockedMultiKey {
-		keys: Vec<Bytes>,
-		execution: LockedExecution,
-	},
 }
 
 impl From<CoordinatedCommandPlan> for CommandPlan {
@@ -71,12 +66,6 @@ pub enum AggregatePolicy {
 	SetUnion,
 	SetIntersection,
 	SetDifference,
-}
-
-#[derive(Debug, Clone)]
-pub enum LockedExecution {
-	MSet { pairs: Vec<(Bytes, Bytes)> },
-	MSetNx { pairs: Vec<(Bytes, Bytes)> },
 }
 
 /// Executes command plans while leaving command semantics out of the
@@ -118,9 +107,6 @@ impl<'a> MultiKeyCoordinator<'a> {
 				subrequests,
 				aggregate,
 			} => self.scatter(subrequests, aggregate),
-			CoordinatedCommandPlan::LockedMultiKey { keys, execution } => {
-				self.locked(keys, execution);
-			}
 		}
 	}
 
@@ -181,151 +167,6 @@ impl<'a> MultiKeyCoordinator<'a> {
 				.ok();
 		});
 	}
-
-	fn locked(&mut self, keys: Vec<Bytes>, execution: LockedExecution) {
-		let (final_tx, final_rx) = oneshot::channel();
-		self.ordered_responses.push(final_rx);
-
-		let peers = self.peers.clone();
-		let ctx = self.ctx;
-		tokio::spawn(async move {
-			let _guard = GCTX!(key_locks).lock_keys(&keys).await;
-			let response = execute_locked(&peers, ctx, execution).await;
-			final_tx.send(response).ok();
-		});
-	}
-}
-
-async fn execute_locked(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	ctx: CmdContext,
-	execution: LockedExecution,
-) -> RespValue {
-	match execution {
-		LockedExecution::MSet { pairs } => execute_locked_mset(peers, ctx, pairs).await,
-		LockedExecution::MSetNx { pairs } => execute_locked_msetnx(peers, ctx, pairs).await,
-	}
-}
-
-async fn execute_locked_mset(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	ctx: CmdContext,
-	pairs: Vec<(Bytes, Bytes)>,
-) -> RespValue {
-	let grouped = group_pairs_by_worker(peers, pairs);
-	let mut write_rxs = Vec::with_capacity(grouped.len());
-	for (worker_idx, args) in grouped {
-		let request = ParsedCmd {
-			name: "MSET".to_string(),
-			args,
-		};
-		write_rxs.push((
-			None,
-			send_worker_request_rx(peers, worker_idx, request, ctx),
-		));
-	}
-
-	aggregate_responses(write_rxs, AggregatePolicy::AllOk).await
-}
-
-async fn execute_locked_msetnx(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	ctx: CmdContext,
-	pairs: Vec<(Bytes, Bytes)>,
-) -> RespValue {
-	let mut exists_rxs = Vec::with_capacity(pairs.len());
-	for (key, _) in &pairs {
-		let request = ParsedCmd {
-			name: "EXISTS".to_string(),
-			args: vec![key.clone()],
-		};
-		let worker_idx = worker_for_key(peers, key);
-		exists_rxs.push((
-			None,
-			send_worker_request_rx(peers, worker_idx, request, ctx),
-		));
-	}
-
-	match aggregate_responses(exists_rxs, AggregatePolicy::IntegerSum).await {
-		RespValue::Integer(0) => {}
-		RespValue::Integer(_) => return RespValue::Integer(0),
-		err @ RespValue::Error(_) => return err,
-		other => {
-			return RespValue::error(format!(
-				"ERR unexpected response in MSETNX existence check: {:?}",
-				other
-			));
-		}
-	}
-
-	match execute_locked_mset(peers, ctx, pairs).await {
-		RespValue::SimpleString(ok) if ok == b"OK".as_slice() => RespValue::Integer(1),
-		err @ RespValue::Error(_) => err,
-		other => RespValue::error(format!(
-			"ERR unexpected response in MSETNX write: {:?}",
-			other
-		)),
-	}
-}
-
-fn group_pairs_by_worker(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	pairs: Vec<(Bytes, Bytes)>,
-) -> HashMap<usize, Vec<Bytes>> {
-	let mut grouped = HashMap::new();
-	for (key, value) in pairs {
-		grouped
-			.entry(worker_for_key(peers, &key))
-			.or_insert_with(Vec::new)
-			.extend([key, value]);
-	}
-	grouped
-}
-
-fn worker_for_key(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	key: &[u8],
-) -> usize {
-	(hash_key(key) as usize) % peers.len()
-}
-
-fn send_worker_request_rx(
-	peers: &Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-	worker_idx: usize,
-	cmd: ParsedCmd,
-	ctx: CmdContext,
-) -> oneshot::Receiver<RespValue> {
-	let (resp_tx, resp_rx) = oneshot::channel();
-
-	match peers.get(&worker_idx) {
-		Some(sender) => {
-			let response_on_send_error =
-				RespValue::error(format!("ERR worker {} unavailable", worker_idx));
-			let req = CmdRequest {
-				cmd_name: cmd.name,
-				args: cmd.args,
-				ctx,
-				resp_tx,
-			};
-			if let Err(err) = sender.send(WorkerMessage::CmdBatch(vec![req])) {
-				match err.0 {
-					WorkerMessage::CmdBatch(mut batch) => {
-						if let Some(req) = batch.pop() {
-							req.resp_tx.send(response_on_send_error).ok();
-						}
-					}
-					WorkerMessage::NewConnection(_) => {}
-				}
-			}
-		}
-		None => {
-			let response_on_send_error =
-				RespValue::error(format!("ERR worker {} unavailable", worker_idx));
-			resp_tx.send(response_on_send_error).ok();
-		}
-	}
-
-	resp_rx
 }
 
 async fn aggregate_responses(

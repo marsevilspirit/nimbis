@@ -147,7 +147,7 @@ impl ClientConnection {
 								return Err(e.into());
 							}
 						};
-						self.dispatcher.dispatch(parsed_cmd);
+						self.dispatcher.dispatch(parsed_cmd).await?;
 					}
 					RespParseResult::Incomplete => {
 						break;

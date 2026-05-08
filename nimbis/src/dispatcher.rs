@@ -73,18 +73,21 @@ impl CommandDispatcher {
 	}
 
 	/// Core dispatch logic - builds command plans and delegates execution.
-	pub fn dispatch(&mut self, cmd: ParsedCmd) {
+	pub async fn dispatch(
+		&mut self,
+		cmd: ParsedCmd,
+	) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let Some(cmd_def) = self.cmd_table.get_cmd(&cmd.name) else {
 			self.push_immediate_response(RespValue::error(format!(
 				"ERR unknown command '{}'",
 				cmd.name.to_lowercase()
 			)));
-			return;
+			return Ok(());
 		};
 
 		if let Err(err) = cmd_def.meta().validate_arity(cmd.args.len() + 1) {
 			self.push_immediate_response(RespValue::error(err));
-			return;
+			return Ok(());
 		}
 
 		match cmd_def.plan(&cmd.args, self.peers.len()) {
@@ -98,6 +101,8 @@ impl CommandDispatcher {
 			.execute(plan),
 			Err(resp) => self.push_immediate_response(resp),
 		}
+
+		Ok(())
 	}
 
 	fn execute_local(&mut self, request: ParsedCmd) {
@@ -169,6 +174,8 @@ mod tests {
 	use std::collections::HashMap;
 	use std::env;
 	use std::sync::Arc;
+	use std::sync::atomic::AtomicU64;
+	use std::sync::atomic::Ordering;
 	use std::time::Duration;
 	use std::time::SystemTime;
 	use std::time::UNIX_EPOCH;
@@ -187,12 +194,15 @@ mod tests {
 	use crate::worker::CmdRequest;
 	use crate::worker::WorkerMessage;
 
+	static TEST_STORAGE_ID: AtomicU64 = AtomicU64::new(0);
+
 	async fn create_test_storage() -> Arc<Storage> {
 		let unique = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
 			.expect("system time before epoch")
 			.as_nanos();
-		let path = env::temp_dir().join(format!("nimbis-dispatcher-test-{unique}"));
+		let id = TEST_STORAGE_ID.fetch_add(1, Ordering::Relaxed);
+		let path = env::temp_dir().join(format!("nimbis-dispatcher-test-{unique}-{id}"));
 		Arc::new(
 			Storage::open(&path, Some(0))
 				.await
@@ -245,10 +255,13 @@ mod tests {
 		let key = Bytes::from_static(b"single:key");
 		let expected_worker = dispatcher.worker_for_key(&key);
 
-		dispatcher.dispatch(ParsedCmd {
-			name: "GET".to_string(),
-			args: vec![key],
-		});
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "GET".to_string(),
+				args: vec![key],
+			})
+			.await
+			.expect("dispatch");
 		dispatcher
 			.dispatch_batches()
 			.await
@@ -300,21 +313,25 @@ mod tests {
 			Bytes::from_static(b"v2"),
 		];
 
-		dispatcher.dispatch(ParsedCmd {
-			name: "MSET".to_string(),
-			args: expected_args.clone(),
-		});
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "MSET".to_string(),
+				args: expected_args.clone(),
+			})
+			.await
+			.expect("dispatch");
+		dispatcher
+			.dispatch_batches()
+			.await
+			.expect("dispatch batches");
 
-		let msg = tokio::time::timeout(
-			Duration::from_millis(100),
-			receivers
-				.get_mut(&expected_worker)
-				.expect("receiver for expected worker should exist")
-				.recv(),
-		)
-		.await
-		.expect("locked MSET should reach expected worker")
-		.expect("worker message should exist");
+		let rx = receivers
+			.get_mut(&expected_worker)
+			.expect("receiver for expected worker should exist");
+		let msg = tokio::time::timeout(Duration::from_millis(100), rx.recv())
+			.await
+			.expect("MSET should reach expected worker")
+			.expect("worker message should exist");
 		let mut batch = take_batch(msg);
 		assert_eq!(batch.len(), 1);
 		assert_eq!(batch[0].cmd_name, "MSET");
@@ -339,8 +356,88 @@ mod tests {
 			.ordered_responses
 			.remove(0)
 			.await
-			.expect("locked MSET response");
+			.expect("MSET response");
 		assert_eq!(response, RespValue::simple_string("OK"));
+	}
+
+	#[tokio::test]
+	async fn same_worker_mset_preserves_batch_order_after_single_key() {
+		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
+		let mut keys_by_worker: HashMap<usize, Vec<Bytes>> = HashMap::new();
+		for idx in 0..200usize {
+			let key = Bytes::from(format!("locked-order:{idx}"));
+			let worker = dispatcher.worker_for_key(&key);
+			let keys = keys_by_worker.entry(worker).or_default();
+			keys.push(key);
+			if keys.len() == 3 {
+				break;
+			}
+		}
+
+		let (expected_worker, keys) = keys_by_worker
+			.into_iter()
+			.find(|(_, keys)| keys.len() == 3)
+			.expect("find three keys on the same worker");
+		let pre_key = keys[0].clone();
+		let key1 = keys[1].clone();
+		let key2 = keys[2].clone();
+
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "SET".to_string(),
+				args: vec![pre_key.clone(), Bytes::from_static(b"pre")],
+			})
+			.await
+			.expect("dispatch queued set");
+
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "MSET".to_string(),
+				args: vec![
+					key1.clone(),
+					Bytes::from_static(b"v1"),
+					key2.clone(),
+					Bytes::from_static(b"v2"),
+				],
+			})
+			.await
+			.expect("dispatch mset");
+		dispatcher
+			.dispatch_batches()
+			.await
+			.expect("dispatch batches");
+
+		let rx = receivers
+			.get_mut(&expected_worker)
+			.expect("receiver for expected worker should exist");
+		let first_msg = tokio::time::timeout(Duration::from_millis(100), rx.recv())
+			.await
+			.expect("worker batch should arrive")
+			.expect("first worker message should exist");
+		let batch = take_batch(first_msg);
+		assert_eq!(batch.len(), 2);
+		assert_eq!(batch[0].cmd_name, "SET");
+		assert_eq!(batch[0].args[0], pre_key);
+		assert_eq!(batch[1].cmd_name, "MSET");
+
+		for req in batch {
+			req.resp_tx
+				.send(RespValue::simple_string("OK"))
+				.expect("send response");
+		}
+
+		let first_response = dispatcher
+			.ordered_responses
+			.remove(0)
+			.await
+			.expect("set response");
+		let second_response = dispatcher
+			.ordered_responses
+			.remove(0)
+			.await
+			.expect("mset response");
+		assert_eq!(first_response, RespValue::simple_string("OK"));
+		assert_eq!(second_response, RespValue::simple_string("OK"));
 	}
 
 	#[tokio::test]
@@ -352,10 +449,13 @@ mod tests {
 			Bytes::from_static(b"mk:c"),
 		];
 
-		dispatcher.dispatch(ParsedCmd {
-			name: "DEL".to_string(),
-			args: keys,
-		});
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "DEL".to_string(),
+				args: keys,
+			})
+			.await
+			.expect("dispatch");
 		assert_eq!(dispatcher.ordered_responses.len(), 1);
 		dispatcher
 			.dispatch_batches()
@@ -388,10 +488,13 @@ mod tests {
 		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 		let keys = vec![Bytes::from_static(b"err:a"), Bytes::from_static(b"err:b")];
 
-		dispatcher.dispatch(ParsedCmd {
-			name: "EXISTS".to_string(),
-			args: keys,
-		});
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "EXISTS".to_string(),
+				args: keys,
+			})
+			.await
+			.expect("dispatch");
 		dispatcher
 			.dispatch_batches()
 			.await
@@ -430,21 +533,30 @@ mod tests {
 	async fn response_order_preserved_with_multi_key_between_single_key() {
 		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 
-		dispatcher.dispatch(ParsedCmd {
-			name: "SET".to_string(),
-			args: vec![Bytes::from_static(b"order:k1"), Bytes::from_static(b"v1")],
-		});
-		dispatcher.dispatch(ParsedCmd {
-			name: "DEL".to_string(),
-			args: vec![
-				Bytes::from_static(b"order:k2"),
-				Bytes::from_static(b"order:k3"),
-			],
-		});
-		dispatcher.dispatch(ParsedCmd {
-			name: "GET".to_string(),
-			args: vec![Bytes::from_static(b"order:k4")],
-		});
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "SET".to_string(),
+				args: vec![Bytes::from_static(b"order:k1"), Bytes::from_static(b"v1")],
+			})
+			.await
+			.expect("dispatch");
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "DEL".to_string(),
+				args: vec![
+					Bytes::from_static(b"order:k2"),
+					Bytes::from_static(b"order:k3"),
+				],
+			})
+			.await
+			.expect("dispatch");
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "GET".to_string(),
+				args: vec![Bytes::from_static(b"order:k4")],
+			})
+			.await
+			.expect("dispatch");
 		assert_eq!(dispatcher.ordered_responses.len(), 3);
 		dispatcher
 			.dispatch_batches()
@@ -501,10 +613,13 @@ mod tests {
 	async fn local_command_does_not_enqueue_worker_batch() {
 		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
 
-		dispatcher.dispatch(ParsedCmd {
-			name: "PING".to_string(),
-			args: vec![],
-		});
+		dispatcher
+			.dispatch(ParsedCmd {
+				name: "PING".to_string(),
+				args: vec![],
+			})
+			.await
+			.expect("dispatch");
 		dispatcher
 			.dispatch_batches()
 			.await

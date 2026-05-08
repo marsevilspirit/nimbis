@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 
 pub struct ZRemCmd {
@@ -19,6 +21,8 @@ impl Default for ZRemCmd {
 				name: "ZREM".to_string(),
 				arity: -3, // ZREM key member [member ...]
 				routing: RoutingPolicy::SingleKey,
+				key_spec: KeySpec::First,
+				kind: CommandKind::Write,
 			},
 		}
 	}

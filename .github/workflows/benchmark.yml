@@ -47,9 +47,17 @@ jobs:
           echo "Warmup on Redis..."
           redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on Redis..."
           # Save to root workspace dir (which is parent of main_branch/pr_branch later)
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > benchmark_redis.txt || true
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 > benchmark_redis.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 HGET bench:hash field1 >> benchmark_redis.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 SREM bench:set:srem member:__rand_int__ >> benchmark_redis.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_redis.txt || true
           
           sudo systemctl stop redis-server
 
@@ -62,8 +70,16 @@ jobs:
           echo "Warmup on Redis (Pipeline)..."
           redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on Redis (Pipeline)..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_redis_pipeline.txt || true
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_redis_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 HGET bench:hash field1 >> benchmark_redis_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_redis_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_redis_pipeline.txt || true
           
           sudo systemctl stop redis-server
 
@@ -76,8 +92,16 @@ jobs:
           echo "Warmup on PikiwiDB ${PIKIWIDB_VERSION}..."
           redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on PikiwiDB ${PIKIWIDB_VERSION}..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > benchmark_pikiwidb.txt || true
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 > benchmark_pikiwidb.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 HGET bench:hash field1 >> benchmark_pikiwidb.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 SREM bench:set:srem member:__rand_int__ >> benchmark_pikiwidb.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb.txt || true
 
       - name: Run PikiwiDB Benchmark with Pipeline
         run: |
@@ -88,8 +112,16 @@ jobs:
           echo "Warmup on PikiwiDB ${PIKIWIDB_VERSION} (Pipeline)..."
           redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on PikiwiDB ${PIKIWIDB_VERSION} (Pipeline)..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_pikiwidb_pipeline.txt || true
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_pikiwidb_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 HGET bench:hash field1 >> benchmark_pikiwidb_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
 
       - name: Run Kvrocks Benchmark
         run: |
@@ -100,8 +132,16 @@ jobs:
           echo "Warmup on Kvrocks ${KVROCKS_RELEASE}..."
           redis-benchmark -q -t set,get -n 1000 -c 10 > /dev/null 2>&1 || true
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on Kvrocks ${KVROCKS_RELEASE}..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 > benchmark_kvrocks.txt || true
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 > benchmark_kvrocks.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 HGET bench:hash field1 >> benchmark_kvrocks.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks.txt || true
 
       - name: Run Kvrocks Benchmark with Pipeline
         run: |
@@ -112,8 +152,16 @@ jobs:
           echo "Warmup on Kvrocks ${KVROCKS_RELEASE} (Pipeline)..."
           redis-benchmark -q -t set,get -n 1000 -c 10 -P 50 > /dev/null 2>&1 || true
 
+          redis-cli FLUSHDB || true
+          redis-cli HSET bench:hash field1 value1 || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+
           echo "Running Benchmark on Kvrocks ${KVROCKS_RELEASE} (Pipeline)..."
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_kvrocks_pipeline.txt || true
+          redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 100000 -c 100 -r 100000 -d 512 -P 50 > benchmark_kvrocks_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 HGET bench:hash field1 >> benchmark_kvrocks_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
+          redis-benchmark -q -n 100000 -c 100 -r 100000 -d 512 -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
 
       - name: Checkout Main
         uses: actions/checkout@v6

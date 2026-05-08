@@ -91,6 +91,9 @@ pub enum ConfigError {
 	#[error("worker_threads must be greater than 0")]
 	InvalidWorkerThreads,
 
+	#[error("worker_runtime_threads must be greater than 0")]
+	InvalidWorkerRuntimeThreads,
+
 	#[error("Invalid environment variable {key}: {value}")]
 	InvalidEnvVar { key: String, value: String },
 
@@ -145,6 +148,8 @@ pub struct ServerConfig {
 	pub trace_report_interval_ms: u64,
 	#[online_config(immutable)]
 	pub worker_threads: usize,
+	#[online_config(immutable)]
+	pub worker_runtime_threads: usize,
 }
 
 impl ServerConfig {
@@ -193,6 +198,10 @@ impl ServerConfig {
 			return Err(ConfigError::InvalidWorkerThreads);
 		}
 
+		if self.worker_runtime_threads == 0 {
+			return Err(ConfigError::InvalidWorkerRuntimeThreads);
+		}
+
 		Ok(())
 	}
 }
@@ -216,6 +225,7 @@ impl Default for ServerConfig {
 			trace_export_timeout_seconds: 10,
 			trace_report_interval_ms: 1000,
 			worker_threads: num_cpus::get(),
+			worker_runtime_threads: 2,
 		}
 	}
 }
@@ -286,6 +296,9 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	}
 	if let Some(t) = args.worker_threads {
 		config.worker_threads = t;
+	}
+	if let Some(t) = args.worker_runtime_threads {
+		config.worker_runtime_threads = t;
 	}
 	apply_env_overrides(&mut config, std::env::vars());
 
@@ -477,6 +490,9 @@ mod tests {
 
 		let threads = server_config!(worker_threads);
 		assert_eq!(threads, num_cpus::get());
+
+		let runtime_threads = server_config!(worker_runtime_threads);
+		assert_eq!(runtime_threads, 2);
 	}
 
 	#[test]
@@ -496,6 +512,7 @@ log_rotation = "hourly"
 trace_enabled = true
 trace_endpoint = "http://localhost:4317"
 worker_threads = 4
+worker_runtime_threads = 3
 "#;
 		std::fs::write(&file_path, content).unwrap();
 
@@ -516,6 +533,7 @@ worker_threads = 4
 		assert_eq!(config.log_rotation, "hourly");
 		assert!(config.trace_enabled);
 		assert_eq!(config.worker_threads, 4);
+		assert_eq!(config.worker_runtime_threads, 3);
 	}
 
 	#[test]
@@ -537,7 +555,8 @@ worker_threads = 4
   "log_rotation": "hourly",
   "trace_enabled": true,
   "trace_endpoint": "http://localhost:4317",
-  "worker_threads": 4
+  "worker_threads": 4,
+  "worker_runtime_threads": 3
 }
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -558,6 +577,7 @@ worker_threads = 4
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
 		assert!(config.trace_enabled);
+		assert_eq!(config.worker_runtime_threads, 3);
 	}
 
 	#[test]
@@ -578,6 +598,7 @@ log_rotation: "hourly"
 trace_enabled: true
 trace_endpoint: "http://localhost:4317"
 worker_threads: 4
+worker_runtime_threads: 3
 "#;
 		std::fs::write(&file_path, content).unwrap();
 
@@ -597,6 +618,7 @@ worker_threads: 4
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
 		assert!(config.trace_enabled);
+		assert_eq!(config.worker_runtime_threads, 3);
 	}
 
 	#[test]
@@ -683,6 +705,17 @@ worker_threads: 4
 
 		let err = config.validate().unwrap_err();
 		assert!(matches!(err, ConfigError::InvalidWorkerThreads));
+	}
+
+	#[test]
+	fn test_worker_runtime_threads_must_be_positive() {
+		let config = ServerConfig {
+			worker_runtime_threads: 0,
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidWorkerRuntimeThreads));
 	}
 
 	#[rstest]

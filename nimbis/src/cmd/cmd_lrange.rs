@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
+use crate::cmd::CommandKind;
+use crate::cmd::KeySpec;
 use crate::cmd::RoutingPolicy;
 use crate::cmd::utils;
 
@@ -20,6 +22,8 @@ impl Default for LRangeCmd {
 				name: "LRANGE".to_string(),
 				arity: 4, // LRANGE key start stop
 				routing: RoutingPolicy::SingleKey,
+				key_spec: KeySpec::First,
+				kind: CommandKind::Read,
 			},
 		}
 	}

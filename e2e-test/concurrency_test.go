@@ -264,8 +264,7 @@ var _ = Describe("Concurrency Tests", func() {
 
 				for j := 0; j < numIterations; j++ {
 					prefix := fmt.Sprintf("mixed:%d:%d", id, j)
-					key1 := prefix + ":k1"
-					key2 := prefix + ":k2"
+					key1, key2 := findSameShardKeysWithPrefix(prefix+":kv", util.WorkerThreads)
 					missing := prefix + ":missing"
 					value1 := fmt.Sprintf("v1-%d-%d", id, j)
 					value2 := fmt.Sprintf("v2-%d-%d", id, j)
@@ -309,8 +308,10 @@ var _ = Describe("Concurrency Tests", func() {
 					Expect(diff).To(Equal([]string{"a"}))
 
 					group := (id + j) % msetnxGroups
-					lockKey1 := fmt.Sprintf("mixed:msetnx:%d:k1", group)
-					lockKey2 := fmt.Sprintf("mixed:msetnx:%d:k2", group)
+					lockKey1, lockKey2 := findSameShardKeysWithPrefix(
+						fmt.Sprintf("mixed:msetnx:%d", group),
+						util.WorkerThreads,
+					)
 					written, err := localClient.MSetNX(
 						ctx,
 						lockKey1, fmt.Sprintf("winner-%d-%d-a", id, j),
@@ -331,8 +332,10 @@ var _ = Describe("Concurrency Tests", func() {
 
 		for group, winnerCount := range winners {
 			Expect(winnerCount).To(Equal(1), fmt.Sprintf("MSETNX group %d should have exactly one winner", group))
-			lockKey1 := fmt.Sprintf("mixed:msetnx:%d:k1", group)
-			lockKey2 := fmt.Sprintf("mixed:msetnx:%d:k2", group)
+			lockKey1, lockKey2 := findSameShardKeysWithPrefix(
+				fmt.Sprintf("mixed:msetnx:%d", group),
+				util.WorkerThreads,
+			)
 			values, err := client.MGet(ctx, lockKey1, lockKey2).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(values[0]).NotTo(BeNil())
@@ -341,7 +344,7 @@ var _ = Describe("Concurrency Tests", func() {
 	})
 
 	It("should allow only one concurrent MSETNX winner for the same keys", func() {
-		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+		key1, key2 := findSameShardKeys(util.WorkerThreads)
 		Expect(client.Del(ctx, key1, key2).Err()).NotTo(HaveOccurred())
 
 		const numGoroutines = 40
@@ -381,8 +384,8 @@ var _ = Describe("Concurrency Tests", func() {
 		Expect(values[1]).NotTo(BeNil())
 	})
 
-	It("should keep concurrent cross-shard MSET writes as complete batches", func() {
-		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+	It("should keep concurrent same-shard MSET writes as complete batches", func() {
+		key1, key2 := findSameShardKeys(util.WorkerThreads)
 		Expect(client.Del(ctx, key1, key2).Err()).NotTo(HaveOccurred())
 
 		const numGoroutines = 50

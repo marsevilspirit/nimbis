@@ -8,6 +8,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 use crate::config::SERVER_CONF;
 use crate::config::ServerConfig;
@@ -30,6 +32,8 @@ impl Default for ConfigCmd {
 				name: "CONFIG".to_string(),
 				arity: -3,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 			sub_cmds,
 		}
@@ -74,6 +78,8 @@ impl Default for ConfigGetCmd {
 				name: "GET".to_string(),
 				arity: 2,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -138,6 +144,8 @@ impl Default for ConfigSetCmd {
 				name: "SET".to_string(),
 				arity: 3, // CONFIG SET key value
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}

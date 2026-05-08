@@ -46,6 +46,7 @@ impl MockNimbisServer {
 			trace_export_timeout_seconds: 10,
 			trace_report_interval_ms: 1000,
 			worker_threads: 2,
+			worker_runtime_threads: 2,
 		};
 
 		SERVER_CONF.init(config.clone());

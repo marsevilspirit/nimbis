@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 
 pub struct FlushDbCmd {
@@ -19,6 +21,8 @@ impl Default for FlushDbCmd {
 				name: "FLUSHDB".to_string(),
 				arity: 0,
 				routing: RoutingPolicy::Broadcast,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Admin,
 			},
 		}
 	}

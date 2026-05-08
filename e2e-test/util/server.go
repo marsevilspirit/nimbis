@@ -80,7 +80,13 @@ func StartServer() error {
 	dataPath := filepath.Join(projectRoot, "nimbis_store")
 	_ = os.RemoveAll(dataPath)
 
-	serverCmd = exec.Command(binPath, "--worker-threads", fmt.Sprint(WorkerThreads))
+	serverCmd = exec.Command(
+		binPath,
+		"--worker-threads",
+		fmt.Sprint(WorkerThreads),
+		"--worker-runtime-threads",
+		"2",
+	)
 	serverCmd.Dir = projectRoot // Resolve relative object_store_url values from the project root.
 	// Redirect stdout/stderr for debugging
 	serverCmd.Stdout = os.Stdout

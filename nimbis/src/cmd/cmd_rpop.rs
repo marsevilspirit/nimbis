@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
+use crate::cmd::CommandKind;
+use crate::cmd::KeySpec;
 use crate::cmd::RoutingPolicy;
 use crate::cmd::utils;
 
@@ -20,6 +22,8 @@ impl Default for RPopCmd {
 				name: "RPOP".to_string(),
 				arity: -2, // RPOP key [count]
 				routing: RoutingPolicy::SingleKey,
+				key_spec: KeySpec::First,
+				kind: CommandKind::Write,
 			},
 		}
 	}

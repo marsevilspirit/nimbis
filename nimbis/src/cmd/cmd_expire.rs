@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 
 #[derive(Debug, Clone)]
@@ -20,6 +22,8 @@ impl Default for ExpireCmd {
 				name: "EXPIRE".to_string(),
 				arity: 3, // EXPIRE key seconds
 				routing: RoutingPolicy::SingleKey,
+				key_spec: KeySpec::First,
+				kind: CommandKind::Write,
 			},
 		}
 	}

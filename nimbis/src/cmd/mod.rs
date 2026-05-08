@@ -5,6 +5,7 @@ use nimbis_storage::Storage;
 
 use crate::coordinator::CommandPlan;
 use crate::coordinator::CoordinatedCommandPlan;
+use crate::coordinator::hash_key;
 
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -16,12 +17,36 @@ pub enum RoutingPolicy {
 	Broadcast,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommandKind {
+	Read,
+	Write,
+	Admin,
+	#[default]
+	Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum KeySpec {
+	#[default]
+	None,
+	First,
+	All,
+	Step {
+		first: usize,
+		step: usize,
+	},
+	Positions(Vec<usize>),
+}
+
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Default)]
 pub struct CmdMeta {
 	pub name: String,
 	pub arity: i16,
 	pub routing: RoutingPolicy,
+	pub key_spec: KeySpec,
+	pub kind: CommandKind,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -55,6 +80,39 @@ impl CmdMeta {
 		// arity == 0 means any number of arguments is allowed
 		Ok(())
 	}
+
+	pub fn keys(&self, args: &[Bytes]) -> Result<Vec<Bytes>, RespValue> {
+		let keys = match &self.key_spec {
+			KeySpec::None => Vec::new(),
+			KeySpec::First => args.first().cloned().into_iter().collect(),
+			KeySpec::All => args.to_vec(),
+			KeySpec::Step { first, step } => {
+				if *step == 0 {
+					return Err(RespValue::error(format!(
+						"ERR invalid key spec for '{}' command",
+						self.name.to_lowercase()
+					)));
+				}
+				if args.len() < *first || !(args.len() - *first).is_multiple_of(*step) {
+					return Err(RespValue::error(format!(
+						"ERR wrong number of arguments for '{}' command",
+						self.name.to_lowercase()
+					)));
+				}
+				args.iter().skip(*first).step_by(*step).cloned().collect()
+			}
+			KeySpec::Positions(positions) => positions
+				.iter()
+				.filter_map(|idx| args.get(*idx).cloned())
+				.collect(),
+		};
+
+		Ok(keys)
+	}
+
+	pub fn is_write(&self) -> bool {
+		self.kind == CommandKind::Write
+	}
 }
 
 /// Command trait - all commands must implement this
@@ -76,7 +134,7 @@ pub trait Cmd: Send + Sync {
 		match self.routing() {
 			RoutingPolicy::Local => Ok(CommandPlan::Local { request }),
 			RoutingPolicy::SingleKey => {
-				let Some(key) = args.first() else {
+				let Some(key) = self.meta().keys(args)?.into_iter().next() else {
 					return Err(RespValue::error(format!(
 						"ERR wrong number of arguments for '{}' command",
 						self.meta().name.to_lowercase()
@@ -89,6 +147,31 @@ pub trait Cmd: Send + Sync {
 				.into())
 			}
 			RoutingPolicy::Broadcast => Ok(CoordinatedCommandPlan::Broadcast { request }.into()),
+			RoutingPolicy::MultiKey if self.meta().is_write() => {
+				let keys = self.meta().keys(args)?;
+				let Some(first_key) = keys.first().cloned() else {
+					return Err(RespValue::error(format!(
+						"ERR wrong number of arguments for '{}' command",
+						self.meta().name.to_lowercase()
+					)));
+				};
+
+				let first_worker = worker_for_key(&first_key, _worker_count);
+				if keys
+					.iter()
+					.any(|key| worker_for_key(key, _worker_count) != first_worker)
+				{
+					return Err(RespValue::error(
+						"ERR cross-shard write command is not supported",
+					));
+				}
+
+				Ok(CoordinatedCommandPlan::SingleKey {
+					key: first_key,
+					request,
+				}
+				.into())
+			}
 			RoutingPolicy::MultiKey => Err(RespValue::error(format!(
 				"ERR command '{}' does not support multi-key routing yet",
 				self.meta().name.to_lowercase()
@@ -106,6 +189,10 @@ pub trait Cmd: Send + Sync {
 
 		self.do_cmd(storage, args, ctx).await
 	}
+}
+
+fn worker_for_key(key: &[u8], worker_count: usize) -> usize {
+	(hash_key(key) as usize) % worker_count
 }
 
 /// Parsed command structure (renamed from Cmd to avoid conflict)
@@ -146,6 +233,76 @@ impl TryFrom<RespValue> for ParsedCmd {
 }
 
 pub mod utils;
+
+#[cfg(test)]
+mod tests {
+	use bytes::Bytes;
+
+	use super::CmdMeta;
+	use super::CommandKind;
+	use super::KeySpec;
+	use super::RoutingPolicy;
+
+	fn meta(key_spec: KeySpec) -> CmdMeta {
+		CmdMeta {
+			name: "TEST".to_string(),
+			arity: -1,
+			routing: RoutingPolicy::SingleKey,
+			key_spec,
+			kind: CommandKind::Read,
+		}
+	}
+
+	#[test]
+	fn cmd_meta_extracts_first_key() {
+		let args = [Bytes::from_static(b"k1"), Bytes::from_static(b"v1")];
+		assert_eq!(
+			meta(KeySpec::First).keys(&args).unwrap(),
+			vec![args[0].clone()]
+		);
+	}
+
+	#[test]
+	fn cmd_meta_extracts_all_keys() {
+		let args = [Bytes::from_static(b"k1"), Bytes::from_static(b"k2")];
+		assert_eq!(meta(KeySpec::All).keys(&args).unwrap(), args.to_vec());
+	}
+
+	#[test]
+	fn cmd_meta_extracts_step_keys() {
+		let args = [
+			Bytes::from_static(b"k1"),
+			Bytes::from_static(b"v1"),
+			Bytes::from_static(b"k2"),
+			Bytes::from_static(b"v2"),
+		];
+		assert_eq!(
+			meta(KeySpec::Step { first: 0, step: 2 })
+				.keys(&args)
+				.unwrap(),
+			vec![args[0].clone(), args[2].clone()]
+		);
+	}
+
+	#[test]
+	fn cmd_meta_extracts_position_keys() {
+		let args = [
+			Bytes::from_static(b"src"),
+			Bytes::from_static(b"dst"),
+			Bytes::from_static(b"extra"),
+		];
+		assert_eq!(
+			meta(KeySpec::Positions(vec![0, 1])).keys(&args).unwrap(),
+			vec![args[0].clone(), args[1].clone()]
+		);
+	}
+
+	#[test]
+	fn cmd_meta_extracts_no_keys() {
+		let args = [Bytes::from_static(b"k1")];
+		assert!(meta(KeySpec::None).keys(&args).unwrap().is_empty());
+	}
+}
 
 mod cmd_append;
 mod cmd_client;

@@ -6,10 +6,9 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::LockedExecution;
 
 pub struct MSetCmd {
 	meta: CmdMeta,
@@ -22,6 +21,8 @@ impl Default for MSetCmd {
 				name: "MSET".to_string(),
 				arity: -3,
 				routing: RoutingPolicy::MultiKey,
+				key_spec: KeySpec::Step { first: 0, step: 2 },
+				kind: CommandKind::Write,
 			},
 		}
 	}
@@ -31,22 +32,6 @@ impl Default for MSetCmd {
 impl Cmd for MSetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
-	}
-
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		if !args.len().is_multiple_of(2) {
-			return Err(RespValue::error(
-				"ERR wrong number of arguments for 'mset' command",
-			));
-		}
-
-		let pairs = pairs_from_args(args);
-		let keys = pairs.iter().map(|(key, _)| key.clone()).collect();
-		Ok(CoordinatedCommandPlan::LockedMultiKey {
-			keys,
-			execution: LockedExecution::MSet { pairs },
-		}
-		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
@@ -75,10 +60,9 @@ mod tests {
 	use crate::cmd::Cmd;
 	use crate::coordinator::CommandPlan;
 	use crate::coordinator::CoordinatedCommandPlan;
-	use crate::coordinator::LockedExecution;
 
 	#[test]
-	fn mset_plan_uses_locked_multi_key_execution() {
+	fn mset_plan_routes_same_worker_multi_key_write_to_owner() {
 		let cmd = MSetCmd::default();
 		let args = vec![
 			Bytes::from_static(b"k1"),
@@ -87,26 +71,27 @@ mod tests {
 			Bytes::from_static(b"v2"),
 		];
 
-		let plan = cmd.plan(&args, 2).expect("mset plan");
+		let plan = cmd.plan(&args, 1).expect("mset plan");
 
 		match plan {
-			CommandPlan::Coordinated(CoordinatedCommandPlan::LockedMultiKey {
-				keys,
-				execution: LockedExecution::MSet { pairs },
-			}) => {
-				assert_eq!(
-					keys,
-					vec![Bytes::from_static(b"k1"), Bytes::from_static(b"k2")]
-				);
-				assert_eq!(
-					pairs,
-					vec![
-						(Bytes::from_static(b"k1"), Bytes::from_static(b"v1")),
-						(Bytes::from_static(b"k2"), Bytes::from_static(b"v2")),
-					]
-				);
+			CommandPlan::Coordinated(CoordinatedCommandPlan::SingleKey { key, request }) => {
+				assert_eq!(key, Bytes::from_static(b"k1"));
+				assert_eq!(request.name, "MSET");
+				assert_eq!(request.args, args);
 			}
 			other => panic!("unexpected MSET plan: {:?}", other),
 		}
+	}
+
+	#[test]
+	fn mset_plan_rejects_odd_argument_count() {
+		let cmd = MSetCmd::default();
+		let args = vec![
+			Bytes::from_static(b"k1"),
+			Bytes::from_static(b"v1"),
+			Bytes::from_static(b"k2"),
+		];
+
+		assert!(cmd.plan(&args, 1).is_err());
 	}
 }

@@ -6,6 +6,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 
 pub struct SaddCmd {
@@ -19,6 +21,8 @@ impl Default for SaddCmd {
 				name: "SADD".to_string(),
 				arity: -3,
 				routing: RoutingPolicy::SingleKey,
+				key_spec: KeySpec::First,
+				kind: CommandKind::Write,
 			},
 		}
 	}

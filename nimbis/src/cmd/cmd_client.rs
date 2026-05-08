@@ -8,6 +8,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 use crate::GCTX;
 
@@ -31,6 +33,8 @@ impl Default for ClientCmd {
 				name: "CLIENT".to_string(),
 				arity: -2,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 			sub_cmds,
 		}
@@ -63,6 +67,8 @@ impl Default for ClientIdCmd {
 				name: "ID".to_string(),
 				arity: 1,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -90,6 +96,8 @@ impl Default for ClientSetNameCmd {
 				name: "SETNAME".to_string(),
 				arity: 2,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -121,6 +129,8 @@ impl Default for ClientGetNameCmd {
 				name: "GETNAME".to_string(),
 				arity: 1,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -151,6 +161,8 @@ impl Default for ClientListCmd {
 				name: "LIST".to_string(),
 				arity: 1,
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}

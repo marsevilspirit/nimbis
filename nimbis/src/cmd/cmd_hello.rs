@@ -8,6 +8,8 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::CommandKind;
+use super::KeySpec;
 use super::RoutingPolicy;
 
 /// HELLO command implementation
@@ -22,6 +24,8 @@ impl Default for HelloCmd {
 				name: "HELLO".to_string(),
 				arity: -1, // HELLO [protover]
 				routing: RoutingPolicy::Local,
+				key_spec: KeySpec::None,
+				kind: CommandKind::Local,
 			},
 		}
 	}
