@@ -56,11 +56,9 @@ mod tests {
 
 	use super::MSetCmd;
 	use crate::cmd::Cmd;
-	use crate::coordinator::CommandPlan;
-	use crate::coordinator::CoordinatedCommandPlan;
 
 	#[test]
-	fn mset_plan_routes_same_worker_multi_key_write_to_owner() {
+	fn mset_meta_extracts_pair_keys() {
 		let cmd = MSetCmd::default();
 		let args = vec![
 			Bytes::from_static(b"k1"),
@@ -69,20 +67,14 @@ mod tests {
 			Bytes::from_static(b"v2"),
 		];
 
-		let plan = cmd.plan(&args, 1).expect("mset plan");
-
-		match plan {
-			CommandPlan::Coordinated(CoordinatedCommandPlan::SingleKey { key, request }) => {
-				assert_eq!(key, Bytes::from_static(b"k1"));
-				assert_eq!(request.name, "MSET");
-				assert_eq!(request.args, args);
-			}
-			other => panic!("unexpected MSET plan: {:?}", other),
-		}
+		assert_eq!(
+			cmd.meta().keys(&args).expect("mset keys"),
+			vec![Bytes::from_static(b"k1"), Bytes::from_static(b"k2")]
+		);
 	}
 
 	#[test]
-	fn mset_plan_rejects_odd_argument_count() {
+	fn mset_meta_rejects_odd_argument_count() {
 		let cmd = MSetCmd::default();
 		let args = vec![
 			Bytes::from_static(b"k1"),
@@ -90,6 +82,6 @@ mod tests {
 			Bytes::from_static(b"k2"),
 		];
 
-		assert!(cmd.plan(&args, 1).is_err());
+		assert!(cmd.meta().keys(&args).is_err());
 	}
 }

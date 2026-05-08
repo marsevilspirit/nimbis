@@ -106,8 +106,8 @@ var _ = Describe("Get/Set Commands", func() {
 	})
 
 	It("should MSET and MGET values on the same worker", func() {
-		key1, key2 := findSameShardKeys(util.WorkerThreads)
-		missing := "mget_missing_key"
+		keys := findSameShardNKeysWithPrefix("e2e:string:mget", util.WorkerThreads, 3)
+		key1, key2, missing := keys[0], keys[1], keys[2]
 		Expect(rdb.Del(ctx, key1, key2, missing).Err()).To(Succeed())
 
 		err := rdb.MSet(ctx, key1, "v1", key2, "v2").Err()

@@ -67,22 +67,24 @@ var _ = Describe("DEL Commands", func() {
 		Expect(deleted).To(Equal(int64(0)), "Should delete 0 keys")
 	})
 
-	It("should support multi-key DEL and EXISTS across shards", func() {
-		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+	It("should support same-shard multi-key DEL and EXISTS", func() {
+		keys := findSameShardNKeysWithPrefix("e2e:delete:same", util.WorkerThreads, 5)
+		key1, key2 := keys[0], keys[1]
+		missing1, missing2, missing3 := keys[2], keys[3], keys[4]
 		Expect(rdb.Set(ctx, key1, "v1", 0).Err()).To(Succeed())
 		Expect(rdb.Set(ctx, key2, "v2", 0).Err()).To(Succeed())
 
-		exists := rdb.Exists(ctx, key1, key2, "missing").Val()
+		exists := rdb.Exists(ctx, key1, key2, missing1).Val()
 		Expect(exists).To(Equal(int64(2)))
 
 		deleted := rdb.Del(ctx, key1, key2).Val()
 		Expect(deleted).To(Equal(int64(2)))
 
-		deleted = rdb.Del(ctx, "missing1", "missing2").Val()
+		deleted = rdb.Del(ctx, missing1, missing2).Val()
 		Expect(deleted).To(Equal(int64(0)))
 
 		Expect(rdb.Set(ctx, key1, "v1", 0).Err()).To(Succeed())
-		deleted = rdb.Del(ctx, key1, "missing3").Val()
+		deleted = rdb.Del(ctx, key1, missing3).Val()
 		Expect(deleted).To(Equal(int64(1)))
 	})
 })

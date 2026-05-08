@@ -8,11 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::ParsedCmd;
-use crate::coordinator::AggregatePolicy;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::ScatterRequest;
 
 pub struct SunionCmd {
 	meta: CmdMeta,
@@ -37,14 +32,6 @@ impl Cmd for SunionCmd {
 		&self.meta
 	}
 
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		Ok(CoordinatedCommandPlan::Scatter {
-			subrequests: set_member_subrequests(args),
-			aggregate: AggregatePolicy::SetUnion,
-		}
-		.into())
-	}
-
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
 		let mut members = std::collections::HashSet::new();
 		for key in args {
@@ -57,18 +44,4 @@ impl Cmd for SunionCmd {
 		members.sort();
 		RespValue::Array(members.into_iter().map(RespValue::BulkString).collect())
 	}
-}
-
-pub(super) fn set_member_subrequests(args: &[Bytes]) -> Vec<ScatterRequest> {
-	args.iter()
-		.enumerate()
-		.map(|(idx, key)| ScatterRequest {
-			route_key: key.clone(),
-			request: ParsedCmd {
-				name: "SMEMBERS".to_string(),
-				args: vec![key.clone()],
-			},
-			output_index: Some(idx),
-		})
-		.collect()
 }

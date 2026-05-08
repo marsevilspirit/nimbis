@@ -188,7 +188,7 @@ var _ = Describe("Concurrency Tests", func() {
 	})
 
 	It("should keep multi-key DEL/EXISTS consistent under concurrent mixed commands", func() {
-		key1, key2 := findCrossShardKeys(util.WorkerThreads)
+		key1, key2 := findSameShardKeys(util.WorkerThreads)
 		Expect(client.Set(ctx, key1, "seed1", 0).Err()).NotTo(HaveOccurred())
 		Expect(client.Set(ctx, key2, "seed2", 0).Err()).NotTo(HaveOccurred())
 
@@ -214,7 +214,7 @@ var _ = Describe("Concurrency Tests", func() {
 					Expect(deletedCount).To(BeNumerically(">=", 0))
 					Expect(deletedCount).To(BeNumerically("<=", 2))
 
-					// Recreate keys to interleave write/read/delete across shards.
+					// Recreate keys to interleave write/read/delete on one shard.
 					if (id+j)%2 == 0 {
 						Expect(client.Set(ctx, key1, fmt.Sprintf("v1-%d-%d", id, j), 0).Err()).NotTo(HaveOccurred())
 					}
@@ -264,8 +264,8 @@ var _ = Describe("Concurrency Tests", func() {
 
 				for j := 0; j < numIterations; j++ {
 					prefix := fmt.Sprintf("mixed:%d:%d", id, j)
-					key1, key2 := findSameShardKeysWithPrefix(prefix+":kv", util.WorkerThreads)
-					missing := prefix + ":missing"
+					kvKeys := findSameShardNKeysWithPrefix(prefix+":kv", util.WorkerThreads, 3)
+					key1, key2, missing := kvKeys[0], kvKeys[1], kvKeys[2]
 					value1 := fmt.Sprintf("v1-%d-%d", id, j)
 					value2 := fmt.Sprintf("v2-%d-%d", id, j)
 
@@ -287,8 +287,8 @@ var _ = Describe("Concurrency Tests", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(existsCount).To(Equal(int64(0)))
 
-					set1 := prefix + ":set1"
-					set2 := prefix + ":set2"
+					setKeys := findSameShardNKeysWithPrefix(prefix+":set", util.WorkerThreads, 2)
+					set1, set2 := setKeys[0], setKeys[1]
 					Expect(localClient.SAdd(ctx, set1, "a", "b", "c").Err()).NotTo(HaveOccurred())
 					Expect(localClient.SAdd(ctx, set2, "b", "c", "d").Err()).NotTo(HaveOccurred())
 
@@ -415,6 +415,6 @@ var _ = Describe("Concurrency Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(values[0]).NotTo(BeNil())
 		Expect(values[1]).NotTo(BeNil())
-		Expect(values[0]).To(Equal(values[1]), "MSET should not leave cross-shard keys from different batches")
+		Expect(values[0]).To(Equal(values[1]), "MSET should not leave same-shard keys from different batches")
 	})
 })

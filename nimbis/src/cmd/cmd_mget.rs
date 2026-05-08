@@ -8,11 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::ParsedCmd;
-use crate::coordinator::AggregatePolicy;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::ScatterRequest;
 
 pub struct MGetCmd {
 	meta: CmdMeta,
@@ -35,25 +30,6 @@ impl Default for MGetCmd {
 impl Cmd for MGetCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
-	}
-
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		Ok(CoordinatedCommandPlan::Scatter {
-			subrequests: args
-				.iter()
-				.enumerate()
-				.map(|(idx, key)| ScatterRequest {
-					route_key: key.clone(),
-					request: ParsedCmd {
-						name: "GET".to_string(),
-						args: vec![key.clone()],
-					},
-					output_index: Some(idx),
-				})
-				.collect(),
-			aggregate: AggregatePolicy::OrderedArray,
-		}
-		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {

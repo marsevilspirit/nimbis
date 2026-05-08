@@ -8,11 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::ParsedCmd;
-use crate::coordinator::AggregatePolicy;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::ScatterRequest;
 
 pub struct DelCmd {
 	meta: CmdMeta,
@@ -37,33 +32,15 @@ impl Cmd for DelCmd {
 		&self.meta
 	}
 
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		Ok(CoordinatedCommandPlan::Scatter {
-			subrequests: args
-				.iter()
-				.map(|key| ScatterRequest {
-					route_key: key.clone(),
-					request: ParsedCmd {
-						name: self.meta.name.clone(),
-						args: vec![key.clone()],
-					},
-					output_index: None,
-				})
-				.collect(),
-			aggregate: AggregatePolicy::IntegerSum,
-		}
-		.into())
-	}
-
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		if let Some(key) = args.first() {
+		let mut deleted = 0;
+		for key in args {
 			match storage.del(key.clone()).await {
-				Ok(true) => RespValue::Integer(1),
-				Ok(false) => RespValue::Integer(0),
-				Err(e) => RespValue::error(e.to_string()),
+				Ok(true) => deleted += 1,
+				Ok(false) => {}
+				Err(e) => return RespValue::error(e.to_string()),
 			}
-		} else {
-			RespValue::Integer(0)
 		}
+		RespValue::Integer(deleted)
 	}
 }

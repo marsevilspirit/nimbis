@@ -8,10 +8,6 @@ use super::CmdContext;
 use super::CmdMeta;
 use super::CommandKind;
 use super::KeySpec;
-use super::cmd_sunion::set_member_subrequests;
-use crate::coordinator::AggregatePolicy;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
 
 pub struct SdiffCmd {
 	meta: CmdMeta,
@@ -34,14 +30,6 @@ impl Default for SdiffCmd {
 impl Cmd for SdiffCmd {
 	fn meta(&self) -> &CmdMeta {
 		&self.meta
-	}
-
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		Ok(CoordinatedCommandPlan::Scatter {
-			subrequests: set_member_subrequests(args),
-			aggregate: AggregatePolicy::SetDifference,
-		}
-		.into())
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {

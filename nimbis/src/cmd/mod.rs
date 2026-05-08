@@ -3,10 +3,6 @@ use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
-use crate::coordinator::CommandPlan;
-use crate::coordinator::CoordinatedCommandPlan;
-use crate::coordinator::hash_key;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandKind {
 	Read,
@@ -26,7 +22,6 @@ pub enum KeySpec {
 		first: usize,
 		step: usize,
 	},
-	Positions(Vec<usize>),
 }
 
 /// Command metadata containing immutable information about a command
@@ -46,7 +41,7 @@ pub struct CmdContext {
 impl CmdMeta {
 	/// Validate argument count against arity
 	/// - Positive arity: requires exact match
-	/// - Negative arity: allows up to abs(arity) arguments
+	/// - Negative arity: requires at least abs(arity) arguments
 	pub fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
 		if self.arity > 0 {
 			// Positive: exact match required
@@ -90,10 +85,6 @@ impl CmdMeta {
 				}
 				args.iter().skip(*first).step_by(*step).cloned().collect()
 			}
-			KeySpec::Positions(positions) => positions
-				.iter()
-				.filter_map(|idx| args.get(*idx).cloned())
-				.collect(),
 		};
 
 		Ok(keys)
@@ -110,43 +101,6 @@ pub trait Cmd: Send + Sync {
 	/// Get command metadata
 	fn meta(&self) -> &CmdMeta;
 
-	fn plan(&self, args: &[Bytes], _worker_count: usize) -> Result<CommandPlan, RespValue> {
-		let request = ParsedCmd {
-			name: self.meta().name.clone(),
-			args: args.to_vec(),
-		};
-
-		match self.meta().kind {
-			CommandKind::Local => Ok(CommandPlan::Local { request }),
-			CommandKind::Admin => Ok(CoordinatedCommandPlan::Broadcast { request }.into()),
-			CommandKind::Read | CommandKind::Write => {
-				let keys = self.meta().keys(args)?;
-				let Some(first_key) = keys.first().cloned() else {
-					return Err(RespValue::error(format!(
-						"ERR wrong number of arguments for '{}' command",
-						self.meta().name.to_lowercase()
-					)));
-				};
-
-				if self.meta().is_write()
-					&& keys.iter().any(|key| {
-						worker_for_key(key, _worker_count)
-							!= worker_for_key(&first_key, _worker_count)
-					}) {
-					return Err(RespValue::error(
-						"ERR cross-shard write command is not supported",
-					));
-				}
-
-				Ok(CoordinatedCommandPlan::SingleKey {
-					key: first_key,
-					request,
-				}
-				.into())
-			}
-		}
-	}
-
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue;
 
 	/// Execute command with request context.
@@ -157,10 +111,6 @@ pub trait Cmd: Send + Sync {
 
 		self.do_cmd(storage, args, ctx).await
 	}
-}
-
-fn worker_for_key(key: &[u8], worker_count: usize) -> usize {
-	(hash_key(key) as usize) % worker_count
 }
 
 /// Parsed command structure (renamed from Cmd to avoid conflict)
@@ -247,19 +197,6 @@ mod tests {
 				.keys(&args)
 				.unwrap(),
 			vec![args[0].clone(), args[2].clone()]
-		);
-	}
-
-	#[test]
-	fn cmd_meta_extracts_position_keys() {
-		let args = [
-			Bytes::from_static(b"src"),
-			Bytes::from_static(b"dst"),
-			Bytes::from_static(b"extra"),
-		];
-		assert_eq!(
-			meta(KeySpec::Positions(vec![0, 1])).keys(&args).unwrap(),
-			vec![args[0].clone(), args[1].clone()]
 		);
 	}
 

@@ -31,19 +31,23 @@ func findCrossShardKeys(workerCount int) (string, string) {
 }
 
 func findSameShardKeys(workerCount int) (string, string) {
-	return findSameShardKeysWithPrefix("e2e:route:same:key", workerCount)
+	keys := findSameShardNKeysWithPrefix("e2e:route:same:key", workerCount, 2)
+	return keys[0], keys[1]
 }
 
 func findSameShardKeysWithPrefix(prefix string, workerCount int) (string, string) {
-	seen := map[int]string{}
+	keys := findSameShardNKeysWithPrefix(prefix, workerCount, 2)
+	return keys[0], keys[1]
+}
+
+func findSameShardNKeysWithPrefix(prefix string, workerCount int, count int) []string {
+	seen := map[int][]string{}
 	for i := 0; i < 2000; i++ {
 		key := fmt.Sprintf("%s:%d", prefix, i)
 		worker := int(hashKey(key) % uint64(workerCount))
-		if existing, ok := seen[worker]; ok && existing != key {
-			return existing, key
-		}
-		if _, ok := seen[worker]; !ok {
-			seen[worker] = key
+		seen[worker] = append(seen[worker], key)
+		if len(seen[worker]) == count {
+			return seen[worker]
 		}
 	}
 	panic("failed to find same-shard keys")

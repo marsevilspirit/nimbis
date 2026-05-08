@@ -14,11 +14,9 @@ use tokio::sync::oneshot;
 
 use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
+use crate::cmd::CommandKind;
 use crate::cmd::ParsedCmd;
-use crate::coordinator::CommandPlan;
-use crate::coordinator::MultiKeyCoordinator;
-#[cfg(test)]
-use crate::coordinator::hash_key;
+use crate::key_hash::hash_key;
 use crate::worker::CmdRequest;
 use crate::worker::WorkerMessage;
 
@@ -72,7 +70,7 @@ impl CommandDispatcher {
 		self.ordered_responses.clear();
 	}
 
-	/// Core dispatch logic - builds command plans and delegates execution.
+	/// Core dispatch logic - routes commands from command metadata.
 	pub async fn dispatch(
 		&mut self,
 		cmd: ParsedCmd,
@@ -90,16 +88,41 @@ impl CommandDispatcher {
 			return Ok(());
 		}
 
-		match cmd_def.plan(&cmd.args, self.peers.len()) {
-			Ok(CommandPlan::Local { request }) => self.execute_local(request),
-			Ok(CommandPlan::Coordinated(plan)) => MultiKeyCoordinator::new(
-				&self.peers,
-				self.ctx,
-				&mut self.batches,
-				&mut self.ordered_responses,
-			)
-			.execute(plan),
-			Err(resp) => self.push_immediate_response(resp),
+		match cmd_def.meta().kind {
+			CommandKind::Local => self.execute_local(cmd),
+			CommandKind::Admin => self.broadcast(cmd),
+			CommandKind::Read | CommandKind::Write => {
+				let keys = match cmd_def.meta().keys(&cmd.args) {
+					Ok(keys) => keys,
+					Err(resp) => {
+						self.push_immediate_response(resp);
+						return Ok(());
+					}
+				};
+				let Some(first_key) = keys.first() else {
+					self.push_immediate_response(RespValue::error(format!(
+						"ERR wrong number of arguments for '{}' command",
+						cmd.name.to_lowercase()
+					)));
+					return Ok(());
+				};
+
+				let worker_idx = self.worker_for_key(first_key);
+				if keys
+					.iter()
+					.any(|key| self.worker_for_key(key) != worker_idx)
+				{
+					let message = if cmd_def.meta().is_write() {
+						"ERR cross-shard write command is not supported"
+					} else {
+						"ERR cross-shard command is not supported"
+					};
+					self.push_immediate_response(RespValue::error(message));
+					return Ok(());
+				}
+
+				self.push_worker_request(worker_idx, cmd);
+			}
 		}
 
 		Ok(())
@@ -111,9 +134,70 @@ impl CommandDispatcher {
 		self.local_tx.send((request, tx)).ok();
 	}
 
-	#[cfg(test)]
 	fn worker_for_key(&self, key: &[u8]) -> usize {
 		(hash_key(key) as usize) % self.peers.len()
+	}
+
+	fn push_worker_request(&mut self, worker_idx: usize, cmd: ParsedCmd) {
+		let (resp_tx, resp_rx) = oneshot::channel();
+		self.ordered_responses.push(resp_rx);
+		self.push_subrequest(worker_idx, cmd, resp_tx);
+	}
+
+	fn push_subrequest(
+		&mut self,
+		worker_idx: usize,
+		cmd: ParsedCmd,
+		resp_tx: oneshot::Sender<RespValue>,
+	) {
+		let req = CmdRequest {
+			cmd_name: cmd.name,
+			args: cmd.args,
+			ctx: self.ctx,
+			resp_tx,
+		};
+		self.batches.entry(worker_idx).or_default().push(req);
+	}
+
+	fn broadcast(&mut self, cmd: ParsedCmd) {
+		let (final_tx, final_rx) = oneshot::channel();
+		self.ordered_responses.push(final_rx);
+
+		let mut sub_rxs = Vec::with_capacity(self.peers.len());
+		let worker_ids: Vec<_> = self.peers.keys().copied().collect();
+		for worker_idx in worker_ids {
+			let (tx, rx) = oneshot::channel();
+			sub_rxs.push(rx);
+			self.push_subrequest(worker_idx, cmd.clone(), tx);
+		}
+
+		tokio::spawn(async move {
+			for rx in sub_rxs {
+				match rx.await {
+					Ok(RespValue::SimpleString(s)) if s == b"OK".as_slice() => {}
+					Ok(RespValue::Error(err)) => {
+						final_tx.send(RespValue::Error(err)).ok();
+						return;
+					}
+					Ok(other) => {
+						final_tx
+							.send(RespValue::error(format!(
+								"ERR unexpected response in broadcast aggregation: {:?}",
+								other
+							)))
+							.ok();
+						return;
+					}
+					Err(_) => {
+						final_tx
+							.send(RespValue::error("ERR worker dropped broadcast request"))
+							.ok();
+						return;
+					}
+				}
+			}
+			final_tx.send(RespValue::simple_string("OK")).ok();
+		});
 	}
 
 	fn push_immediate_response(&mut self, resp: RespValue) {
@@ -441,18 +525,27 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn multi_key_sum_aggregates_integer_responses() {
+	async fn multi_key_command_routes_to_single_owner_when_keys_share_worker() {
 		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
-		let keys = vec![
-			Bytes::from_static(b"mk:a"),
-			Bytes::from_static(b"mk:b"),
-			Bytes::from_static(b"mk:c"),
-		];
+		let mut keys_by_worker: HashMap<usize, Vec<Bytes>> = HashMap::new();
+		for idx in 0..200usize {
+			let key = Bytes::from(format!("same-worker-del:{idx}"));
+			let worker = dispatcher.worker_for_key(&key);
+			let keys = keys_by_worker.entry(worker).or_default();
+			keys.push(key);
+			if keys.len() == 3 {
+				break;
+			}
+		}
+		let (expected_worker, keys) = keys_by_worker
+			.into_iter()
+			.find(|(_, keys)| keys.len() == 3)
+			.expect("find keys on same worker");
 
 		dispatcher
 			.dispatch(ParsedCmd {
 				name: "DEL".to_string(),
-				args: keys,
+				args: keys.clone(),
 			})
 			.await
 			.expect("dispatch");
@@ -462,31 +555,58 @@ mod tests {
 			.await
 			.expect("dispatch batches");
 
+		let rx = receivers
+			.get_mut(&expected_worker)
+			.expect("receiver for worker should exist");
+		let msg = rx.try_recv().expect("worker batch");
+		let mut batch = take_batch(msg);
+		assert_eq!(batch.len(), 1);
+		assert_eq!(batch[0].cmd_name, "DEL");
+		assert_eq!(batch[0].args, keys);
+		batch
+			.pop()
+			.expect("del request")
+			.resp_tx
+			.send(RespValue::Integer(3))
+			.expect("send integer");
+
 		for idx in 0..2usize {
-			let rx = receivers
-				.get_mut(&idx)
-				.expect("receiver for worker should exist");
-			if let Ok(msg) = rx.try_recv() {
-				for req in take_batch(msg) {
-					req.resp_tx
-						.send(RespValue::Integer(1))
-						.expect("send integer");
-				}
+			if idx != expected_worker {
+				let rx = receivers
+					.get_mut(&idx)
+					.expect("receiver for worker should exist");
+				assert!(rx.try_recv().is_err());
 			}
 		}
 
-		let aggregated = dispatcher
+		let response = dispatcher
 			.ordered_responses
 			.remove(0)
 			.await
-			.expect("aggregated response");
-		assert_eq!(aggregated, RespValue::Integer(3));
+			.expect("response");
+		assert_eq!(response, RespValue::Integer(3));
 	}
 
 	#[tokio::test]
-	async fn multi_key_sum_propagates_error() {
-		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
-		let keys = vec![Bytes::from_static(b"err:a"), Bytes::from_static(b"err:b")];
+	async fn multi_key_command_rejects_cross_worker_keys() {
+		let (mut dispatcher, _) = setup_dispatcher().await;
+		let mut seen_by_worker: HashMap<usize, Bytes> = HashMap::new();
+		let mut keys = None;
+		for idx in 0..200usize {
+			let key = Bytes::from(format!("cross-worker-exists:{idx}"));
+			let worker = dispatcher.worker_for_key(&key);
+			for (other_worker, other_key) in &seen_by_worker {
+				if *other_worker != worker {
+					keys = Some(vec![other_key.clone(), key.clone()]);
+					break;
+				}
+			}
+			if keys.is_some() {
+				break;
+			}
+			seen_by_worker.entry(worker).or_insert(key);
+		}
+		let keys = keys.expect("find cross-worker keys");
 
 		dispatcher
 			.dispatch(ParsedCmd {
@@ -495,43 +615,36 @@ mod tests {
 			})
 			.await
 			.expect("dispatch");
-		dispatcher
-			.dispatch_batches()
-			.await
-			.expect("dispatch batches");
 
-		let mut sent_error = false;
-		for idx in 0..2usize {
-			let rx = receivers
-				.get_mut(&idx)
-				.expect("receiver for worker should exist");
-			if let Ok(msg) = rx.try_recv() {
-				for req in take_batch(msg) {
-					if !sent_error {
-						req.resp_tx
-							.send(RespValue::error("ERR injected error"))
-							.expect("send error");
-						sent_error = true;
-					} else {
-						req.resp_tx
-							.send(RespValue::Integer(1))
-							.expect("send integer");
-					}
-				}
-			}
-		}
-
-		let aggregated = dispatcher
+		let response = dispatcher
 			.ordered_responses
 			.remove(0)
 			.await
-			.expect("aggregated response");
-		assert!(matches!(aggregated, RespValue::Error(_)));
+			.expect("response");
+		assert_eq!(
+			response,
+			RespValue::error("ERR cross-shard command is not supported")
+		);
 	}
 
 	#[tokio::test]
 	async fn response_order_preserved_with_multi_key_between_single_key() {
 		let (mut dispatcher, mut receivers) = setup_dispatcher().await;
+		let mut keys_by_worker: HashMap<usize, Vec<Bytes>> = HashMap::new();
+		for idx in 0..200usize {
+			let key = Bytes::from(format!("order-same-worker:{idx}"));
+			let worker = dispatcher.worker_for_key(&key);
+			let keys = keys_by_worker.entry(worker).or_default();
+			keys.push(key);
+			if keys.len() == 2 {
+				break;
+			}
+		}
+		let del_keys = keys_by_worker
+			.into_iter()
+			.find(|(_, keys)| keys.len() == 2)
+			.expect("find del keys on same worker")
+			.1;
 
 		dispatcher
 			.dispatch(ParsedCmd {
@@ -543,10 +656,7 @@ mod tests {
 		dispatcher
 			.dispatch(ParsedCmd {
 				name: "DEL".to_string(),
-				args: vec![
-					Bytes::from_static(b"order:k2"),
-					Bytes::from_static(b"order:k3"),
-				],
+				args: del_keys,
 			})
 			.await
 			.expect("dispatch");
@@ -576,7 +686,7 @@ mod tests {
 							.expect("send set resp"),
 						"DEL" => req
 							.resp_tx
-							.send(RespValue::Integer(1))
+							.send(RespValue::Integer(2))
 							.expect("send del resp"),
 						"GET" => req
 							.resp_tx
