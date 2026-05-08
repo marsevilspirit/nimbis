@@ -5,7 +5,6 @@ pub mod config;
 pub mod context;
 pub mod dispatcher;
 pub mod key_hash;
-pub mod key_lock_manager;
 pub mod logo;
 pub mod server;
 pub mod worker;

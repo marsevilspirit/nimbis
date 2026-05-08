@@ -152,23 +152,6 @@ impl Worker {
 				if let Err(err) = cmd.meta().validate_arity(req.args.len() + 1) {
 					RespValue::error(err)
 				} else {
-					let keys = match cmd.meta().keys(&req.args) {
-						Ok(keys) => keys,
-						Err(resp) => {
-							if let Err(resp) = req.resp_tx.send(resp) {
-								warn!(
-									"Failed to send response for command '{}'; receiver dropped. Dropped response: {:?}",
-									req.cmd_name, resp
-								);
-							}
-							return;
-						}
-					};
-					let _guard = if cmd.meta().is_write() {
-						Some(GCTX!(key_locks).lock_keys(&keys).await)
-					} else {
-						None
-					};
 					cmd.execute(storage, &req.args, &req.ctx).await
 				}
 			}

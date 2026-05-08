@@ -14,6 +14,8 @@ use slatedb::object_store::path::Path as ObjectStorePath;
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
 use crate::error::StorageError;
+use crate::key_lock_manager::KeyLockManager;
+use crate::key_lock_manager::MultiKeyGuard;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 use crate::utils::is_expired;
@@ -25,6 +27,7 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
+	pub(crate) key_locks: Arc<KeyLockManager>,
 }
 
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
@@ -116,7 +119,12 @@ impl Storage {
 			list_db,
 			set_db,
 			zset_db,
+			key_locks: Arc::new(KeyLockManager::default()),
 		}
+	}
+
+	pub(crate) async fn lock_keys(&self, keys: &[Bytes]) -> MultiKeyGuard<'_> {
+		self.key_locks.lock_keys(keys).await
 	}
 
 	#[fastrace::trace]

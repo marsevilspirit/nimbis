@@ -25,6 +25,8 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn set(&self, key: Bytes, value: Bytes) -> Result<(), StorageError> {
+		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
+
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
@@ -40,6 +42,9 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn mset(&self, pairs: Vec<(Bytes, Bytes)>) -> Result<(), StorageError> {
+		let keys: Vec<_> = pairs.iter().map(|(key, _)| key.clone()).collect();
+		let _guard = self.lock_keys(&keys).await;
+
 		if pairs.is_empty() {
 			return Ok(());
 		}
@@ -66,6 +71,9 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn msetnx(&self, pairs: Vec<(Bytes, Bytes)>) -> Result<bool, StorageError> {
+		let keys: Vec<_> = pairs.iter().map(|(key, _)| key.clone()).collect();
+		let _guard = self.lock_keys(&keys).await;
+
 		if pairs.is_empty() {
 			return Ok(true);
 		}
@@ -106,6 +114,8 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
+		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
+
 		let user_key = key;
 		let key = StringKey::new(user_key.clone());
 
@@ -129,6 +139,8 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, StorageError> {
+		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
+
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
@@ -205,6 +217,8 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn incr(&self, key: Bytes) -> Result<i64, StorageError> {
+		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
+
 		let current_val = self.get(key.clone()).await?;
 
 		let mut int_val: i64 = match current_val {
@@ -225,13 +239,23 @@ impl Storage {
 				message: "ERR increment or decrement would overflow".to_string(),
 			})?;
 
-		self.set(key, Bytes::from(int_val.to_string())).await?;
+		let key = StringKey::new(key);
+		let value = StringValue::new(Bytes::from(int_val.to_string()));
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		let put_opts = PutOptions::default();
+		self.string_db
+			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
+			.await?;
 
 		Ok(int_val)
 	}
 
 	#[fastrace::trace]
 	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
+		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
+
 		let current_val = self.get(key.clone()).await?;
 
 		let mut int_val: i64 = match current_val {
@@ -252,13 +276,23 @@ impl Storage {
 				message: "ERR increment or decrement would overflow".to_string(),
 			})?;
 
-		self.set(key, Bytes::from(int_val.to_string())).await?;
+		let key = StringKey::new(key);
+		let value = StringValue::new(Bytes::from(int_val.to_string()));
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		let put_opts = PutOptions::default();
+		self.string_db
+			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
+			.await?;
 
 		Ok(int_val)
 	}
 
 	#[fastrace::trace]
 	pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, StorageError> {
+		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
+
 		let current_val = self.get(key.clone()).await?;
 
 		let new_val = match current_val {
@@ -272,7 +306,15 @@ impl Storage {
 		};
 
 		let len = new_val.len();
-		self.set(key, Bytes::from(new_val)).await?;
+		let key = StringKey::new(key);
+		let value = StringValue::new(Bytes::from(new_val));
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		let put_opts = PutOptions::default();
+		self.string_db
+			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
+			.await?;
 
 		Ok(len)
 	}
@@ -616,6 +658,147 @@ mod tests {
 
 		let result = storage.get(key_bytes.clone()).await.unwrap();
 		assert_eq!(result, Some(Bytes::from(expected_val.to_string())));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_concurrent_incr_same_key() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from_static(b"concurrent:incr");
+		let task_count = 8;
+		let increments_per_task = 50;
+
+		storage
+			.set(key.clone(), Bytes::from_static(b"0"))
+			.await
+			.unwrap();
+
+		let mut tasks = Vec::new();
+		for _ in 0..task_count {
+			let storage = storage.clone();
+			let key = key.clone();
+			tasks.push(tokio::spawn(async move {
+				for _ in 0..increments_per_task {
+					storage.incr(key.clone()).await.unwrap();
+				}
+			}));
+		}
+
+		for task in tasks {
+			task.await.unwrap();
+		}
+
+		let value = storage.get(key).await.unwrap().unwrap();
+		assert_eq!(
+			std::str::from_utf8(&value).unwrap(),
+			(task_count * increments_per_task).to_string()
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_concurrent_append_same_key() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from_static(b"concurrent:append");
+		let task_count = 8;
+		let appends_per_task = 50;
+
+		let mut tasks = Vec::new();
+		for _ in 0..task_count {
+			let storage = storage.clone();
+			let key = key.clone();
+			tasks.push(tokio::spawn(async move {
+				for _ in 0..appends_per_task {
+					storage
+						.append(key.clone(), Bytes::from_static(b"x"))
+						.await
+						.unwrap();
+				}
+			}));
+		}
+
+		for task in tasks {
+			task.await.unwrap();
+		}
+
+		let value = storage.get(key).await.unwrap().unwrap();
+		assert_eq!(value.len(), task_count * appends_per_task);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_concurrent_msetnx_single_winner() {
+		let (storage, path) = get_storage().await;
+		let pairs = vec![
+			(
+				Bytes::from_static(b"msetnx:race:k1"),
+				Bytes::from_static(b"v1"),
+			),
+			(
+				Bytes::from_static(b"msetnx:race:k2"),
+				Bytes::from_static(b"v2"),
+			),
+		];
+		let task_count = 16;
+
+		let mut tasks = Vec::new();
+		for _ in 0..task_count {
+			let storage = storage.clone();
+			let pairs = pairs.clone();
+			tasks.push(tokio::spawn(
+				async move { storage.msetnx(pairs).await.unwrap() },
+			));
+		}
+
+		let mut winners = 0;
+		for task in tasks {
+			if task.await.unwrap() {
+				winners += 1;
+			}
+		}
+
+		assert_eq!(winners, 1);
+		assert_eq!(
+			storage
+				.get(Bytes::from_static(b"msetnx:race:k1"))
+				.await
+				.unwrap(),
+			Some(Bytes::from_static(b"v1"))
+		);
+		assert_eq!(
+			storage
+				.get(Bytes::from_static(b"msetnx:race:k2"))
+				.await
+				.unwrap(),
+			Some(Bytes::from_static(b"v2"))
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_storage_string_write_paths_do_not_deadlock() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from_static(b"no:nested:lock");
+
+		tokio::time::timeout(std::time::Duration::from_secs(2), async {
+			storage
+				.set(key.clone(), Bytes::from_static(b"1"))
+				.await
+				.unwrap();
+			storage.incr(key.clone()).await.unwrap();
+			storage.decr(key.clone()).await.unwrap();
+			storage
+				.append(key.clone(), Bytes::from_static(b"2"))
+				.await
+				.unwrap();
+			storage.expire(key, 0).await.unwrap();
+		})
+		.await
+		.expect("write paths should not deadlock");
 
 		let _ = std::fs::remove_dir_all(path);
 	}

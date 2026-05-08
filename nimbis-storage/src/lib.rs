@@ -2,6 +2,7 @@ pub mod compaction_filter;
 pub mod data_type;
 pub mod error;
 pub mod hash;
+pub mod key_lock_manager;
 pub mod list;
 pub mod set;
 pub mod storage;
