@@ -164,7 +164,7 @@ jobs:
         cache-dependency-path: e2e-test/go.sum
 
     - name: Download Release Binary
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: nimbis-release-${{ matrix.os }}
         path: target/release
@@ -195,7 +195,7 @@ jobs:
         cache-dependency-path: e2e-test/go.sum
 
     - name: Download Release Binary
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: nimbis-release-ubuntu-latest
         path: target/release
