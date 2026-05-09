@@ -46,7 +46,7 @@ The xtask is configured with environment variables or equivalent CLI flags.
 ```bash
 HOST=127.0.0.1 \
 PORT=6379 \
-N=100000 \
+N=2000000 \
 C=50 \
 D=128 \
 P=1 \
@@ -61,7 +61,7 @@ Supported environment variables:
 
 - `HOST`: Redis host, default `127.0.0.1`
 - `PORT`: Redis port, default `6379`
-- `N`: request count per benchmark, default `100000`
+- `N`: request count per benchmark, default `2000000`
 - `C`: concurrent clients, default `50`
 - `D`: payload size for SET-like benchmark values, default `128`
 - `P`: pipeline depth, default `1`

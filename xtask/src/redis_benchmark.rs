@@ -108,7 +108,7 @@ struct Config {
 
 impl Config {
 	fn from_args(args: &Args, workspace_root: &Path) -> Result<Self, String> {
-		let requests = option_or_env_u64(args.requests, "N", 100000)?;
+		let requests = option_or_env_u64(args.requests, "N", 2000000)?;
 		let output_dir = option_or_env_string(
 			args.output_dir.as_deref(),
 			"OUTPUT_DIR",
@@ -780,7 +780,7 @@ mod tests {
 
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 6379);
-		assert_eq!(config.requests, 100000);
+		assert_eq!(config.requests, 2000000);
 		assert_eq!(config.clients, 50);
 		assert_eq!(config.data_size, 128);
 		assert_eq!(config.pipeline, 1);
@@ -818,7 +818,7 @@ mod tests {
 				"-p",
 				"6379",
 				"-n",
-				"100000",
+				"2000000",
 				"-c",
 				"50",
 				"-d",
