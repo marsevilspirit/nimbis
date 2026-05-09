@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 
 pub struct HGetAllCmd {
 	meta: CmdMeta,
@@ -19,8 +17,6 @@ impl Default for HGetAllCmd {
 			meta: CmdMeta {
 				name: "HGETALL".to_string(),
 				arity: 2, // HGETALL key
-				key_spec: KeySpec::First,
-				kind: CommandKind::Read,
 			},
 		}
 	}

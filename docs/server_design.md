@@ -9,14 +9,13 @@ Nimbis is designed as an asynchronous, multi-threaded Redis-compatible server bu
 ### 1.1 Concurrency Model
 The server follows a multi-worker "Acceptor-Worker" pattern:
 - **Main Task (Acceptor)**: Binds to the TCP port and accepts incoming connections. It dispatches new connections to Workers using a **Round-robin** strategy.
-- **Worker Threads**: A fixed number of workers (typically equal to CPU cores). Each worker runs on its own native thread with a dedicated multi-thread Tokio runtime.
+- **Worker Threads**: A fixed number of workers (typically equal to CPU cores). Each worker runs on its own native thread with a dedicated single-threaded Tokio runtime.
 - **Client Handling**: Each worker handles multiple client connections using asynchronous tasks within its runtime.
-- **Command Execution**: Worker batches are spawned as tasks. A single client batch preserves command order, while batches from different clients can execute concurrently.
 
 ### 1.2 Data Storage
 - **Sharded Storage**: Data is sharded across multiple `Storage` instances. Each Worker owns exactly one shard.
 - **Isolation**: Each shard has its own SlateDB instance and data directory (`shard-{id}`).
-- **Key Locks for Writes**: Write commands acquire sorted per-key locks before touching storage. Reads do not take those locks.
+- **Zero Locks**: No cross-shard locks or shared storage handles are used for primary data operations, maximizing vertical scalability.
 
 ### 1.3 Build Info and Startup Banner
 The server includes a comprehensive build information system that executes at compile time via `build.rs`:
@@ -108,9 +107,8 @@ The Worker subsystem is responsible for handling client commands and managing co
 #### 3.1.1 Key Design Goals
 
 - **Multi-core Utilization**: Spawn workers equal to CPU cores for parallelism
-- **Strict Sharding**: Each worker manages a unique storage shard, eliminating shared-storage contention
+- **Strict Sharding**: Each worker manages a unique storage shard, eliminating cross-shard lock contention
 - **Key-based Affinity**: Commands targeting the same key are routed to the same worker/shard
-- **Command-level Write Safety**: Write commands lock their declared keys before execution
 - **Thread Safety**: All state is isolated or shared via `Arc` with message passing
 
 ### 3.2 Worker Architecture
@@ -155,7 +153,7 @@ pub fn new(
 **Process:**
 
 1. **Spawn Dedicated Thread**: Each worker runs in its own native thread with a dedicated Tokio runtime
-2. **Initialize Runtime**: Creates a multi-thread Tokio runtime with `worker_runtime_threads` and `enable_all()`
+2. **Initialize Runtime**: Creates a single-threaded Tokio runtime with `enable_all()`
 3. **Store References**: Keeps references to shared resources (storage, cmd_table, peer channels)
 
 #### 3.3.2 Message Loop & Smart Batching
@@ -211,10 +209,9 @@ pub struct CmdRequest {
 
 #### 3.5.1 Why Consistent Hashing?
 
-To ensure **key-based affinity**, commands extract keys from `CmdMeta::key_spec` and route to the owning worker. This guarantees:
-- **Single-key affinity**: commands targeting the same key reach the same worker/shard
-- **Shard-local multi-key execution**: multi-key commands execute only when all keys hash to the same worker
-- **Clear cross-shard behavior**: cross-shard multi-key reads/writes return explicit unsupported errors
+To ensure **key-based affinity** - commands targeting the same key must be processed by the same worker. This guarantees:
+- **Atomic operations** on the same key are serialized
+- **Multi-key operations** see a consistent view across commands
 
 #### 3.5.2 Routing Algorithm: FNV-1a
 
@@ -230,10 +227,10 @@ let target_worker_idx = (hasher as usize) % peers.len();
 ```
 
 **Steps:**
-1. Extract keys from command metadata (`KeySpec::First`, `All`, or `Step`)
-2. Compute 64-bit FNV-1a hash for each key
-3. Require all keys to map to the same worker
-4. Route the whole command to that worker as one `CmdRequest`
+1. Extract the first argument (typically the key)
+2. Compute 64-bit FNV-1a hash
+3. Modulo by worker count to get target worker index
+4. Route via `CmdBatchDescriptor` to target worker
 
 #### 3.5.3 Channel Communication
 
@@ -248,8 +245,8 @@ let response = resp_rx.await?;
 ```
 
 **Benefits:**
-- **Key Affinity**: All commands for a key go through the same worker
-- **Concurrent Batches**: Different client batches can run concurrently inside the worker runtime
+- **Serial Execution**: All commands for a key go through the same worker's channel
+- **Non-blocking**: Async channels don't block the sender
 - **Response Channel**: `oneshot` channel ensures response delivery
 
 ### 3.6 Client Handling (`handle_client`)
@@ -303,13 +300,12 @@ The `handle_client` loop parses multiple RESP values and groups them into batche
 3. **Dispatch**: Send `CmdBatch` to each involved worker.
 4. **Collect**: Wait for `oneshot` receivers in the exact order they were created and write to the socket.
 
-#### 3.6.5 Multi-Key & Global Commands
+#### 3.6.5 Multi-Key & Global Commands (Scatter-Gather)
 
 | Command     | Behavior           | implementation                                                      |
 | ----------- | ------------------ | ------------------------------------------------------------------- |
 | `FLUSHDB`   | **Broadcast**      | Sent to ALL workers; success if all OK.                             |
-| `DEL k1 k2` | **Shard-local**    | Executes as one command when all keys hash to the same worker.      |
-| `MGET k1 k2`| **Shard-local**    | Executes as one command when all keys hash to the same worker.      |
+| `DEL k1 k2` | **Scatter-Gather** | Keys grouped by target worker; sent as sub-batches; results summed. |
 
 ### 3.7 Storage Sharding
 
@@ -317,7 +313,7 @@ Each worker owns its own `Storage` instance, rooted under the configured object 
 `{object_store_url path}/shard-{id}/`
 
 This ensures:
-- **Low contention**: No shared SlateDB instances across shards; write locks are scoped to command keys.
+- **Zero contention**: No cross-shard locks or shared SlateDB instances.
 - **Improved Cache Locality**: Each worker thread processes a specific subset of the data.
 - **Independent Compaction**: SlateDB background tasks are distributed across workers.
 
@@ -333,10 +329,9 @@ This ensures:
 
 #### 3.8.1 Worker Threads
 
-- **Count**: `num_cpus::get()` workers by default (one per CPU core)
+- **Count**: `num_cpus::get()` (one per CPU core)
 - **Type**: Native `std::thread` with Tokio runtime
-- **Isolation**: Each worker has its own runtime and storage shard
-- **Runtime threads**: each worker runtime uses `worker_runtime_threads` Tokio worker threads
+- **Isolation**: Each worker has its own runtime and event loop
 
 #### 3.8.2 Async Tasks
 

@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
-use crate::cmd::CommandKind;
-use crate::cmd::KeySpec;
 use crate::cmd::utils;
 
 pub struct LRangeCmd {
@@ -20,8 +18,6 @@ impl Default for LRangeCmd {
 			meta: CmdMeta {
 				name: "LRANGE".to_string(),
 				arity: 4, // LRANGE key start stop
-				key_spec: KeySpec::First,
-				kind: CommandKind::Read,
 			},
 		}
 	}

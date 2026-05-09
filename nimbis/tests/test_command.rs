@@ -1,63 +1,9 @@
 mod mock;
 
-use std::collections::HashMap;
-
 use mock::MockNimbisServer;
 use mock::utils::resp_error;
 use nimbis_resp::RespValue;
 use serial_test::serial;
-
-fn hash_key(key: &[u8]) -> u64 {
-	let mut hasher: u64 = 0xcbf29ce484222325;
-	for &byte in key {
-		hasher ^= byte as u64;
-		hasher = hasher.wrapping_mul(0x100000001b3);
-	}
-	hasher
-}
-
-fn find_cross_shard_keys(worker_count: usize) -> (String, String) {
-	let mut seen_by_worker: HashMap<usize, String> = HashMap::new();
-	for i in 0..2000usize {
-		let key = format!("it:route:key:{}", i);
-		let worker = (hash_key(key.as_bytes()) as usize) % worker_count;
-		if let Some(existing) = seen_by_worker.get(&worker)
-			&& existing != &key
-		{
-			for (other_worker, other_key) in &seen_by_worker {
-				if *other_worker != worker {
-					return (other_key.clone(), key);
-				}
-			}
-		}
-		seen_by_worker.entry(worker).or_insert(key);
-	}
-	panic!("failed to find cross-shard keys");
-}
-
-fn find_same_shard_keys(worker_count: usize) -> (String, String) {
-	let keys = find_same_shard_n_keys(worker_count, 2, "it:route:same:key");
-	(keys[0].clone(), keys[1].clone())
-}
-
-fn find_same_shard_n_keys(worker_count: usize, count: usize, prefix: &str) -> Vec<String> {
-	let mut keys_by_worker: HashMap<usize, Vec<String>> = HashMap::new();
-	for i in 0..2000usize {
-		let key = format!("{prefix}:{i}");
-		let worker = (hash_key(key.as_bytes()) as usize) % worker_count;
-		let keys = keys_by_worker.entry(worker).or_default();
-		keys.push(key.clone());
-		if keys.len() == count {
-			return keys.clone();
-		}
-	}
-	panic!("failed to find same-shard keys");
-}
-
-fn sorted(mut values: Vec<String>) -> Vec<String> {
-	values.sort();
-	values
-}
 
 #[test]
 #[serial]
@@ -91,14 +37,6 @@ fn test_raw_command_helpers() {
 		resp_error(client.execute(&["GET"])),
 		"ERR wrong number of arguments for 'get' command"
 	);
-	assert_eq!(
-		resp_error(client.execute(&["MSET", "key", "value", "dangling"])),
-		"ERR wrong number of arguments for 'mset' command"
-	);
-	assert_eq!(
-		resp_error(client.execute(&["MSETNX", "key", "value", "dangling"])),
-		"ERR wrong number of arguments for 'msetnx' command"
-	);
 }
 
 #[test]
@@ -125,151 +63,10 @@ fn test_del_and_exists() {
 
 	client.set("it:del:key", "hello");
 	assert!(client.exists("it:del:key"));
-	assert_eq!(client.del(&["it:del:key"]), 1);
+	assert_eq!(client.del("it:del:key"), 1);
 	assert!(!client.exists("it:del:key"));
-	assert_eq!(client.del(&["it:del:key"]), 0);
+	assert_eq!(client.del("it:del:key"), 0);
 	assert_eq!(client.get("it:del:key"), "");
-}
-
-#[test]
-#[serial]
-fn test_multi_key_del_and_exists_same_shard() {
-	let server = MockNimbisServer::new();
-	let mut client = server.get_client();
-	let keys = find_same_shard_n_keys(2, 5, "it:del:same");
-	let key1 = &keys[0];
-	let key2 = &keys[1];
-	let missing1 = &keys[2];
-	let missing2 = &keys[3];
-	let missing3 = &keys[4];
-
-	assert_eq!(client.set(key1, "v1"), "OK");
-	assert_eq!(client.set(key2, "v2"), "OK");
-
-	assert_eq!(client.exists_count(&[key1, key2, missing1]), 2);
-	assert_eq!(client.del(&[key1, key2]), 2);
-	assert_eq!(client.del(&[missing1, missing2]), 0);
-
-	assert_eq!(client.set(key1, "v1"), "OK");
-	assert_eq!(client.del(&[key1, missing3]), 1);
-}
-
-#[test]
-#[serial]
-fn test_cross_shard_multi_key_commands_return_errors() {
-	let server = MockNimbisServer::new();
-	let mut client = server.get_client();
-	let (key1, key2) = find_cross_shard_keys(2);
-
-	assert_eq!(
-		resp_error(client.execute(&["MSET", &key1, "v1", &key2, "v2"])),
-		"ERR cross-shard write command is not supported"
-	);
-	assert_eq!(client.set(&key1, "v1"), "OK");
-	assert_eq!(client.set(&key2, "v2"), "OK");
-	assert_eq!(client.get(&key1), "v1");
-	assert_eq!(client.get(&key2), "v2");
-	assert_eq!(
-		resp_error(client.execute(&["MGET", &key1, &key2, "it:mget:missing"])),
-		"ERR cross-shard command is not supported"
-	);
-	assert_eq!(
-		resp_error(client.execute(&["EXISTS", &key1, &key2])),
-		"ERR cross-shard command is not supported"
-	);
-	assert_eq!(
-		resp_error(client.execute(&["DEL", &key1, &key2])),
-		"ERR cross-shard write command is not supported"
-	);
-}
-
-#[test]
-#[serial]
-fn test_msetnx_across_shards_all_or_none() {
-	let server = MockNimbisServer::new();
-	let mut client = server.get_client();
-	let (key1, key2) = find_cross_shard_keys(2);
-
-	assert_eq!(
-		resp_error(client.execute(&["MSETNX", &key1, "v1", &key2, "v2"])),
-		"ERR cross-shard write command is not supported"
-	);
-	assert_eq!(client.msetnx(&[(&key1, "v1")]), 1);
-	assert_eq!(client.msetnx(&[(&key2, "v2")]), 1);
-	assert_eq!(client.get(&key1), "v1");
-	assert_eq!(client.get(&key2), "v2");
-
-	assert_eq!(client.msetnx(&[(&key1, "new1")]), 0);
-	assert_eq!(client.msetnx(&[(&key2, "new2")]), 0);
-	assert_eq!(client.get(&key1), "v1");
-	assert_eq!(client.get(&key2), "v2");
-}
-
-#[test]
-#[serial]
-fn test_same_shard_mset_and_msetnx() {
-	let server = MockNimbisServer::new();
-	let mut client = server.get_client();
-	let (key1, key2) = find_same_shard_keys(2);
-
-	assert_eq!(client.mset(&[(&key1, "v1"), (&key2, "v2")]), "OK");
-	assert_eq!(client.mget(&[&key1, &key2]), vec!["v1", "v2"]);
-
-	assert_eq!(client.del(&[&key1, &key2]), 2);
-	assert_eq!(client.msetnx(&[(&key1, "nx1"), (&key2, "nx2")]), 1);
-	assert_eq!(client.msetnx(&[(&key1, "new1"), (&key2, "new2")]), 0);
-	assert_eq!(client.mget(&[&key1, &key2]), vec!["nx1", "nx2"]);
-}
-
-#[test]
-#[serial]
-fn test_multi_key_set_ops_same_shard() {
-	let server = MockNimbisServer::new();
-	let mut client = server.get_client();
-	let keys = find_same_shard_n_keys(2, 3, "it:set:same");
-	let key1 = &keys[0];
-	let key2 = &keys[1];
-	let missing = &keys[2];
-
-	assert_eq!(client.sadd(key1, &["a", "b", "c"]), 3);
-	assert_eq!(client.sadd(key2, &["b", "c", "d"]), 3);
-
-	assert_eq!(
-		sorted(client.sunion(&[key1, key2])),
-		vec!["a", "b", "c", "d"]
-	);
-	assert_eq!(sorted(client.sinter(&[key1, key2])), vec!["b", "c"]);
-	assert_eq!(sorted(client.sdiff(&[key1, key2])), vec!["a"]);
-	assert_eq!(client.sinter(&[key1, missing]), Vec::<String>::new());
-}
-
-#[test]
-#[serial]
-fn test_sequence_order_with_multi_key_between_single_key() {
-	let server = MockNimbisServer::new();
-	let mut client = server.get_client();
-	let (key1, key2) = find_same_shard_keys(2);
-
-	assert_eq!(
-		client.execute(&["SET", &key1, "v1"]),
-		RespValue::simple_string("OK")
-	);
-	assert_eq!(
-		client.execute(&["SET", &key2, "v2"]),
-		RespValue::simple_string("OK")
-	);
-	assert_eq!(
-		client.execute(&["DEL", &key1, &key2]),
-		RespValue::Integer(2)
-	);
-	assert_eq!(
-		client.execute(&["EXISTS", &key1, &key2]),
-		RespValue::Integer(0)
-	);
-	assert_eq!(
-		client.execute(&["PING"]),
-		RespValue::SimpleString("PONG".into())
-	);
 }
 
 #[test]
@@ -505,11 +302,11 @@ fn test_del_across_types() {
 	client.sadd("it:cross:set", &["m"]);
 	client.zadd("it:cross:zset", &[("1", "z")]);
 
-	assert_eq!(client.del(&["it:cross:str"]), 1);
-	assert_eq!(client.del(&["it:cross:hash"]), 1);
-	assert_eq!(client.del(&["it:cross:list"]), 1);
-	assert_eq!(client.del(&["it:cross:set"]), 1);
-	assert_eq!(client.del(&["it:cross:zset"]), 1);
+	assert_eq!(client.del("it:cross:str"), 1);
+	assert_eq!(client.del("it:cross:hash"), 1);
+	assert_eq!(client.del("it:cross:list"), 1);
+	assert_eq!(client.del("it:cross:set"), 1);
+	assert_eq!(client.del("it:cross:zset"), 1);
 
 	assert!(!client.exists("it:cross:str"));
 	assert!(!client.exists("it:cross:hash"));

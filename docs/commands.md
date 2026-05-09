@@ -8,26 +8,13 @@ Command implementation lives in `nimbis/src/cmd/`.
 
 Core types in `nimbis/src/cmd/mod.rs`:
 
-- `CmdMeta { name, arity, key_spec, kind }`
-- `CommandKind { Read, Write, Admin, Local }`
-- `KeySpec { None, First, All, Step }`
+- `CmdMeta { name, arity }`
 - `CmdContext { client_id }`
 - `Cmd` trait (`meta`, `do_cmd`, `execute`)
 - `ParsedCmd`
 - `CmdTable`
 
-`Cmd::execute` performs arity validation first, then calls `do_cmd` with the
-storage selected by the dispatcher or worker execution path.
-The dispatcher validates arity, extracts keys from `CmdMeta`, and routes the
-whole command to the owner worker.
-
-Command metadata is the routing source of truth:
-
-- `CommandKind::Local`: executes inline in the `CommandDispatcher` for the client session
-- `CommandKind::Admin`: broadcasts to all workers
-- `CommandKind::Read`: hashes extracted keys and routes to one worker
-- `CommandKind::Write`: hashes extracted keys, rejects cross-shard writes, and is locked by key in the worker execution path
-- `KeySpec` defines how keys are extracted from command arguments before routing or locking
+`Cmd::execute` performs arity validation first, then calls `do_cmd`.
 
 ## Arity Rules
 
@@ -63,9 +50,6 @@ Source of truth: `nimbis/src/cmd/table.rs`.
 
 - `SET` (`3`)
 - `GET` (`2`)
-- `MGET` (`-2`)
-- `MSET` (`-3`)
-- `MSETNX` (`-3`)
 - `APPEND` (`3`)
 
 ### Hash
@@ -90,9 +74,6 @@ Source of truth: `nimbis/src/cmd/table.rs`.
 
 - `SADD` (`-3`)
 - `SMEMBERS` (`2`)
-- `SUNION` (`-2`)
-- `SINTER` (`-2`)
-- `SDIFF` (`-2`)
 - `SISMEMBER` (`3`)
 - `SREM` (`-3`)
 - `SCARD` (`2`)
@@ -131,16 +112,7 @@ Nimbis is Redis-compatible for the implemented subset, but does **not** yet impl
 - `ZRANGE` supports `start stop [WITHSCORES]` rank mode only; flags such as `BYSCORE`, `BYLEX`, `REV`, and `LIMIT` are not part of this interface.
 - `CONFIG` is limited to `GET` and `SET` subcommands.
 - `CLIENT` is limited to `ID`, `SETNAME`, `GETNAME`, and `LIST`.
-- Transactions (`MULTI`/`EXEC`), pub/sub, scripting, streams, cluster commands, and ACL are not documented as implemented in this command table.
+- Multi-key string helpers like `MGET`/`MSET`, transactions (`MULTI`/`EXEC`), pub/sub, scripting, streams, cluster commands, and ACL are not documented as implemented in this command table.
 
 When adding new commands or options, update both `nimbis/src/cmd/table.rs` and this document together.
 
-## Multi-Key Routing Notes
-
-- Multi-key commands use `KeySpec` to extract all keys, then the dispatcher
-  routes the whole command to one worker.
-- All keys in a command must hash to the same worker. Cross-shard reads return
-  `ERR cross-shard command is not supported`; cross-shard writes return
-  `ERR cross-shard write command is not supported`.
-- `DEL`, `EXISTS`, `MGET`, `MSET`, `MSETNX`, `SUNION`, `SINTER`, and `SDIFF`
-  execute as shard-local multi-key commands.

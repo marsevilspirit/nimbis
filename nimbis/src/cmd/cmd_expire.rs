@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 
 #[derive(Debug, Clone)]
 pub struct ExpireCmd {
@@ -20,8 +18,6 @@ impl Default for ExpireCmd {
 			meta: CmdMeta {
 				name: "EXPIRE".to_string(),
 				arity: 3, // EXPIRE key seconds
-				key_spec: KeySpec::First,
-				kind: CommandKind::Write,
 			},
 		}
 	}

@@ -14,8 +14,6 @@ use crate::utils::user_key_prefix;
 impl Storage {
 	#[fastrace::trace]
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
-		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
-
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let write_opts = WriteOptions {
@@ -195,8 +193,6 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
-		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
-
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 

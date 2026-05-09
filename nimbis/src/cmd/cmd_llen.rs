@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
-use crate::cmd::CommandKind;
-use crate::cmd::KeySpec;
 
 pub struct LLenCmd {
 	meta: CmdMeta,
@@ -19,8 +17,6 @@ impl Default for LLenCmd {
 			meta: CmdMeta {
 				name: "LLEN".to_string(),
 				arity: 2, // LLEN key
-				key_spec: KeySpec::First,
-				kind: CommandKind::Read,
 			},
 		}
 	}

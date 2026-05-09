@@ -24,7 +24,7 @@ nimbis-storage = { path = "nimbis-storage" }
 nimbis-telemetry = { path = "nimbis-telemetry" }
 
 # Dependencies
-arc-swap = "1.8.1"
+arc-swap = "1.9.1"
 async-trait = "0.1.89"
 bytes = "1.11.0"
 chrono = "0.4.43"

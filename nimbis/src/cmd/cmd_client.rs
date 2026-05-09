@@ -8,8 +8,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 use crate::GCTX;
 
 /// Client command implementation.
@@ -31,8 +29,6 @@ impl Default for ClientCmd {
 			meta: CmdMeta {
 				name: "CLIENT".to_string(),
 				arity: -2,
-				key_spec: KeySpec::None,
-				kind: CommandKind::Local,
 			},
 			sub_cmds,
 		}
@@ -64,8 +60,6 @@ impl Default for ClientIdCmd {
 			meta: CmdMeta {
 				name: "ID".to_string(),
 				arity: 1,
-				key_spec: KeySpec::None,
-				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -92,8 +86,6 @@ impl Default for ClientSetNameCmd {
 			meta: CmdMeta {
 				name: "SETNAME".to_string(),
 				arity: 2,
-				key_spec: KeySpec::None,
-				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -124,8 +116,6 @@ impl Default for ClientGetNameCmd {
 			meta: CmdMeta {
 				name: "GETNAME".to_string(),
 				arity: 1,
-				key_spec: KeySpec::None,
-				kind: CommandKind::Local,
 			},
 		}
 	}
@@ -155,8 +145,6 @@ impl Default for ClientListCmd {
 			meta: CmdMeta {
 				name: "LIST".to_string(),
 				arity: 1,
-				key_spec: KeySpec::None,
-				kind: CommandKind::Local,
 			},
 		}
 	}

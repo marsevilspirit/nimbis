@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
-use crate::cmd::CommandKind;
-use crate::cmd::KeySpec;
 use crate::cmd::utils;
 
 pub struct LPopCmd {
@@ -20,8 +18,6 @@ impl Default for LPopCmd {
 			meta: CmdMeta {
 				name: "LPOP".to_string(),
 				arity: -2, // LPOP key [count]
-				key_spec: KeySpec::First,
-				kind: CommandKind::Write,
 			},
 		}
 	}

@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 
 pub struct ZRangeCmd {
 	meta: CmdMeta,
@@ -19,8 +17,6 @@ impl Default for ZRangeCmd {
 			meta: CmdMeta {
 				name: "ZRANGE".to_string(),
 				arity: -4, // ZRANGE key start stop [WITHSCORES]
-				key_spec: KeySpec::First,
-				kind: CommandKind::Read,
 			},
 		}
 	}

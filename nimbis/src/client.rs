@@ -12,14 +12,12 @@ use nimbis_resp::RespEncoder;
 use nimbis_resp::RespParseResult;
 use nimbis_resp::RespParser;
 use nimbis_resp::RespValue;
-use nimbis_storage::Storage;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 use crate::cmd::CmdContext;
-use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
 use crate::dispatcher::CommandDispatcher;
 use crate::worker::WorkerMessage;
@@ -98,13 +96,11 @@ impl ClientConnection {
 	pub fn new(
 		socket: TcpStream,
 		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
-		cmd_table: Arc<CmdTable>,
-		storage: Arc<Storage>,
 		ctx: CmdContext,
 	) -> Self {
 		Self {
 			socket,
-			dispatcher: CommandDispatcher::new(peers, cmd_table, storage, ctx),
+			dispatcher: CommandDispatcher::new(peers, ctx),
 			parser: RespParser::new(),
 		}
 	}
@@ -147,7 +143,7 @@ impl ClientConnection {
 								return Err(e.into());
 							}
 						};
-						self.dispatcher.dispatch(parsed_cmd).await?;
+						self.dispatcher.dispatch(parsed_cmd);
 					}
 					RespParseResult::Incomplete => {
 						break;

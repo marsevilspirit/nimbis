@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 
 pub struct HMGetCmd {
 	meta: CmdMeta,
@@ -19,8 +17,6 @@ impl Default for HMGetCmd {
 			meta: CmdMeta {
 				name: "HMGET".to_string(),
 				arity: -3, // HMGET key field [field ...]
-				key_spec: KeySpec::First,
-				kind: CommandKind::Read,
 			},
 		}
 	}

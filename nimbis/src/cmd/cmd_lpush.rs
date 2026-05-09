@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::CmdContext;
 use crate::cmd::Cmd;
 use crate::cmd::CmdMeta;
-use crate::cmd::CommandKind;
-use crate::cmd::KeySpec;
 
 pub struct LPushCmd {
 	meta: CmdMeta,
@@ -19,8 +17,6 @@ impl Default for LPushCmd {
 			meta: CmdMeta {
 				name: "LPUSH".to_string(),
 				arity: -3, // LPUSH key element [element ...]
-				key_spec: KeySpec::First,
-				kind: CommandKind::Write,
 			},
 		}
 	}

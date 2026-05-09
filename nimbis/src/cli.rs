@@ -26,8 +26,4 @@ pub struct Cli {
 	/// Number of worker threads (default: number of CPU cores)
 	#[arg(long)]
 	pub worker_threads: Option<usize>,
-
-	/// Tokio runtime threads per worker shard
-	#[arg(long)]
-	pub worker_runtime_threads: Option<usize>,
 }

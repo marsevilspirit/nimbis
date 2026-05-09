@@ -50,8 +50,7 @@ impl Worker {
 		cmd_table: Arc<CmdTable>,
 	) -> Self {
 		let thread_handle = thread::spawn(move || {
-			let rt = tokio::runtime::Builder::new_multi_thread()
-				.worker_threads(server_config!(worker_runtime_threads))
+			let rt = tokio::runtime::Builder::new_current_thread()
 				.enable_all()
 				.build()
 				.unwrap();
@@ -78,18 +77,10 @@ impl Worker {
 						match msg {
 							WorkerMessage::NewConnection(socket) => {
 								let peers = peers.clone();
-								let cmd_table = cmd_table.clone();
-								let storage = storage.clone();
 								tokio::spawn(async move {
 									let client_id = next_client_session_id();
 									let ctx = CmdContext { client_id };
-									let mut session = ClientConnection::new(
-										socket,
-										peers,
-										cmd_table,
-										storage.clone(),
-										ctx,
-									);
+									let mut session = ClientConnection::new(socket, peers, ctx);
 									GCTX!(client_sessions).register(client_id);
 									if let Err(e) = session.run().await {
 										debug!("Client session error: {}", e);
@@ -98,13 +89,9 @@ impl Worker {
 								});
 							}
 							WorkerMessage::CmdBatch(reqs) => {
-								let cmd_table = cmd_table.clone();
-								let storage = storage.clone();
-								tokio::spawn(async move {
-									for req in reqs {
-										Self::handle_cmd_request(req, &cmd_table, &storage).await;
-									}
-								});
+								for req in reqs {
+									Self::handle_cmd_request(req, &cmd_table, &storage).await;
+								}
 							}
 						}
 					}
@@ -148,13 +135,7 @@ impl Worker {
 	#[trace]
 	async fn handle_cmd_request_inner(req: CmdRequest, cmd_table: &CmdTable, storage: &Storage) {
 		let response = match cmd_table.get_cmd(&req.cmd_name) {
-			Some(cmd) => {
-				if let Err(err) = cmd.meta().validate_arity(req.args.len() + 1) {
-					RespValue::error(err)
-				} else {
-					cmd.execute(storage, &req.args, &req.ctx).await
-				}
-			}
+			Some(cmd) => cmd.execute(storage, &req.args, &req.ctx).await,
 			None => RespValue::error(format!(
 				"ERR unknown command '{}'",
 				req.cmd_name.to_lowercase()

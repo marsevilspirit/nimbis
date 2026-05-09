@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 
 /// SET command implementation
 pub struct SetCmd {
@@ -20,8 +18,6 @@ impl Default for SetCmd {
 			meta: CmdMeta {
 				name: "SET".to_string(),
 				arity: 3,
-				key_spec: KeySpec::First,
-				kind: CommandKind::Write,
 			},
 		}
 	}

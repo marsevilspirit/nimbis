@@ -4,7 +4,6 @@ pub mod cmd;
 pub mod config;
 pub mod context;
 pub mod dispatcher;
-pub mod key_hash;
 pub mod logo;
 pub mod server;
 pub mod worker;

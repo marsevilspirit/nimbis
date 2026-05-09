@@ -6,8 +6,6 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::CommandKind;
-use super::KeySpec;
 
 pub struct SaddCmd {
 	meta: CmdMeta,
@@ -19,8 +17,6 @@ impl Default for SaddCmd {
 			meta: CmdMeta {
 				name: "SADD".to_string(),
 				arity: -3,
-				key_spec: KeySpec::First,
-				kind: CommandKind::Write,
 			},
 		}
 	}

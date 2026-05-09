@@ -99,36 +99,6 @@ var _ = Describe("Set Commands", func() {
 		Expect(card).To(Equal(int64(1)))
 	})
 
-	It("should support same-shard SUNION, SINTER, and SDIFF", func() {
-		keys := findSameShardNKeysWithPrefix("e2e:set:same", util.WorkerThreads, 3)
-		key1, key2, missing := keys[0], keys[1], keys[2]
-		Expect(rdb.Del(ctx, key1, key2).Err()).To(Succeed())
-
-		_, err := rdb.SAdd(ctx, key1, "a", "b", "c").Result()
-		Expect(err).NotTo(HaveOccurred())
-		_, err = rdb.SAdd(ctx, key2, "b", "c", "d").Result()
-		Expect(err).NotTo(HaveOccurred())
-
-		union, err := rdb.SUnion(ctx, key1, key2).Result()
-		Expect(err).NotTo(HaveOccurred())
-		sort.Strings(union)
-		Expect(union).To(Equal([]string{"a", "b", "c", "d"}))
-
-		inter, err := rdb.SInter(ctx, key1, key2).Result()
-		Expect(err).NotTo(HaveOccurred())
-		sort.Strings(inter)
-		Expect(inter).To(Equal([]string{"b", "c"}))
-
-		diff, err := rdb.SDiff(ctx, key1, key2).Result()
-		Expect(err).NotTo(HaveOccurred())
-		sort.Strings(diff)
-		Expect(diff).To(Equal([]string{"a"}))
-
-		inter, err = rdb.SInter(ctx, key1, missing).Result()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(inter).To(BeEmpty())
-	})
-
 	It("should handle WRONGTYPE", func() {
 		key := "myset_wrongtype"
 		rdb.Set(ctx, key, "value", 0)

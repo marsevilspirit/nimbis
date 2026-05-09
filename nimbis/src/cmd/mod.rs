@@ -3,34 +3,11 @@ use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CommandKind {
-	Read,
-	Write,
-	Admin,
-	#[default]
-	Local,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum KeySpec {
-	#[default]
-	None,
-	First,
-	All,
-	Step {
-		first: usize,
-		step: usize,
-	},
-}
-
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Default)]
 pub struct CmdMeta {
 	pub name: String,
 	pub arity: i16,
-	pub key_spec: KeySpec,
-	pub kind: CommandKind,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -41,7 +18,7 @@ pub struct CmdContext {
 impl CmdMeta {
 	/// Validate argument count against arity
 	/// - Positive arity: requires exact match
-	/// - Negative arity: requires at least abs(arity) arguments
+	/// - Negative arity: allows up to abs(arity) arguments
 	pub fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
 		if self.arity > 0 {
 			// Positive: exact match required
@@ -64,35 +41,6 @@ impl CmdMeta {
 		// arity == 0 means any number of arguments is allowed
 		Ok(())
 	}
-
-	pub fn keys(&self, args: &[Bytes]) -> Result<Vec<Bytes>, RespValue> {
-		let keys = match &self.key_spec {
-			KeySpec::None => Vec::new(),
-			KeySpec::First => args.first().cloned().into_iter().collect(),
-			KeySpec::All => args.to_vec(),
-			KeySpec::Step { first, step } => {
-				if *step == 0 {
-					return Err(RespValue::error(format!(
-						"ERR invalid key spec for '{}' command",
-						self.name.to_lowercase()
-					)));
-				}
-				if args.len() < *first || !(args.len() - *first).is_multiple_of(*step) {
-					return Err(RespValue::error(format!(
-						"ERR wrong number of arguments for '{}' command",
-						self.name.to_lowercase()
-					)));
-				}
-				args.iter().skip(*first).step_by(*step).cloned().collect()
-			}
-		};
-
-		Ok(keys)
-	}
-
-	pub fn is_write(&self) -> bool {
-		self.kind == CommandKind::Write
-	}
 }
 
 /// Command trait - all commands must implement this
@@ -114,7 +62,6 @@ pub trait Cmd: Send + Sync {
 }
 
 /// Parsed command structure (renamed from Cmd to avoid conflict)
-#[derive(Debug, Clone)]
 pub struct ParsedCmd {
 	pub name: String,
 	pub args: Vec<Bytes>,
@@ -152,61 +99,6 @@ impl TryFrom<RespValue> for ParsedCmd {
 
 pub mod utils;
 
-#[cfg(test)]
-mod tests {
-	use bytes::Bytes;
-
-	use super::CmdMeta;
-	use super::CommandKind;
-	use super::KeySpec;
-
-	fn meta(key_spec: KeySpec) -> CmdMeta {
-		CmdMeta {
-			name: "TEST".to_string(),
-			arity: -1,
-			key_spec,
-			kind: CommandKind::Read,
-		}
-	}
-
-	#[test]
-	fn cmd_meta_extracts_first_key() {
-		let args = [Bytes::from_static(b"k1"), Bytes::from_static(b"v1")];
-		assert_eq!(
-			meta(KeySpec::First).keys(&args).unwrap(),
-			vec![args[0].clone()]
-		);
-	}
-
-	#[test]
-	fn cmd_meta_extracts_all_keys() {
-		let args = [Bytes::from_static(b"k1"), Bytes::from_static(b"k2")];
-		assert_eq!(meta(KeySpec::All).keys(&args).unwrap(), args.to_vec());
-	}
-
-	#[test]
-	fn cmd_meta_extracts_step_keys() {
-		let args = [
-			Bytes::from_static(b"k1"),
-			Bytes::from_static(b"v1"),
-			Bytes::from_static(b"k2"),
-			Bytes::from_static(b"v2"),
-		];
-		assert_eq!(
-			meta(KeySpec::Step { first: 0, step: 2 })
-				.keys(&args)
-				.unwrap(),
-			vec![args[0].clone(), args[2].clone()]
-		);
-	}
-
-	#[test]
-	fn cmd_meta_extracts_no_keys() {
-		let args = [Bytes::from_static(b"k1")];
-		assert!(meta(KeySpec::None).keys(&args).unwrap().is_empty());
-	}
-}
-
 mod cmd_append;
 mod cmd_client;
 mod cmd_config;
@@ -228,21 +120,15 @@ mod cmd_llen;
 mod cmd_lpop;
 mod cmd_lpush;
 mod cmd_lrange;
-mod cmd_mget;
-mod cmd_mset;
-mod cmd_msetnx;
 mod cmd_ping;
 mod cmd_rpop;
 mod cmd_rpush;
 mod cmd_sadd;
 mod cmd_scard;
-mod cmd_sdiff;
 mod cmd_set;
-mod cmd_sinter;
 mod cmd_sismember;
 mod cmd_smembers;
 mod cmd_srem;
-mod cmd_sunion;
 mod cmd_ttl;
 mod cmd_zadd;
 mod cmd_zcard;
@@ -272,21 +158,15 @@ pub use cmd_llen::LLenCmd;
 pub use cmd_lpop::LPopCmd;
 pub use cmd_lpush::LPushCmd;
 pub use cmd_lrange::LRangeCmd;
-pub use cmd_mget::MGetCmd;
-pub use cmd_mset::MSetCmd;
-pub use cmd_msetnx::MSetNxCmd;
 pub use cmd_ping::PingCmd;
 pub use cmd_rpop::RPopCmd;
 pub use cmd_rpush::RPushCmd;
 pub use cmd_sadd::SaddCmd;
 pub use cmd_scard::ScardCmd;
-pub use cmd_sdiff::SdiffCmd;
 pub use cmd_set::SetCmd;
-pub use cmd_sinter::SinterCmd;
 pub use cmd_sismember::SismemberCmd;
 pub use cmd_smembers::SmembersCmd;
 pub use cmd_srem::SremCmd;
-pub use cmd_sunion::SunionCmd;
 pub use cmd_ttl::TtlCmd;
 pub use cmd_zadd::ZAddCmd;
 pub use cmd_zcard::ZCardCmd;

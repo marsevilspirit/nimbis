@@ -13,13 +13,11 @@ use crate::string::meta::MetaKey;
 impl Storage {
 	#[fastrace::trace]
 	pub async fn lpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
-		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
 		self.list_push(key, elements, true).await
 	}
 
 	#[fastrace::trace]
 	pub async fn rpush(&self, key: Bytes, elements: Vec<Bytes>) -> Result<u64, StorageError> {
-		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
 		self.list_push(key, elements, false).await
 	}
 
@@ -95,13 +93,11 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn lpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, StorageError> {
-		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
 		self.list_pop(key, count, true).await
 	}
 
 	#[fastrace::trace]
 	pub async fn rpop(&self, key: Bytes, count: Option<usize>) -> Result<Vec<Bytes>, StorageError> {
-		let _guard = self.lock_keys(std::slice::from_ref(&key)).await;
 		self.list_pop(key, count, false).await
 	}
 
