@@ -182,7 +182,17 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 	run_with_runner(&config, &runner)
 }
 
-fn run_with_runner(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+trait Runner {
+	fn run_status(&self, program: &str, args: &[String]) -> Result<(), String>;
+	fn run_streaming_output(
+		&self,
+		program: &str,
+		args: &[String],
+		file: &Path,
+	) -> Result<(), String>;
+}
+
+fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	require_cmd(&config.redis_benchmark)?;
 	require_cmd(&config.redis_cli)?;
 	fs::create_dir_all(&config.output_dir).map_err(|error| error.to_string())?;
@@ -223,7 +233,7 @@ fn run_with_runner(config: &Config, runner: &ProcessRunner) -> Result<(), String
 	Ok(())
 }
 
-fn seed_fixed_data(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+fn seed_fixed_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	redis_cli(config, runner, &["SET", "bench:string:get", "value"])?;
 	redis_cli(config, runner, &["SET", "bench:string:ttl", "value"])?;
 	redis_cli(
@@ -282,7 +292,7 @@ fn seed_fixed_data(config: &Config, runner: &ProcessRunner) -> Result<(), String
 	Ok(())
 }
 
-fn seed_random_data(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+fn seed_random_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	seed_benchmark(
 		config,
 		runner,
@@ -336,7 +346,7 @@ fn seed_random_data(config: &Config, runner: &ProcessRunner) -> Result<(), Strin
 	Ok(())
 }
 
-fn run_builtin_suite(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+fn run_builtin_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	run_benchmark(
 		config,
 		runner,
@@ -345,7 +355,7 @@ fn run_builtin_suite(config: &Config, runner: &ProcessRunner) -> Result<(), Stri
 	)
 }
 
-fn run_comparison_suite(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+fn run_comparison_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	run_benchmark(
 		config,
 		runner,
@@ -364,7 +374,7 @@ fn run_comparison_suite(config: &Config, runner: &ProcessRunner) -> Result<(), S
 	Ok(())
 }
 
-fn run_custom_suite(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	let benchmarks: &[(&str, &[&str])] = &[
 		(
 			"del_multi_key",
@@ -440,16 +450,16 @@ fn run_custom_suite(config: &Config, runner: &ProcessRunner) -> Result<(), Strin
 	Ok(())
 }
 
-fn run_control_smoke_suite(config: &Config, runner: &ProcessRunner) -> Result<(), String> {
+fn run_control_smoke_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	run_benchmark(config, runner, "hello_2", &["HELLO", "2"])?;
 	run_benchmark(config, runner, "config_get_all", &["CONFIG", "GET", "*"])?;
 	run_benchmark(config, runner, "client_id", &["CLIENT", "ID"])?;
 	Ok(())
 }
 
-fn seed_benchmark(
+fn seed_benchmark<R: Runner>(
 	config: &Config,
-	runner: &ProcessRunner,
+	runner: &R,
 	command_args: &[&str],
 ) -> Result<(), String> {
 	let mut args = vec![
@@ -473,9 +483,9 @@ fn seed_benchmark(
 	runner.run_status(&config.redis_benchmark, &args)
 }
 
-fn run_benchmark(
+fn run_benchmark<R: Runner>(
 	config: &Config,
-	runner: &ProcessRunner,
+	runner: &R,
 	label: &str,
 	command_args: &[&str],
 ) -> Result<(), String> {
@@ -491,7 +501,7 @@ fn run_benchmark(
 	runner.run_streaming_output(&config.redis_benchmark, &args, &file)
 }
 
-fn redis_cli(config: &Config, runner: &ProcessRunner, command_args: &[&str]) -> Result<(), String> {
+fn redis_cli<R: Runner>(config: &Config, runner: &R, command_args: &[&str]) -> Result<(), String> {
 	let mut args = vec![
 		"-h".to_string(),
 		config.host.clone(),
@@ -504,7 +514,7 @@ fn redis_cli(config: &Config, runner: &ProcessRunner, command_args: &[&str]) -> 
 
 struct ProcessRunner;
 
-impl ProcessRunner {
+impl Runner for ProcessRunner {
 	fn run_status(&self, program: &str, args: &[String]) -> Result<(), String> {
 		let output = Command::new(program)
 			.args(args)
@@ -667,9 +677,101 @@ fn env_bool(env_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+	use std::cell::RefCell;
 	use std::path::Path;
+	use std::path::PathBuf;
+
+	use tempfile::tempdir;
 
 	use super::*;
+
+	#[derive(Debug, Clone, PartialEq, Eq)]
+	struct RecordedCall {
+		program: String,
+		args: Vec<String>,
+		output_file: Option<PathBuf>,
+	}
+
+	#[derive(Debug, Default)]
+	struct FakeRunner {
+		status_calls: RefCell<Vec<RecordedCall>>,
+		streaming_calls: RefCell<Vec<RecordedCall>>,
+	}
+
+	impl FakeRunner {
+		fn streamed_labels(&self) -> Vec<String> {
+			self.streaming_calls
+				.borrow()
+				.iter()
+				.map(|call| {
+					let output_path = call
+						.output_file
+						.as_ref()
+						.expect("streaming call has output file");
+					output_path
+						.file_stem()
+						.expect("output file has stem")
+						.to_string_lossy()
+						.into_owned()
+				})
+				.collect()
+		}
+
+		fn status_commands(&self, program: &str) -> Vec<Vec<String>> {
+			self.status_calls
+				.borrow()
+				.iter()
+				.filter(|call| call.program == program)
+				.map(|call| call.args.clone())
+				.collect()
+		}
+	}
+
+	impl Runner for FakeRunner {
+		fn run_status(&self, program: &str, args: &[String]) -> Result<(), String> {
+			self.status_calls.borrow_mut().push(RecordedCall {
+				program: program.to_string(),
+				args: args.to_vec(),
+				output_file: None,
+			});
+			Ok(())
+		}
+
+		fn run_streaming_output(
+			&self,
+			program: &str,
+			args: &[String],
+			file: &Path,
+		) -> Result<(), String> {
+			self.streaming_calls.borrow_mut().push(RecordedCall {
+				program: program.to_string(),
+				args: args.to_vec(),
+				output_file: Some(file.to_path_buf()),
+			});
+			fs::write(file, b"PING_INLINE: 1.00 requests per second\n")
+				.map_err(|error| error.to_string())
+		}
+	}
+
+	fn test_config(output_dir: PathBuf, profile: Profile) -> Config {
+		Config {
+			host: "127.0.0.1".into(),
+			port: 6379,
+			requests: 100,
+			clients: 4,
+			data_size: 16,
+			pipeline: 1,
+			random_keyspace: 32,
+			threads: Some(2),
+			csv: false,
+			output_dir,
+			seed_requests: 7,
+			redis_benchmark: "/bin/echo".into(),
+			redis_cli: "/bin/echo".into(),
+			extra_args: vec!["--cluster".into()],
+			profile,
+		}
+	}
 
 	#[test]
 	fn config_uses_env_style_defaults() {
@@ -752,5 +854,73 @@ mod tests {
 		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
 
 		assert_eq!(config.profile, Profile::Comparison);
+	}
+
+	#[test]
+	fn run_with_runner_executes_full_profile_suites_and_writes_outputs() {
+		let tempdir = tempdir().unwrap();
+		let config = test_config(tempdir.path().join("redis-benchmark"), Profile::Full);
+		let runner = FakeRunner::default();
+
+		run_with_runner(&config, &runner).unwrap();
+
+		let labels = runner.streamed_labels();
+		assert!(labels.contains(&"builtin_supported".to_string()));
+		assert!(labels.contains(&"del_multi_key".to_string()));
+		assert!(labels.contains(&"msetnx_multi_key".to_string()));
+		assert!(labels.contains(&"hello_2".to_string()));
+		assert!(labels.contains(&"client_id".to_string()));
+		assert_eq!(labels.len(), 29);
+
+		let redis_cli_calls = runner.status_commands("/bin/echo");
+		assert!(
+			redis_cli_calls
+				.iter()
+				.any(|args| args.ends_with(&["PING".into()]))
+		);
+		assert!(
+			redis_cli_calls
+				.iter()
+				.any(|args| args.ends_with(&["FLUSHDB".into()]))
+		);
+		assert!(redis_cli_calls.iter().any(|args| args.ends_with(&[
+			"SET".into(),
+			"bench:string:get".into(),
+			"value".into()
+		])));
+		assert!(redis_cli_calls.iter().any(|args| {
+			args.windows(4).any(|window| {
+				window
+					== [
+						"HSET".to_string(),
+						"bench:hash".to_string(),
+						"field1".to_string(),
+						"value1".to_string(),
+					]
+			})
+		}));
+		assert!(config.output_dir.join("builtin_supported.txt").exists());
+		assert!(config.output_dir.join("client_id.txt").exists());
+	}
+
+	#[test]
+	fn run_with_runner_executes_comparison_profile_only() {
+		let tempdir = tempdir().unwrap();
+		let config = test_config(tempdir.path().join("redis-benchmark"), Profile::Comparison);
+		let runner = FakeRunner::default();
+
+		run_with_runner(&config, &runner).unwrap();
+
+		let labels = runner.streamed_labels();
+		assert_eq!(
+			labels,
+			vec![
+				"builtin_comparison".to_string(),
+				"hget".to_string(),
+				"srem".to_string(),
+				"zrem".to_string(),
+			]
+		);
+		assert!(!config.output_dir.join("hello_2.txt").exists());
 	}
 }
