@@ -1,5 +1,6 @@
 pub mod benchmarks;
 pub mod checks;
+pub mod redis_benchmark;
 
 use std::io::Write;
 

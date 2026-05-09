@@ -226,11 +226,18 @@ fn parse_named_path(value: &str, benchmark_type: &str) -> Result<(String, String
 
 fn parse_benchmark(content: &str) -> HashMap<String, f64> {
 	let mut map = HashMap::new();
-	let re = Regex::new(r"([\w_]+):\s+([\d\.]+)\s+requests per second").unwrap();
+	let re = Regex::new(r"(.+):\s+([\d\.]+)\s+requests per second").unwrap();
 
 	for line in content.lines() {
 		if let Some(caps) = re.captures(line) {
-			let cmd = caps.get(1).unwrap().as_str();
+			let cmd = caps
+				.get(1)
+				.unwrap()
+				.as_str()
+				.split_whitespace()
+				.next()
+				.unwrap_or_default()
+				.trim_matches('\r');
 			let rps_str = caps.get(2).unwrap().as_str();
 			if let Ok(rps) = rps_str.parse::<f64>() {
 				map.insert(cmd.to_string(), rps);
@@ -279,5 +286,14 @@ mod tests {
 		assert!(report.contains("| GET | 190.00 | 200.00 | 180.00 | -5.00% | 🏆 +5.56% |"));
 
 		std::fs::remove_dir_all(dir).unwrap();
+	}
+
+	#[test]
+	fn parse_benchmark_uses_command_token_for_custom_commands() {
+		let content = "HGET bench:hash field1: 123.45 requests per second\n";
+		let parsed = parse_benchmark(content);
+
+		assert_eq!(parsed.get("HGET"), Some(&123.45));
+		assert!(!parsed.contains_key("field1"));
 	}
 }

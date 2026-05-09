@@ -30,6 +30,11 @@ bench package="" *args:
         cargo bench -p {{package}} {{args}}
     fi
 
+# Run redis-benchmark against a running Nimbis server
+[group: 'test']
+redis-bench *args:
+    cargo xtask redis-benchmark {{args}}
+
 # Check all crates
 [group: 'check']
 check: check-workspace check-code-fmt check-numbered-comments

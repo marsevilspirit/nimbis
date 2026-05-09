@@ -72,6 +72,7 @@ Available recipes:
     [test]
     bench       # Run storage benchmark target
     e2e-test    # Run e2e tests
+    redis-bench # Run redis-benchmark through xtask against a running Nimbis server
     test        # Run unit tests
 ```
 
