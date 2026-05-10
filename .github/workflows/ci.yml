@@ -40,22 +40,6 @@ jobs:
     - name: Check
       run: just check
 
-  cargo_shear:
-    name: Cargo Shear
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Setup Rust Toolchain
-      uses: dtolnay/rust-toolchain@nightly
-
-    - name: Cache Rust Dependencies
-      uses: Swatinem/rust-cache@v2
-      with:
-        shared-key: ${{ runner.os }}-rust-cargo-shear
-        cache-on-failure: true
-
     - name: Install cargo-shear
       uses: taiki-e/install-action@cargo-shear
 
@@ -284,36 +268,15 @@ jobs:
         shared-key: benchmark-xtask
         cache-on-failure: true
 
-    - name: Resolve main benchmark baseline run
-      id: resolve-main-run
-      uses: actions/github-script@v9
+    - name: Checkout Main for benchmark
+      uses: actions/checkout@v6
       with:
-        script: |
-          const runs = await github.rest.actions.listWorkflowRuns({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            workflow_id: 'ci.yml',
-            branch: 'main',
-            event: 'push',
-            status: 'completed',
-            per_page: 20,
-          });
+        ref: main
+        path: artifacts/main
 
-          const run = runs.data.workflow_runs.find((entry) => entry.conclusion === 'success');
-          if (!run) {
-            throw new Error('Could not find a successful CI workflow run on main.');
-          }
-
-          core.setOutput('run_id', String(run.id));
-
-    - name: Download main ubuntu release artifact
-      uses: actions/download-artifact@v8
-      with:
-        github-token: ${{ github.token }}
-        repository: ${{ github.repository }}
-        run-id: ${{ steps.resolve-main-run.outputs.run_id }}
-        name: nimbis-release-ubuntu-latest
-        path: artifacts/main/target/release
+    - name: Build Main benchmark binary
+      working-directory: artifacts/main
+      run: cargo build --release
 
     - name: Download PR ubuntu release artifact
       uses: actions/download-artifact@v8
@@ -352,14 +315,14 @@ jobs:
 
         redis-cli FLUSHDB || true
         redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
 
         echo "Running Benchmark on Redis..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_redis.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_redis.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_redis.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_redis.txt || true
+        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_redis.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_redis.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_redis.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_redis.txt || true
 
         sudo systemctl stop redis-server
 
@@ -373,14 +336,14 @@ jobs:
 
         redis-cli FLUSHDB || true
         redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
 
         echo "Running Benchmark on Redis (Pipeline)..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_redis_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_redis_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_redis_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_redis_pipeline.txt || true
+        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_redis_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_redis_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_redis_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_redis_pipeline.txt || true
 
         sudo systemctl stop redis-server
 
@@ -395,14 +358,14 @@ jobs:
 
         redis-cli FLUSHDB || true
         redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
 
         echo "Running Benchmark on PikiwiDB ${PIKIWIDB_VERSION}..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_pikiwidb.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_pikiwidb.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_pikiwidb.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb.txt || true
+        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_pikiwidb.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_pikiwidb.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_pikiwidb.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb.txt || true
 
     - name: Run PikiwiDB Benchmark with Pipeline
       run: |
@@ -415,14 +378,14 @@ jobs:
 
         redis-cli FLUSHDB || true
         redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
 
         echo "Running Benchmark on PikiwiDB ${PIKIWIDB_VERSION} (Pipeline)..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_pikiwidb_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_pikiwidb_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
+        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_pikiwidb_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_pikiwidb_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
 
     - name: Run Kvrocks Benchmark
       run: |
@@ -435,14 +398,14 @@ jobs:
 
         redis-cli FLUSHDB || true
         redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
 
         echo "Running Benchmark on Kvrocks ${KVROCKS_RELEASE}..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_kvrocks.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_kvrocks.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks.txt || true
+        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_kvrocks.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_kvrocks.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks.txt || true
 
     - name: Run Kvrocks Benchmark with Pipeline
       run: |
@@ -455,14 +418,14 @@ jobs:
 
         redis-cli FLUSHDB || true
         redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
 
         echo "Running Benchmark on Kvrocks ${KVROCKS_RELEASE} (Pipeline)..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_kvrocks_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_kvrocks_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
+        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_kvrocks_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_kvrocks_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
+        redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
 
     - name: Run Main benchmark
       run: |
@@ -472,16 +435,10 @@ jobs:
         echo "Nimbis (Main) started with PID $NIMBIS_PID"
         sleep 10
 
-        redis-cli FLUSHDB || true
-        redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
-
         echo "Running Benchmark on Main..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} > benchmark_main.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} HGET bench:hash field1 >> benchmark_main.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} SREM bench:set:srem member:__rand_int__ >> benchmark_main.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_main.txt || true
+        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=1 OUTPUT_DIR=benchmark_main_suites \
+          cargo xtask redis-benchmark --profile comparison \
+          > benchmark_main.txt
 
     - name: Run Main benchmark with pipeline
       run: |
@@ -491,16 +448,10 @@ jobs:
         echo "Nimbis (Main) started with PID $NIMBIS_PID"
         sleep 10
 
-        redis-cli FLUSHDB || true
-        redis-cli HSET bench:hash field1 value1 || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 SADD bench:set:srem member:__rand_int__ > /dev/null || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 ZADD bench:zset:zrem __rand_int__ member:__rand_int__ > /dev/null || true
-
         echo "Running Benchmark on Main (Pipeline)..."
-        redis-benchmark -q -t set,get,hset,lpush,lpop,sadd,zadd -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 > benchmark_main_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 HGET bench:hash field1 >> benchmark_main_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_main_pipeline.txt || true
-        redis-benchmark -q -n 500000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_main_pipeline.txt || true
+        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=50 OUTPUT_DIR=benchmark_main_pipeline_suites \
+          cargo xtask redis-benchmark --profile comparison \
+          > benchmark_main_pipeline.txt
 
     - name: Run PR benchmark
       run: |
@@ -511,7 +462,7 @@ jobs:
         sleep 10
 
         echo "Running Benchmark on PR..."
-        N=500000 C=100 R=100000 D=${{ matrix.data_size }} P=1 OUTPUT_DIR=benchmark_pr_suites \
+        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=1 OUTPUT_DIR=benchmark_pr_suites \
           cargo xtask redis-benchmark --profile comparison \
           > benchmark_pr.txt
 
@@ -524,7 +475,7 @@ jobs:
         sleep 10
 
         echo "Running Benchmark on PR (Pipeline)..."
-        N=500000 C=100 R=100000 D=${{ matrix.data_size }} P=50 OUTPUT_DIR=benchmark_pr_pipeline_suites \
+        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=50 OUTPUT_DIR=benchmark_pr_pipeline_suites \
           cargo xtask redis-benchmark --profile comparison \
           > benchmark_pr_pipeline.txt
 
