@@ -36,7 +36,7 @@ futures = "0.3.31"
 log = "0.4.29"
 memchr = "2.8.0"
 num_cpus = "1.17.0"
-opentelemetry = "0.31.0"
+opentelemetry = "0.32.0"
 opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "http-proto", "http-json", "reqwest-client"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
 quote = "1.0.45"
