@@ -13,7 +13,7 @@ use clap::ValueEnum;
 
 use crate::write_stdout_line;
 
-const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd,mset";
+const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd";
 
 #[derive(ClapArgs, Debug, Default)]
 pub struct Args {
@@ -398,25 +398,6 @@ fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 			"append",
 			&["APPEND", "bench:string:append:__rand_int__", "value"],
 		),
-		(
-			"mget_multi_key",
-			&[
-				"MGET",
-				"bench:string:a:__rand_int__",
-				"bench:string:b:__rand_int__",
-				"bench:string:missing:__rand_int__",
-			],
-		),
-		(
-			"msetnx_multi_key",
-			&[
-				"MSETNX",
-				"bench:string:msetnx:a:__rand_int__",
-				"value-a",
-				"bench:string:msetnx:b:__rand_int__",
-				"value-b",
-			],
-		),
 		("hdel", &["HDEL", "bench:hash:hdel", "field:__rand_int__"]),
 		("hget", &["HGET", "bench:hash", "field1"]),
 		("hlen", &["HLEN", "bench:hash"]),
@@ -426,10 +407,8 @@ fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 		),
 		("hgetall", &["HGETALL", "bench:hash"]),
 		("llen", &["LLEN", "bench:list"]),
+		("lrange", &["LRANGE", "bench:list", "0", "-1"]),
 		("smembers", &["SMEMBERS", "bench:set:a"]),
-		("sunion", &["SUNION", "bench:set:a", "bench:set:b"]),
-		("sinter", &["SINTER", "bench:set:a", "bench:set:b"]),
-		("sdiff", &["SDIFF", "bench:set:a", "bench:set:b"]),
 		("sismember", &["SISMEMBER", "bench:set:a", "a"]),
 		("srem", &["SREM", "bench:set:srem", "member:__rand_int__"]),
 		("scard", &["SCARD", "bench:set:a"]),
@@ -678,6 +657,7 @@ fn env_bool(env_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
 	use std::cell::RefCell;
+	use std::collections::BTreeSet;
 	use std::path::Path;
 	use std::path::PathBuf;
 
@@ -698,6 +678,48 @@ mod tests {
 		streaming_calls: RefCell<Vec<RecordedCall>>,
 	}
 
+	const BENCHMARKED_FULL_PROFILE_COMMANDS: &[&str] = &[
+		"APPEND",
+		"CLIENT",
+		"CONFIG",
+		"DECR",
+		"DEL",
+		"EXISTS",
+		"EXPIRE",
+		"GET",
+		"HELLO",
+		"HDEL",
+		"HGET",
+		"HGETALL",
+		"HLEN",
+		"HMGET",
+		"HSET",
+		"INCR",
+		"LLEN",
+		"LPOP",
+		"LPUSH",
+		"LRANGE",
+		"PING",
+		"RPOP",
+		"RPUSH",
+		"SADD",
+		"SCARD",
+		"SET",
+		"SISMEMBER",
+		"SMEMBERS",
+		"SREM",
+		"TTL",
+		"ZADD",
+		"ZCARD",
+		"ZRANGE",
+		"ZREM",
+		"ZSCORE",
+	];
+
+	const BENCHMARKED_COMPARISON_PROFILE_COMMANDS: &[&str] = &[
+		"GET", "HGET", "HSET", "LPOP", "LPUSH", "SADD", "SET", "SREM", "ZADD", "ZREM",
+	];
+
 	impl FakeRunner {
 		fn streamed_labels(&self) -> Vec<String> {
 			self.streaming_calls
@@ -717,6 +739,14 @@ mod tests {
 				.collect()
 		}
 
+		fn streamed_commands(&self) -> BTreeSet<String> {
+			self.streaming_calls
+				.borrow()
+				.iter()
+				.flat_map(|call| benchmarked_commands(&call.args))
+				.collect()
+		}
+
 		fn status_commands(&self, program: &str) -> Vec<Vec<String>> {
 			self.status_calls
 				.borrow()
@@ -725,6 +755,31 @@ mod tests {
 				.map(|call| call.args.clone())
 				.collect()
 		}
+	}
+
+	fn benchmarked_commands(args: &[String]) -> Vec<String> {
+		if let Some(index) = args.iter().position(|arg| arg == "-t") {
+			return args
+				.get(index + 1)
+				.into_iter()
+				.flat_map(|commands| commands.split(','))
+				.map(|command| command.to_ascii_uppercase())
+				.collect();
+		}
+
+		let known_commands = benchmarked_command_set(BENCHMARKED_FULL_PROFILE_COMMANDS);
+		args.iter()
+			.find(|arg| known_commands.contains(arg.as_str()))
+			.into_iter()
+			.cloned()
+			.collect()
+	}
+
+	fn benchmarked_command_set(commands: &[&str]) -> BTreeSet<String> {
+		commands
+			.iter()
+			.map(|command| (*command).to_string())
+			.collect()
 	}
 
 	impl Runner for FakeRunner {
@@ -867,10 +922,14 @@ mod tests {
 		let labels = runner.streamed_labels();
 		assert!(labels.contains(&"builtin_supported".to_string()));
 		assert!(labels.contains(&"del_multi_key".to_string()));
-		assert!(labels.contains(&"msetnx_multi_key".to_string()));
+		assert!(labels.contains(&"lrange".to_string()));
 		assert!(labels.contains(&"hello_2".to_string()));
 		assert!(labels.contains(&"client_id".to_string()));
-		assert_eq!(labels.len(), 29);
+		assert_eq!(labels.len(), 25);
+		assert_eq!(
+			runner.streamed_commands(),
+			benchmarked_command_set(BENCHMARKED_FULL_PROFILE_COMMANDS)
+		);
 
 		let redis_cli_calls = runner.status_commands("/bin/echo");
 		assert!(
@@ -920,6 +979,10 @@ mod tests {
 				"srem".to_string(),
 				"zrem".to_string(),
 			]
+		);
+		assert_eq!(
+			runner.streamed_commands(),
+			benchmarked_command_set(BENCHMARKED_COMPARISON_PROFILE_COMMANDS)
 		);
 		assert!(!config.output_dir.join("hello_2.txt").exists());
 	}

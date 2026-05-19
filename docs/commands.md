@@ -97,12 +97,24 @@ Source of truth: `nimbis/src/cmd/table.rs`.
   - `CLIENT GETNAME`
   - `CLIENT LIST`
 
+## Benchmark Alignment
+
+The `full` redis-benchmark profile in `xtask/src/redis_benchmark.rs` should
+cover this implemented command table. `FLUSHDB` is the exception: it is used for
+benchmark setup and cleanup, not throughput comparison.
+
+The `comparison` redis-benchmark profile is intentionally smaller so CI can
+compare PR and main branch performance across a stable command subset. It must
+still contain only commands listed in this document.
+
 ## Add a New Command
 
 1. Add `cmd_xxx.rs` under `nimbis/src/cmd/`.
 2. Implement `Cmd` for the command struct.
 3. Export the module in `nimbis/src/cmd/mod.rs`.
 4. Register it in `nimbis/src/cmd/table.rs`.
+5. Update this document, `docs/redis-benchmark.md`, and the benchmark profiles
+   in `xtask/src/redis_benchmark.rs` together.
 
 ## Redis Compatibility Notes (Known Gaps)
 
@@ -114,5 +126,5 @@ Nimbis is Redis-compatible for the implemented subset, but does **not** yet impl
 - `CLIENT` is limited to `ID`, `SETNAME`, `GETNAME`, and `LIST`.
 - Multi-key string helpers like `MGET`/`MSET`, transactions (`MULTI`/`EXEC`), pub/sub, scripting, streams, cluster commands, and ACL are not documented as implemented in this command table.
 
-When adding new commands or options, update both `nimbis/src/cmd/table.rs` and this document together.
-
+When adding new commands or options, update `nimbis/src/cmd/table.rs`, this
+document, and the benchmark documentation/profile lists together.

@@ -82,10 +82,11 @@ cargo xtask redis-benchmark --n 10000 --c 100 --p 16 --threads 4
 Extra arguments for `redis-benchmark` can be passed after `--` and are forwarded
 to every benchmark invocation.
 
-The default command profile is `full`, which covers all Nimbis-supported
-commands listed below. Benchmark CI uses `--profile comparison` for the
-main-vs-PR comparison so the main branch can be benchmarked before it has newly
-added commands from a PR.
+The default command profile is `full`, which covers the currently implemented
+Nimbis command table from [Commands](commands.md). `FLUSHDB` is used only for
+setup and cleanup isolation, not as a throughput benchmark. Benchmark CI uses
+`--profile comparison` for the main-vs-PR comparison so the main branch can be
+benchmarked before it has newly added commands from a PR.
 
 ## Built-In Coverage
 
@@ -106,7 +107,6 @@ Built-in Redis tests enabled for Nimbis:
 - `sadd`
 - `hset`
 - `zadd`
-- `mset`
 
 Built-in Redis tests skipped because Nimbis does not currently implement the
 commands:
@@ -115,10 +115,10 @@ commands:
 - `zpopmin`
 - `xadd`
 
-Redis `LRANGE` built-ins are skipped from the default Nimbis benchmark because
-current LRANGE performance needs separate optimization work, and
+Redis `LRANGE` built-ins are skipped from the Nimbis benchmark because
 `redis-benchmark -t lrange` expands into the larger `LRANGE_300`,
-`LRANGE_500`, and `LRANGE_600` cases.
+`LRANGE_500`, and `LRANGE_600` cases. The `full` profile covers Nimbis
+`LRANGE` with a direct custom command instead.
 
 - `lrange`
 - `lrange_100`
@@ -133,16 +133,21 @@ directly to `redis-benchmark`.
 
 Covered command groups:
 
-- String/generic: `DEL`, `EXISTS`, `DECR`, `APPEND`, `MGET`, `MSETNX`
+- String/generic: `DEL`, `EXISTS`, `DECR`, `APPEND`
 - Hash: `HDEL`, `HGET`, `HLEN`, `HMGET`, `HGETALL`
-- List: `LLEN`
-- Set: `SMEMBERS`, `SUNION`, `SINTER`, `SDIFF`, `SISMEMBER`, `SREM`, `SCARD`
+- List: `LLEN`, `LRANGE`
+- Set: `SMEMBERS`, `SISMEMBER`, `SREM`, `SCARD`
 - Sorted set: `ZRANGE`, `ZSCORE`, `ZREM`, `ZCARD`
 - TTL: `EXPIRE`, `TTL`
 - Control smoke: `HELLO 2`, `CONFIG GET *`, `CLIENT ID`
 
 `FLUSHDB` is used only for setup and cleanup isolation. It is not included in
 throughput comparisons.
+
+The `comparison` profile is intentionally smaller than `full`. It benchmarks:
+
+- Built-in tests: `set`, `get`, `hset`, `lpush`, `lpop`, `sadd`, `zadd`
+- Custom commands: `HGET`, `SREM`, `ZREM`
 
 ## Notes
 
