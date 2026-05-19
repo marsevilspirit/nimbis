@@ -128,6 +128,40 @@ jobs:
         path: target/release/nimbis.exe
         if-no-files-found: error
 
+  build_main_release:
+    name: Build Main Release
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.base.sha }}
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: llvm-tools-preview
+
+    - name: Cache Rust Dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ubuntu-latest-rust-build-main-release
+        cache-on-failure: true
+
+    - name: Install just
+      uses: taiki-e/install-action@just
+
+    - name: Build Release
+      run: just build --release
+
+    - name: Upload Main Release Binary
+      uses: actions/upload-artifact@v7
+      with:
+        name: nimbis-release-main-ubuntu-latest
+        path: target/release/nimbis
+        if-no-files-found: error
+
   e2e_local:
     name: E2E Test (Local Filesystem)
     needs: build_release
@@ -226,7 +260,7 @@ jobs:
   benchmark:
     name: Benchmark (${{ matrix.slot_title }}, ${{ matrix.data_size }} bytes)
     if: ${{ github.event_name == 'pull_request' }}
-    needs: build_release
+    needs: [build_release, build_main_release]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -268,15 +302,11 @@ jobs:
         shared-key: benchmark-xtask
         cache-on-failure: true
 
-    - name: Checkout Main for benchmark
-      uses: actions/checkout@v6
+    - name: Download main benchmark binary
+      uses: actions/download-artifact@v8
       with:
-        ref: main
-        path: artifacts/main
-
-    - name: Build Main benchmark binary
-      working-directory: artifacts/main
-      run: cargo build --release
+        name: nimbis-release-main-ubuntu-latest
+        path: artifacts/main/target/release
 
     - name: Download PR ubuntu release artifact
       uses: actions/download-artifact@v8
@@ -429,7 +459,8 @@ jobs:
 
     - name: Run Main benchmark
       run: |
-        ./artifacts/main/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/main \
+          ./artifacts/main/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (Main) started with PID $NIMBIS_PID"
@@ -442,7 +473,8 @@ jobs:
 
     - name: Run Main benchmark with pipeline
       run: |
-        ./artifacts/main/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/main-pipeline \
+          ./artifacts/main/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (Main) started with PID $NIMBIS_PID"
@@ -455,7 +487,8 @@ jobs:
 
     - name: Run PR benchmark
       run: |
-        ./artifacts/pr/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/pr \
+          ./artifacts/pr/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (PR) started with PID $NIMBIS_PID"
@@ -468,7 +501,8 @@ jobs:
 
     - name: Run PR benchmark with pipeline
       run: |
-        ./artifacts/pr/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/pr-pipeline \
+          ./artifacts/pr/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (PR) started with PID $NIMBIS_PID"
