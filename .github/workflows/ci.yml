@@ -459,7 +459,8 @@ jobs:
 
     - name: Run Main benchmark
       run: |
-        ./artifacts/main/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/main \
+          ./artifacts/main/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (Main) started with PID $NIMBIS_PID"
@@ -472,7 +473,8 @@ jobs:
 
     - name: Run Main benchmark with pipeline
       run: |
-        ./artifacts/main/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/main-pipeline \
+          ./artifacts/main/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (Main) started with PID $NIMBIS_PID"
@@ -485,7 +487,8 @@ jobs:
 
     - name: Run PR benchmark
       run: |
-        ./artifacts/pr/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/pr \
+          ./artifacts/pr/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (PR) started with PID $NIMBIS_PID"
@@ -498,7 +501,8 @@ jobs:
 
     - name: Run PR benchmark with pipeline
       run: |
-        ./artifacts/pr/target/release/nimbis &
+        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/pr-pipeline \
+          ./artifacts/pr/target/release/nimbis &
         NIMBIS_PID=$!
         trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
         echo "Nimbis (PR) started with PID $NIMBIS_PID"
