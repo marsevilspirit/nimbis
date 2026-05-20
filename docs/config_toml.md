@@ -13,8 +13,8 @@ Basic server settings determine how Nimbis listens to incoming connections and h
 host = "127.0.0.1"
 port = 6379
 
-# Number of worker threads (default: number of CPU cores)
-worker_threads = 8
+# Number of Tokio runtime worker threads (default: number of CPU cores)
+runtime_threads = 8
 ```
 
 ## Object Store Configuration

@@ -141,7 +141,7 @@ pub struct ServerConfig {
 	#[online_config(immutable)]
 	pub trace_report_interval_ms: u64,
 	#[online_config(immutable)]
-	pub worker_threads: usize,
+	pub runtime_threads: usize,
 }
 
 impl ServerConfig {
@@ -208,7 +208,7 @@ impl Default for ServerConfig {
 			trace_protocol: "grpc".into(),
 			trace_export_timeout_seconds: 10,
 			trace_report_interval_ms: 1000,
-			worker_threads: num_cpus::get(),
+			runtime_threads: num_cpus::get(),
 		}
 	}
 }
@@ -252,7 +252,7 @@ pub static SERVER_CONF: GlobalConfig = GlobalConfig::new();
 /// Helper macro to access server configuration fields
 ///
 /// Usage:
-/// - For Copy types (numbers): `let n = server_config!(worker_threads);`
+/// - For Copy types (numbers): `let n = server_config!(runtime_threads);`
 /// - For Borrowed types (Strings): `let s = &server_config!(host);`
 #[macro_export]
 macro_rules! server_config {
@@ -277,8 +277,8 @@ pub fn setup(args: Cli) -> Result<(), ConfigError> {
 	if let Some(log_level) = args.log_level {
 		config.log_level = log_level;
 	}
-	if let Some(t) = args.worker_threads {
-		config.worker_threads = t;
+	if let Some(t) = args.runtime_threads {
+		config.runtime_threads = t;
 	}
 	apply_env_overrides(&mut config, std::env::vars());
 
@@ -468,7 +468,7 @@ mod tests {
 		let port = server_config!(port);
 		assert_eq!(port, 6379);
 
-		let threads = server_config!(worker_threads);
+		let threads = server_config!(runtime_threads);
 		assert_eq!(threads, num_cpus::get());
 	}
 
@@ -488,7 +488,7 @@ log_output = "file"
 log_rotation = "hourly"
 trace_enabled = true
 trace_endpoint = "http://localhost:4317"
-worker_threads = 4
+runtime_threads = 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
 
@@ -508,7 +508,7 @@ worker_threads = 4
 		assert_eq!(config.log_output, "file");
 		assert_eq!(config.log_rotation, "hourly");
 		assert!(config.trace_enabled);
-		assert_eq!(config.worker_threads, 4);
+		assert_eq!(config.runtime_threads, 4);
 	}
 
 	#[test]
@@ -530,7 +530,7 @@ worker_threads = 4
   "log_rotation": "hourly",
   "trace_enabled": true,
   "trace_endpoint": "http://localhost:4317",
-  "worker_threads": 4
+  "runtime_threads": 4
 }
 "#;
 		std::fs::write(&file_path, content).unwrap();
@@ -570,7 +570,7 @@ log_output: "file"
 log_rotation: "hourly"
 trace_enabled: true
 trace_endpoint: "http://localhost:4317"
-worker_threads: 4
+runtime_threads: 4
 "#;
 		std::fs::write(&file_path, content).unwrap();
 

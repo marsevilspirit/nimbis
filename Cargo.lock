@@ -1802,6 +1802,7 @@ dependencies = [
  "bytes",
  "chrono",
  "criterion",
+ "dashmap",
  "fastrace",
  "futures",
  "log",

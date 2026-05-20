@@ -198,7 +198,7 @@ pub struct ServerConfig {
     pub trace_report_interval_ms: u64,
 
     #[online_config(immutable)]
-    pub worker_threads: usize,
+    pub runtime_threads: usize,
 }
 ```
 

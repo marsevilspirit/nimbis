@@ -78,7 +78,7 @@ var _ = Describe("CONFIG Commands", func() {
 			// host, port, object_store_url, object_store_options, save, appendonly,
 			// log_level, log_output, log_rotation, trace_enabled, trace_endpoint,
 			// trace_sampling_ratio, trace_protocol, trace_export_timeout_seconds,
-			// trace_report_interval_ms, worker_threads
+			// trace_report_interval_ms, runtime_threads
 			Expect(result).To(HaveLen(16))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
@@ -96,7 +96,7 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveKeyWithValue("trace_protocol", "grpc"))
 			Expect(result).To(HaveKeyWithValue("trace_export_timeout_seconds", "10"))
 			Expect(result).To(HaveKeyWithValue("trace_report_interval_ms", "1000"))
-			workerThreads, ok := result["worker_threads"]
+			workerThreads, ok := result["runtime_threads"]
 			Expect(ok).To(BeTrue())
 			workerThreadsInt, convErr := strconv.Atoi(workerThreads)
 			Expect(convErr).NotTo(HaveOccurred())

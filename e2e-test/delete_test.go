@@ -66,4 +66,17 @@ var _ = Describe("DEL Commands", func() {
 		deleted := rdb.Del(ctx, "nonexistent").Val()
 		Expect(deleted).To(Equal(int64(0)), "Should delete 0 keys")
 	})
+
+	It("should delete multiple keys and count only existing keys", func() {
+		Expect(rdb.Set(ctx, "key1", "value1", 0).Err()).NotTo(HaveOccurred())
+		Expect(rdb.HSet(ctx, "hash1", "field1", "value1").Err()).NotTo(HaveOccurred())
+
+		deleted, err := rdb.Del(ctx, "key1", "hash1", "missing").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleted).To(Equal(int64(2)))
+
+		exists, err := rdb.Exists(ctx, "key1", "hash1").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(Equal(int64(0)))
+	})
 })

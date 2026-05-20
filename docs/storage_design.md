@@ -4,7 +4,7 @@ This document describes the current storage design in `nimbis-storage`.
 
 ## Overview
 
-Nimbis uses **five isolated SlateDB instances** per shard:
+Nimbis uses **five isolated SlateDB instances** for the logical database:
 
 - `string_db`: String payloads and metadata for non-string types
 - `hash_db`: Hash fields
@@ -22,11 +22,31 @@ pub struct Storage {
     pub(crate) list_db: Arc<Db>,
     pub(crate) set_db: Arc<Db>,
     pub(crate) zset_db: Arc<Db>,
+    locks: Arc<StorageLocks>,
 }
 ```
 
 Each data type has its own database instance for isolation and predictable performance.
-`Storage::open(path, shard_id)` and `Storage::open_object_store(url, options, shard_id)` open all five DBs per shard.
+`Storage::open(path, shard_id)` and `Storage::open_object_store(url, options, shard_id)`
+open all five DBs under either the root path (`None`) or a shard subdirectory (`Some(id)`).
+The server opens one shared storage instance with `None`.
+
+## Command Locking
+
+`Storage` also owns command-level concurrency control through
+`nimbis-storage/src/lock.rs`.
+
+The lock state has two layers:
+
+- a database-level `RwLock<()>`
+- a stable map of per-key `RwLock<()>` values
+
+Regular key commands acquire a database read lock, then per-key locks in sorted
+raw-byte order. Read commands use read locks, write commands use write locks,
+and a key that appears in both sets is treated as a write key.
+
+`FLUSHDB` acquires the database write lock and is mutually exclusive with all
+regular key commands.
 
 ## Key Encoding
 
@@ -105,12 +125,12 @@ Expiration for all top-level keys is driven by `string_db` metadata TTL:
 - `-1`: key exists without expiration
 - `-2`: key does not exist (or already expired)
 
-## Sharding Layout
+## Storage Layout
 
-Per worker shard, files are organized under:
+The server's default layout is:
 
 ```text
-{object_store_url path}/shard-{id}/
+{object_store_url path}/
   string/
   hash/
   list/
@@ -118,18 +138,22 @@ Per worker shard, files are organized under:
   zset/
 ```
 
-This enables per-worker isolation and avoids cross-shard lock contention.
+The storage API still accepts an optional shard ID for tests and lower-level
+experiments. When `Some(id)` is provided, files are rooted under
+`{object_store_url path}/shard-{id}/`.
 
 ## Storage Initialization
 
-Server workers initialize storage from the configured object store URL and options:
+The server initializes one shared storage instance from the configured object
+store URL and options:
 
 ```rust
 let storage = Storage::open_object_store(
     "file:nimbis_store",
     std::iter::empty::<(&str, &str)>(),
-    Some(shard_id),
+    None,
 ).await?;
 ```
 
-This flow parses the URL/options into an object store backend, then opens the five per-shard SlateDB instances under `shard-{id}`.
+This flow parses the URL/options into an object store backend, then opens the
+five SlateDB instances under the configured root.

@@ -1,5 +1,7 @@
 mod mock;
 
+use std::thread;
+
 use mock::MockNimbisServer;
 use mock::utils::resp_error;
 use nimbis_resp::RespValue;
@@ -67,6 +69,69 @@ fn test_del_and_exists() {
 	assert!(!client.exists("it:del:key"));
 	assert_eq!(client.del("it:del:key"), 0);
 	assert_eq!(client.get("it:del:key"), "");
+}
+
+#[test]
+#[serial]
+fn test_del_and_exists_multi_key() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+
+	assert_eq!(client.set("it:del:key:1", "hello"), "OK");
+	assert_eq!(client.set("it:del:key:2", "world"), "OK");
+
+	assert_eq!(
+		client.execute(&["EXISTS", "it:del:key:1", "it:del:key:2", "missing"]),
+		RespValue::Integer(2)
+	);
+	assert_eq!(
+		client.execute(&["DEL", "it:del:key:1", "it:del:key:2", "missing"]),
+		RespValue::Integer(2)
+	);
+	assert_eq!(
+		client.execute(&["EXISTS", "it:del:key:1", "it:del:key:2"]),
+		RespValue::Integer(0)
+	);
+}
+
+#[test]
+#[serial]
+fn test_pipeline_response_order() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+
+	let responses = client.execute_pipeline(&[
+		&["SET", "it:pipeline:key", "1"],
+		&["INCR", "it:pipeline:key"],
+		&["GET", "it:pipeline:key"],
+	]);
+
+	assert_eq!(responses[0], RespValue::SimpleString("OK".into()));
+	assert_eq!(responses[1], RespValue::Integer(2));
+	assert_eq!(responses[2], RespValue::bulk_string("2"));
+}
+
+#[test]
+#[serial]
+fn test_concurrent_incr_from_multiple_clients() {
+	let server = MockNimbisServer::new();
+	let mut setup_client = server.get_client();
+	assert_eq!(setup_client.set("it:runtime:counter", "0"), "OK");
+	drop(setup_client);
+
+	thread::scope(|scope| {
+		for _ in 0..8 {
+			scope.spawn(|| {
+				let mut client = server.get_client();
+				for _ in 0..100 {
+					client.incr("it:runtime:counter");
+				}
+			});
+		}
+	});
+
+	let mut verify_client = server.get_client();
+	assert_eq!(verify_client.get("it:runtime:counter"), "800");
 }
 
 #[test]
