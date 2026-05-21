@@ -39,11 +39,14 @@ The server opens one shared storage instance with `None`.
 The lock state has two layers:
 
 - a database-level `RwLock<()>`
-- a stable map of per-key `RwLock<()>` values
+- a fixed striped table of key-level `RwLock<()>` values
 
-Regular key commands acquire a database read lock, then per-key locks in sorted
-raw-byte order. Read commands use read locks, write commands use write locks,
-and a key that appears in both sets is treated as a write key.
+Regular key commands acquire a database read lock, hash raw keys into fixed
+lock stripes, then acquire those stripes in ascending index order. Read
+commands use read locks, write commands use write locks, and any stripe that
+contains both read and write keys is treated as a write stripe. This bounds
+lock memory regardless of key cardinality while preserving deterministic
+multi-key lock ordering.
 
 `FLUSHDB` acquires the database write lock and is mutually exclusive with all
 regular key commands.
@@ -51,8 +54,8 @@ regular key commands.
 Lock selection happens inside storage methods, not in command handlers. Public
 APIs such as `get`, `set`, `incr`, `hset`, `lrange`, `zadd`, and `flush_all`
 acquire the appropriate lock before touching SlateDB. Multi-key APIs such as
-`del_many` and `exists_many` acquire the whole key set in one storage call so
-their lock ordering and deduplication stay centralized.
+`del_many` and `exists_many` acquire the whole stripe set in one storage call
+so their lock ordering and deduplication stay centralized.
 
 ## Key Encoding
 

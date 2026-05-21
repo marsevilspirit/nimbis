@@ -79,6 +79,9 @@ pub enum ConfigError {
 	#[error("Invalid trace_sampling_ratio: {0}. Expected a value between 0.0 and 1.0")]
 	InvalidTraceSamplingRatio(f64),
 
+	#[error("runtime_threads must be greater than 0")]
+	InvalidRuntimeThreads,
+
 	#[error("Invalid trace_protocol: {0}. Valid values: grpc, http_binary, http_json")]
 	InvalidTraceProtocol(String),
 
@@ -167,6 +170,10 @@ impl ServerConfig {
 			return Err(ConfigError::InvalidTraceSamplingRatio(
 				self.trace_sampling_ratio,
 			));
+		}
+
+		if self.runtime_threads == 0 {
+			return Err(ConfigError::InvalidRuntimeThreads);
 		}
 
 		match self.trace_protocol.trim().to_ascii_lowercase().as_str() {
@@ -665,6 +672,17 @@ runtime_threads: 4
 	#[test]
 	fn test_default_trace_sampling_ratio() {
 		assert_eq!(ServerConfig::default().trace_sampling_ratio, 0.0001);
+	}
+
+	#[test]
+	fn test_runtime_threads_must_be_positive() {
+		let config = ServerConfig {
+			runtime_threads: 0,
+			..ServerConfig::default()
+		};
+
+		let err = config.validate().unwrap_err();
+		assert!(matches!(err, ConfigError::InvalidRuntimeThreads));
 	}
 
 	#[rstest]

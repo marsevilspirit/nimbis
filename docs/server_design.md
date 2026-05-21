@@ -64,12 +64,12 @@ Storage owns the command-locking state in `nimbis-storage/src/lock.rs`. It has
 two layers:
 
 - a database-level `RwLock<()>`
-- a map of per-key `RwLock<()>` values
+- a fixed striped table of key-level `RwLock<()>` values
 
-Regular key commands acquire the database read lock, then acquire per-key locks
-in sorted raw-byte order. Read commands use read locks, write commands use
-write locks, and any key that appears in both read and write sets is treated as
-a write key.
+Regular key commands acquire the database read lock, hash raw keys into fixed
+lock stripes, then acquire those stripes in ascending index order. Read
+commands use read locks, write commands use write locks, and any stripe that
+contains both read and write keys is treated as a write stripe.
 
 `FLUSHDB` acquires the database write lock, making it mutually exclusive with
 all regular key commands.
@@ -77,7 +77,7 @@ all regular key commands.
 Lock selection is kept inside storage methods rather than command handlers:
 for example `Storage::get` acquires a per-key read lock, `Storage::set` and
 `Storage::incr` acquire per-key write locks, `Storage::del_many` and
-`Storage::exists_many` acquire their full multi-key lock set before iterating,
+`Storage::exists_many` acquire their full multi-key stripe set before iterating,
 and `Storage::flush_all` acquires the database write lock.
 
 This design keeps multi-key commands local to one storage view and avoids

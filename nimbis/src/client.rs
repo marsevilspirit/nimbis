@@ -187,11 +187,7 @@ impl ClientConnection {
 		}
 
 		let sampling_ratio = server_config!(trace_sampling_ratio);
-		let is_sampled = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.unwrap_or_default()
-			.subsec_nanos()
-			.is_multiple_of(sampling_divisor(sampling_ratio));
+		let is_sampled = should_sample(sampling_ratio);
 		let span_context = SpanContext::random().sampled(is_sampled);
 		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[
@@ -222,27 +218,25 @@ impl ClientConnection {
 	}
 }
 
-fn sampling_divisor(sampling_ratio: f64) -> u32 {
-	if sampling_ratio >= 1.0 {
-		return 1;
-	}
-
+fn should_sample(sampling_ratio: f64) -> bool {
 	if sampling_ratio <= 0.0 {
-		return u32::MAX;
+		return false;
 	}
 
-	(1.0 / sampling_ratio).round().max(1.0) as u32
+	if sampling_ratio >= 1.0 {
+		return true;
+	}
+
+	rand::random::<f64>() < sampling_ratio
 }
 
 #[cfg(test)]
 mod tests {
-	use super::sampling_divisor;
+	use super::should_sample;
 
 	#[test]
-	fn test_sampling_divisor_limits() {
-		assert_eq!(sampling_divisor(1.0), 1);
-		assert_eq!(sampling_divisor(0.5), 2);
-		assert_eq!(sampling_divisor(0.0001), 10000);
-		assert_eq!(sampling_divisor(0.0), u32::MAX);
+	fn test_should_sample_limits() {
+		assert!(should_sample(1.0));
+		assert!(!should_sample(0.0));
 	}
 }
