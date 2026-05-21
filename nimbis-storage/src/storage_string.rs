@@ -15,6 +15,11 @@ use crate::utils::is_expired;
 impl Storage {
 	#[fastrace::trace]
 	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
+		self.get_unlocked(key).await
+	}
+
+	pub(crate) async fn get_unlocked(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
 		match self.get_meta::<AnyValue>(&key).await? {
 			Some(AnyValue::String(val)) => Ok(Some(val.value)),
 			Some(val) => Err(StorageError::wrong_type(DataType::String, val.data_type())),
@@ -24,6 +29,11 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn set(&self, key: Bytes, value: Bytes) -> Result<(), StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
+		self.set_unlocked(key, value).await
+	}
+
+	pub(crate) async fn set_unlocked(&self, key: Bytes, value: Bytes) -> Result<(), StorageError> {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
@@ -39,6 +49,28 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
+		Ok(self.del_many([key]).await? == 1)
+	}
+
+	#[fastrace::trace]
+	pub async fn del_many<I>(&self, keys: I) -> Result<i64, StorageError>
+	where
+		I: IntoIterator<Item = Bytes>,
+	{
+		let keys: Vec<_> = keys.into_iter().collect();
+		let _guard = self.write_lock(keys.clone()).await;
+		let mut deleted = 0;
+
+		for key in keys {
+			if self.del_unlocked(key).await? {
+				deleted += 1;
+			}
+		}
+
+		Ok(deleted)
+	}
+
+	async fn del_unlocked(&self, key: Bytes) -> Result<bool, StorageError> {
 		let user_key = key;
 		let key = StringKey::new(user_key.clone());
 
@@ -62,6 +94,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
 		let encoded_key = skey.encode();
@@ -107,6 +140,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		let encoded_key = StringKey::new(key).encode();
 		let kv = match self.string_db.get_key_value(encoded_key.clone()).await? {
 			Some(kv) => kv,
@@ -133,12 +167,36 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn exists(&self, key: Bytes) -> Result<bool, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
+		self.exists_unlocked(key).await
+	}
+
+	#[fastrace::trace]
+	pub async fn exists_many<I>(&self, keys: I) -> Result<i64, StorageError>
+	where
+		I: IntoIterator<Item = Bytes>,
+	{
+		let keys: Vec<_> = keys.into_iter().collect();
+		let _guard = self.read_lock(keys.clone()).await;
+		let mut count = 0;
+
+		for key in keys {
+			if self.exists_unlocked(key).await? {
+				count += 1;
+			}
+		}
+
+		Ok(count)
+	}
+
+	async fn exists_unlocked(&self, key: Bytes) -> Result<bool, StorageError> {
 		Ok(self.get_meta::<AnyValue>(&key).await?.is_some())
 	}
 
 	#[fastrace::trace]
 	pub async fn incr(&self, key: Bytes) -> Result<i64, StorageError> {
-		let current_val = self.get(key.clone()).await?;
+		let _guard = self.write_lock([key.clone()]).await;
+		let current_val = self.get_unlocked(key.clone()).await?;
 
 		let mut int_val: i64 = match current_val {
 			Some(bytes) => {
@@ -158,14 +216,16 @@ impl Storage {
 				message: "ERR increment or decrement would overflow".to_string(),
 			})?;
 
-		self.set(key, Bytes::from(int_val.to_string())).await?;
+		self.set_unlocked(key, Bytes::from(int_val.to_string()))
+			.await?;
 
 		Ok(int_val)
 	}
 
 	#[fastrace::trace]
 	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
-		let current_val = self.get(key.clone()).await?;
+		let _guard = self.write_lock([key.clone()]).await;
+		let current_val = self.get_unlocked(key.clone()).await?;
 
 		let mut int_val: i64 = match current_val {
 			Some(bytes) => {
@@ -185,14 +245,16 @@ impl Storage {
 				message: "ERR increment or decrement would overflow".to_string(),
 			})?;
 
-		self.set(key, Bytes::from(int_val.to_string())).await?;
+		self.set_unlocked(key, Bytes::from(int_val.to_string()))
+			.await?;
 
 		Ok(int_val)
 	}
 
 	#[fastrace::trace]
 	pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, StorageError> {
-		let current_val = self.get(key.clone()).await?;
+		let _guard = self.write_lock([key.clone()]).await;
+		let current_val = self.get_unlocked(key.clone()).await?;
 
 		let new_val = match current_val {
 			Some(bytes) => {
@@ -205,7 +267,7 @@ impl Storage {
 		};
 
 		let len = new_val.len();
-		self.set(key, Bytes::from(new_val)).await?;
+		self.set_unlocked(key, Bytes::from(new_val)).await?;
 
 		Ok(len)
 	}

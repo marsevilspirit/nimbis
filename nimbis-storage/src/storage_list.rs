@@ -27,6 +27,8 @@ impl Storage {
 		elements: Vec<Bytes>,
 		is_left: bool,
 	) -> Result<u64, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
+
 		if elements.is_empty() {
 			// If key exists, return len. If not, return 0.
 			if let Some(meta) = self.get_meta::<ListMetaValue>(&key).await? {
@@ -107,6 +109,8 @@ impl Storage {
 		count: Option<usize>,
 		is_left: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
+
 		let Some(mut meta_val) = self.get_meta::<ListMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};
@@ -182,6 +186,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn llen(&self, key: Bytes) -> Result<u64, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -196,6 +201,7 @@ impl Storage {
 		start: i64,
 		stop: i64,
 	) -> Result<Vec<Bytes>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};

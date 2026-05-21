@@ -218,8 +218,6 @@ impl ClientConnection {
 			return RespValue::error(err);
 		}
 
-		let lock = cmd.storage_lock(&parsed_cmd.args);
-		let _lock_guard = self.storage.acquire_lock(&lock).await;
 		cmd.do_cmd(&self.storage, &parsed_cmd.args, &self.ctx).await
 	}
 }

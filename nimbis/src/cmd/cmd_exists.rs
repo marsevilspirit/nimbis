@@ -29,14 +29,9 @@ impl Cmd for ExistsCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let mut count = 0;
-		for key in args {
-			match storage.exists(key.clone()).await {
-				Ok(true) => count += 1,
-				Ok(false) => {}
-				Err(e) => return RespValue::Error(Bytes::from(e.to_string())),
-			}
+		match storage.exists_many(args.iter().cloned()).await {
+			Ok(count) => RespValue::Integer(count),
+			Err(e) => RespValue::Error(Bytes::from(e.to_string())),
 		}
-		RespValue::Integer(count)
 	}
 }

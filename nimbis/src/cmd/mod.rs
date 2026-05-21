@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
-use nimbis_storage::lock::StorageLock;
 
 /// Command metadata containing immutable information about a command
 #[derive(Debug, Clone, Default)]
@@ -50,22 +49,6 @@ pub trait Cmd: Send + Sync {
 	/// Get command metadata
 	fn meta(&self) -> &CmdMeta;
 
-	fn storage_lock(&self, args: &[Bytes]) -> StorageLock {
-		match self.meta().name.as_str() {
-			"PING" | "HELLO" | "CONFIG" | "CLIENT" => StorageLock::none(),
-			"FLUSHDB" => StorageLock::global_write(),
-			"DEL" => StorageLock::write_keys(args.iter().cloned()),
-			"EXISTS" => StorageLock::read_keys(args.iter().cloned()),
-			"GET" | "TTL" | "HGET" | "HLEN" | "HMGET" | "HGETALL" | "LLEN" | "LRANGE"
-			| "SMEMBERS" | "SISMEMBER" | "SCARD" | "ZRANGE" | "ZSCORE" | "ZCARD" => {
-				first_key_read_lock(args)
-			}
-			"SET" | "INCR" | "DECR" | "APPEND" | "EXPIRE" | "HSET" | "HDEL" | "LPUSH" | "RPUSH"
-			| "LPOP" | "RPOP" | "SADD" | "SREM" | "ZADD" | "ZREM" => first_key_write_lock(args),
-			_ => StorageLock::none(),
-		}
-	}
-
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue;
 
 	/// Execute command with request context.
@@ -75,20 +58,6 @@ pub trait Cmd: Send + Sync {
 		}
 
 		self.do_cmd(storage, args, ctx).await
-	}
-}
-
-fn first_key_read_lock(args: &[Bytes]) -> StorageLock {
-	match args.first() {
-		Some(key) => StorageLock::read_keys([key.clone()]),
-		None => StorageLock::none(),
-	}
-}
-
-fn first_key_write_lock(args: &[Bytes]) -> StorageLock {
-	match args.first() {
-		Some(key) => StorageLock::write_keys([key.clone()]),
-		None => StorageLock::none(),
 	}
 }
 

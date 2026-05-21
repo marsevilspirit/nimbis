@@ -14,6 +14,7 @@ use crate::utils::user_key_prefix;
 impl Storage {
 	#[fastrace::trace]
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let write_opts = WriteOptions {
@@ -71,6 +72,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		// Check if the hash exists and is valid, get version
 		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
 			return Ok(None);
@@ -88,6 +90,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -101,6 +104,7 @@ impl Storage {
 		key: Bytes,
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		// Check if the hash exists and is valid, get version
 		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
 			return Ok(vec![None; fields.len()]);
@@ -148,6 +152,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		// Check if the hash exists and is valid, get version
 		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
 			return Ok(Vec::new());
@@ -193,6 +198,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 

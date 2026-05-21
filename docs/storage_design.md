@@ -31,9 +31,9 @@ Each data type has its own database instance for isolation and predictable perfo
 open all five DBs under either the root path (`None`) or a shard subdirectory (`Some(id)`).
 The server opens one shared storage instance with `None`.
 
-## Command Locking
+## Storage API Locking
 
-`Storage` also owns command-level concurrency control through
+`Storage` owns concurrency control through
 `nimbis-storage/src/lock.rs`.
 
 The lock state has two layers:
@@ -47,6 +47,12 @@ and a key that appears in both sets is treated as a write key.
 
 `FLUSHDB` acquires the database write lock and is mutually exclusive with all
 regular key commands.
+
+Lock selection happens inside storage methods, not in command handlers. Public
+APIs such as `get`, `set`, `incr`, `hset`, `lrange`, `zadd`, and `flush_all`
+acquire the appropriate lock before touching SlateDB. Multi-key APIs such as
+`del_many` and `exists_many` acquire the whole key set in one storage call so
+their lock ordering and deduplication stay centralized.
 
 ## Key Encoding
 

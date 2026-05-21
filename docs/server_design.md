@@ -55,10 +55,8 @@ Command execution follows this order:
 
 1. Look up the command in `CmdTable`.
 2. Validate arity.
-3. Ask the command which storage lock it needs.
-4. Acquire that lock through the shared `Storage`.
-5. Execute the command against shared `Storage`.
-6. Drop the lock guard before processing the next command.
+3. Execute the command against shared `Storage`.
+4. Let each storage API acquire and release its own read/write/global lock.
 
 ## Locking Model
 
@@ -75,6 +73,12 @@ a write key.
 
 `FLUSHDB` acquires the database write lock, making it mutually exclusive with
 all regular key commands.
+
+Lock selection is kept inside storage methods rather than command handlers:
+for example `Storage::get` acquires a per-key read lock, `Storage::set` and
+`Storage::incr` acquire per-key write locks, `Storage::del_many` and
+`Storage::exists_many` acquire their full multi-key lock set before iterating,
+and `Storage::flush_all` acquires the database write lock.
 
 This design keeps multi-key commands local to one storage view and avoids
 scatter-gather routing.
@@ -97,4 +101,4 @@ scatter-gather routing.
 | `nimbis/src/server.rs` | Listener, shared server state, client task spawning |
 | `nimbis/src/client.rs` | RESP parsing, pipeline ordering, command execution |
 | `nimbis-storage/src/lock.rs` | Storage-owned database and per-key command locking |
-| `nimbis/src/cmd/` | Command definitions and storage lock declarations |
+| `nimbis/src/cmd/` | Command definitions and storage API calls |

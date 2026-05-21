@@ -29,14 +29,9 @@ impl Cmd for DelCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let mut deleted = 0;
-		for key in args {
-			match storage.del(key.clone()).await {
-				Ok(true) => deleted += 1,
-				Ok(false) => {}
-				Err(e) => return RespValue::error(e.to_string()),
-			}
+		match storage.del_many(args.iter().cloned()).await {
+			Ok(deleted) => RespValue::Integer(deleted),
+			Err(e) => RespValue::error(e.to_string()),
 		}
-		RespValue::Integer(deleted)
 	}
 }

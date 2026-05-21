@@ -33,7 +33,7 @@ Persistent storage layer using SlateDB.
 **Key Components**:
 - `Storage` struct with 5 isolated SlateDB instances (`string_db`, `hash_db`, `list_db`, `set_db`, `zset_db`)
 - Shared logical database storage opened once by the server
-- Storage-owned database and per-key command locking
+- Storage-owned database and per-key API locking
 - Type-specific encoding logic (StringKey, HashFieldKey, etc.)
 - SlateDB integration
 

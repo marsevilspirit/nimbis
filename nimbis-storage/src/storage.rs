@@ -124,8 +124,25 @@ impl Storage {
 		}
 	}
 
-	pub async fn acquire_lock(&self, lock: &StorageLock) -> StorageLockGuard {
-		self.locks.acquire(lock).await
+	pub(crate) async fn read_lock(
+		&self,
+		keys: impl IntoIterator<Item = Bytes>,
+	) -> StorageLockGuard {
+		let lock = StorageLock::read_keys(keys);
+		self.locks.acquire(&lock).await
+	}
+
+	pub(crate) async fn write_lock(
+		&self,
+		keys: impl IntoIterator<Item = Bytes>,
+	) -> StorageLockGuard {
+		let lock = StorageLock::write_keys(keys);
+		self.locks.acquire(&lock).await
+	}
+
+	pub(crate) async fn global_write_lock(&self) -> StorageLockGuard {
+		let lock = StorageLock::global_write();
+		self.locks.acquire(&lock).await
 	}
 
 	#[fastrace::trace]
@@ -236,6 +253,8 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
+		let _guard = self.global_write_lock().await;
+
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
 		// Scanning and deleting everything is slow but correct for tests.
