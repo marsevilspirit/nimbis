@@ -16,6 +16,7 @@ pub struct MockNimbisClient {
 	id: i64,
 	stream: TcpStream,
 	parser: RespParser,
+	read_buffer: bytes::BytesMut,
 }
 
 impl MockNimbisClient {
@@ -26,6 +27,7 @@ impl MockNimbisClient {
 			id: 0,
 			stream,
 			parser: RespParser::new(),
+			read_buffer: bytes::BytesMut::with_capacity(4096),
 		};
 		client.id = client.client_id();
 		Ok(client)
@@ -47,11 +49,36 @@ impl MockNimbisClient {
 			.unwrap_or_else(|e| panic!("read response for {:?}: {}", args, e))
 	}
 
+	pub fn execute_pipeline(&mut self, commands: &[&[&str]]) -> Vec<RespValue> {
+		for args in commands {
+			let req = RespValue::array(
+				args.iter()
+					.map(|arg| RespValue::bulk_string(Bytes::copy_from_slice(arg.as_bytes()))),
+			);
+			self.stream
+				.write_all(&req.encode().expect("encode request"))
+				.unwrap_or_else(|e| panic!("write request {:?}: {}", args, e));
+		}
+
+		commands
+			.iter()
+			.map(|args| {
+				self.read_response()
+					.unwrap_or_else(|e| panic!("read pipeline response for {:?}: {}", args, e))
+			})
+			.collect()
+	}
+
 	fn read_response(&mut self) -> Result<RespValue, String> {
-		let mut buf = Vec::with_capacity(4096);
 		let mut read_chunk = [0u8; 1024];
 
 		loop {
+			match self.parser.parse(&mut self.read_buffer) {
+				RespParseResult::Complete(v) => return Ok(v),
+				RespParseResult::Incomplete => {}
+				RespParseResult::Error(e) => return Err(format!("RESP parse error: {}", e)),
+			}
+
 			let n = self
 				.stream
 				.read(&mut read_chunk)
@@ -60,13 +87,7 @@ impl MockNimbisClient {
 				return Err("connection closed before full response".into());
 			}
 
-			buf.extend_from_slice(&read_chunk[..n]);
-			let mut bytes = bytes::BytesMut::from(buf.as_slice());
-			match self.parser.parse(&mut bytes) {
-				RespParseResult::Complete(v) => return Ok(v),
-				RespParseResult::Incomplete => {}
-				RespParseResult::Error(e) => return Err(format!("RESP parse error: {}", e)),
-			}
+			self.read_buffer.extend_from_slice(&read_chunk[..n]);
 		}
 	}
 

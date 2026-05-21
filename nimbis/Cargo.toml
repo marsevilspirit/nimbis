@@ -21,6 +21,7 @@ dashmap = { workspace = true }
 fastrace = { workspace = true, features = ["enable"] }
 log = { workspace = true }
 num_cpus = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

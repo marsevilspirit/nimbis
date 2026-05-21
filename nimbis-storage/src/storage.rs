@@ -14,6 +14,9 @@ use slatedb::object_store::path::Path as ObjectStorePath;
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
 use crate::error::StorageError;
+use crate::lock::StorageLock;
+use crate::lock::StorageLockGuard;
+use crate::lock::StorageLocks;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 use crate::utils::is_expired;
@@ -25,6 +28,7 @@ pub struct Storage {
 	pub(crate) list_db: Arc<Db>,
 	pub(crate) set_db: Arc<Db>,
 	pub(crate) zset_db: Arc<Db>,
+	locks: Arc<StorageLocks>,
 }
 
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
@@ -116,7 +120,29 @@ impl Storage {
 			list_db,
 			set_db,
 			zset_db,
+			locks: Arc::new(StorageLocks::new()),
 		}
+	}
+
+	pub(crate) async fn read_lock(
+		&self,
+		keys: impl IntoIterator<Item = Bytes>,
+	) -> StorageLockGuard {
+		let lock = StorageLock::read_keys(keys);
+		self.locks.acquire(&lock).await
+	}
+
+	pub(crate) async fn write_lock(
+		&self,
+		keys: impl IntoIterator<Item = Bytes>,
+	) -> StorageLockGuard {
+		let lock = StorageLock::write_keys(keys);
+		self.locks.acquire(&lock).await
+	}
+
+	pub(crate) async fn global_write_lock(&self) -> StorageLockGuard {
+		let lock = StorageLock::global_write();
+		self.locks.acquire(&lock).await
 	}
 
 	#[fastrace::trace]
@@ -227,6 +253,8 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
+		let _guard = self.global_write_lock().await;
+
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
 		// Scanning and deleting everything is slow but correct for tests.

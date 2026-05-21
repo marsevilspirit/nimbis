@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
@@ -6,21 +5,24 @@ use std::sync::atomic::Ordering;
 use bytes::Bytes;
 use bytes::BytesMut;
 use dashmap::DashMap;
+use fastrace::future::FutureExt;
+use fastrace::prelude::Span;
+use fastrace::prelude::SpanContext;
 use fastrace::trace;
 use log::debug;
 use nimbis_resp::RespEncoder;
 use nimbis_resp::RespParseResult;
 use nimbis_resp::RespParser;
 use nimbis_resp::RespValue;
+use nimbis_storage::Storage;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
 
 use crate::cmd::CmdContext;
+use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
-use crate::dispatcher::CommandDispatcher;
-use crate::worker::WorkerMessage;
+use crate::server_config;
 
 static NEXT_CLIENT_SESSION_ID: AtomicI64 = AtomicI64::new(1);
 
@@ -88,20 +90,25 @@ impl ClientSessions {
 
 pub struct ClientConnection {
 	socket: TcpStream,
-	dispatcher: CommandDispatcher,
 	parser: RespParser,
+	storage: Arc<Storage>,
+	cmd_table: Arc<CmdTable>,
+	ctx: CmdContext,
 }
 
 impl ClientConnection {
 	pub fn new(
 		socket: TcpStream,
-		peers: Arc<HashMap<usize, mpsc::UnboundedSender<WorkerMessage>>>,
+		storage: Arc<Storage>,
+		cmd_table: Arc<CmdTable>,
 		ctx: CmdContext,
 	) -> Self {
 		Self {
 			socket,
-			dispatcher: CommandDispatcher::new(peers, ctx),
 			parser: RespParser::new(),
+			storage,
+			cmd_table,
+			ctx,
 		}
 	}
 
@@ -129,7 +136,7 @@ impl ClientConnection {
 				}
 			}
 
-			self.dispatcher.reset();
+			let mut parsed_cmds = Vec::new();
 
 			loop {
 				match self.parser.parse(&mut buffer) {
@@ -143,7 +150,7 @@ impl ClientConnection {
 								return Err(e.into());
 							}
 						};
-						self.dispatcher.dispatch(parsed_cmd);
+						parsed_cmds.push(parsed_cmd);
 					}
 					RespParseResult::Incomplete => {
 						break;
@@ -161,8 +168,75 @@ impl ClientConnection {
 				}
 			}
 
-			self.dispatcher.dispatch_batches().await?;
-			self.dispatcher.await_responses(&mut self.socket).await?;
+			for parsed_cmd in parsed_cmds {
+				let response = self.execute_command(parsed_cmd).await;
+				if let Err(e) = self.socket.write_all(&response.encode()?).await {
+					if e.kind() == std::io::ErrorKind::ConnectionReset {
+						debug!("Connection reset by peer");
+						return Ok(());
+					}
+					return Err(e.into());
+				}
+			}
 		}
+	}
+
+	async fn execute_command(&self, parsed_cmd: ParsedCmd) -> RespValue {
+		if !server_config!(trace_enabled) {
+			return self.execute_command_inner(parsed_cmd).await;
+		}
+
+		let sampling_ratio = server_config!(trace_sampling_ratio);
+		let is_sampled = should_sample(sampling_ratio);
+		let span_context = SpanContext::random().sampled(is_sampled);
+		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
+			[
+				("cmd", parsed_cmd.name.clone()),
+				("client_id", self.ctx.client_id.to_string()),
+			]
+		});
+
+		self.execute_command_inner(parsed_cmd)
+			.in_span(root_span)
+			.await
+	}
+
+	#[trace]
+	async fn execute_command_inner(&self, parsed_cmd: ParsedCmd) -> RespValue {
+		let Some(cmd) = self.cmd_table.get_cmd(&parsed_cmd.name) else {
+			return RespValue::error(format!(
+				"ERR unknown command '{}'",
+				parsed_cmd.name.to_lowercase()
+			));
+		};
+
+		if let Err(err) = cmd.meta().validate_arity(parsed_cmd.args.len() + 1) {
+			return RespValue::error(err);
+		}
+
+		cmd.do_cmd(&self.storage, &parsed_cmd.args, &self.ctx).await
+	}
+}
+
+fn should_sample(sampling_ratio: f64) -> bool {
+	if sampling_ratio <= 0.0 {
+		return false;
+	}
+
+	if sampling_ratio >= 1.0 {
+		return true;
+	}
+
+	rand::random::<f64>() < sampling_ratio
+}
+
+#[cfg(test)]
+mod tests {
+	use super::should_sample;
+
+	#[test]
+	fn test_should_sample_limits() {
+		assert!(should_sample(1.0));
+		assert!(!should_sample(0.0));
 	}
 }

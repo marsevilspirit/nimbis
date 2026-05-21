@@ -77,6 +77,15 @@ var _ = Describe("Expire/TTL Commands", func() {
 		Expect(ttl).To(Equal(time.Duration(-2)))
 	})
 
+	It("should count multiple keys in EXISTS", func() {
+		Expect(rdb.Set(ctx, "expire_key", "value", 0).Err()).NotTo(HaveOccurred())
+		Expect(rdb.HSet(ctx, "hash_expire_key", "f1", "v1").Err()).NotTo(HaveOccurred())
+
+		exists, err := rdb.Exists(ctx, "expire_key", "hash_expire_key", "missing").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(Equal(int64(2)))
+	})
+
 	It("should handle EXPIRE on non-existent key", func() {
 		key := "non_existent_key_expire"
 		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()

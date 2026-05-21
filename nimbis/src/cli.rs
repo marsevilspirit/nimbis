@@ -23,7 +23,21 @@ pub struct Cli {
 	#[arg(short, long)]
 	pub log_level: Option<String>,
 
-	/// Number of worker threads (default: number of CPU cores)
+	/// Number of Tokio runtime worker threads (default: number of CPU cores)
 	#[arg(long)]
-	pub worker_threads: Option<usize>,
+	pub runtime_threads: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::Cli;
+
+	#[test]
+	fn parses_runtime_threads() {
+		let cli = Cli::parse_from(["nimbis", "--runtime-threads", "4"]);
+
+		assert_eq!(cli.runtime_threads, Some(4));
+	}
 }

@@ -45,7 +45,7 @@ impl MockNimbisServer {
 			trace_protocol: "grpc".to_string(),
 			trace_export_timeout_seconds: 10,
 			trace_report_interval_ms: 1000,
-			worker_threads: 2,
+			runtime_threads: 2,
 		};
 
 		SERVER_CONF.init(config.clone());

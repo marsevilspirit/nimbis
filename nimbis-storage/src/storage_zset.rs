@@ -19,6 +19,7 @@ impl Storage {
 		key: Bytes,
 		elements: Vec<(f64, Bytes)>, // (score, member)
 	) -> Result<u64, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let write_opts = WriteOptions {
@@ -164,6 +165,7 @@ impl Storage {
 		stop: isize,
 		with_scores: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			// Adjust indices
 			let len = meta.len as isize;
@@ -227,6 +229,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? else {
 			return Ok(None);
 		};
@@ -245,6 +248,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
+		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -319,6 +323,7 @@ impl Storage {
 
 	#[fastrace::trace]
 	pub async fn zcard(&self, key: Bytes) -> Result<u64, StorageError> {
+		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {

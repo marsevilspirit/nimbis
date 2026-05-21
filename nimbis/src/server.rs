@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use fastrace::trace;
@@ -7,17 +6,19 @@ use log::error;
 use log::info;
 use nimbis_storage::Storage;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
 
+use crate::GCTX;
+use crate::client::ClientConnection;
 use crate::client::ClientSessions;
+use crate::client::next_client_session_id;
+use crate::cmd::CmdContext;
 use crate::cmd::CmdTable;
 use crate::context::init_global_context;
 use crate::server_config;
-use crate::worker::Worker;
-use crate::worker::WorkerMessage;
 
 pub struct Server {
-	workers: Vec<Worker>,
+	storage: Arc<Storage>,
+	cmd_table: Arc<CmdTable>,
 	_client_sessions: Arc<ClientSessions>,
 }
 
@@ -29,59 +30,25 @@ impl Server {
 		init_global_context(client_sessions.clone());
 		let cmd_table = Arc::new(CmdTable::new());
 
-		// Determine number of workers from config
 		let config = crate::config::SERVER_CONF.load();
-		let workers_num = config.worker_threads;
 		let object_store_url = config.object_store_url.clone();
 		let object_store_options = config.object_store_options.0.clone();
 		drop(config);
 
-		let mut workers = Vec::with_capacity(workers_num);
-
-		// First pass: create channels
-		let mut senders = HashMap::with_capacity(workers_num);
-		let mut receivers = Vec::with_capacity(workers_num);
-
-		for i in 0..workers_num {
-			let (tx, rx) = mpsc::unbounded_channel();
-			senders.insert(i, tx);
-			receivers.push(rx);
-		}
-
-		// Wrap senders in Arc to avoid deep cloning for each worker
-		let senders = Arc::new(senders);
-
-		// Second pass: create workers and sharded storage
-		for (i, rx) in receivers.into_iter().enumerate() {
-			let my_tx = senders.get(&i).unwrap().clone();
-
-			// SHARDED STORAGE: Create a unique Storage instance for this worker
-			// Data will be rooted at {object_store_url path}/shard-{i}/...
-			let storage = Arc::new(
-				Storage::open_object_store(
-					&object_store_url,
-					object_store_options
-						.iter()
-						.map(|(key, value)| (key.as_str(), value.as_str())),
-					Some(i),
-				)
-				.await?,
-			);
-
-			// workers need the full map of senders to route commands to the appropriate
-			// worker based on consistent hashing of the command's key
-			workers.push(Worker::new(
-				i,
-				my_tx,
-				rx,
-				senders.clone(),
-				storage, // This is now unique per worker
-				cmd_table.clone(),
-			));
-		}
+		let storage = Arc::new(
+			Storage::open_object_store(
+				&object_store_url,
+				object_store_options
+					.iter()
+					.map(|(key, value)| (key.as_str(), value.as_str())),
+				None,
+			)
+			.await?,
+		);
 
 		Ok(Self {
-			workers,
+			storage,
+			cmd_table,
 			_client_sessions: client_sessions,
 		})
 	}
@@ -92,25 +59,24 @@ impl Server {
 		let listener = TcpListener::bind(&addr).await?;
 		info!("Nimbis server listening on {}", addr);
 
-		let workers_len = self.workers.len();
-		let mut next_worker_idx = 0;
-
 		loop {
 			debug!("Waiting for accept...");
 			match listener.accept().await {
 				Ok((socket, addr)) => {
 					debug!("New client connected from {}", addr);
 
-					// Round-robin dispatch
-					let worker = &self.workers[next_worker_idx];
-					if let Err(e) = worker.tx.send(WorkerMessage::NewConnection(socket)) {
-						error!(
-							"Failed to dispatch connection to worker {}: {}",
-							next_worker_idx, e
-						);
-					}
-
-					next_worker_idx = (next_worker_idx + 1) % workers_len;
+					let storage = self.storage.clone();
+					let cmd_table = self.cmd_table.clone();
+					tokio::spawn(async move {
+						let client_id = next_client_session_id();
+						let ctx = CmdContext { client_id };
+						let mut session = ClientConnection::new(socket, storage, cmd_table, ctx);
+						GCTX!(client_sessions).register(client_id);
+						if let Err(e) = session.run().await {
+							debug!("Client session error: {}", e);
+						}
+						GCTX!(client_sessions).unregister(client_id);
+					});
 				}
 				Err(e) => {
 					error!("Error accepting connection: {}", e);

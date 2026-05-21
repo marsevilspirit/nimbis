@@ -1,11 +1,11 @@
 use clap::Parser;
 use nimbis::cli::Cli;
+use nimbis::config::SERVER_CONF;
 use nimbis::logo;
 use nimbis::server::Server;
 use nimbis_telemetry::manager::TELEMETRY_MANAGER;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	let args = Cli::parse();
 
 	if let Err(e) = nimbis::config::setup(args) {
@@ -15,7 +15,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 	logo::show_logo();
 
-	let result = async {
+	let runtime_threads = SERVER_CONF.load().runtime_threads;
+	let runtime = tokio::runtime::Builder::new_multi_thread()
+		.worker_threads(runtime_threads)
+		.enable_all()
+		.build()?;
+
+	let result = runtime.block_on(async {
 		let server = Server::new().await?;
 		tokio::select! {
 			result = server.run() => result,
@@ -25,8 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 				Ok(())
 			}
 		}
-	}
-	.await;
+	});
 
 	TELEMETRY_MANAGER.load().flush();
 	result?;

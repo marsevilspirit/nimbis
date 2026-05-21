@@ -16,7 +16,7 @@ impl Default for DelCmd {
 		Self {
 			meta: CmdMeta {
 				name: "DEL".to_string(),
-				arity: 2, // Exactly 1 key
+				arity: -2,
 			},
 		}
 	}
@@ -29,16 +29,9 @@ impl Cmd for DelCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		// TODO: Support multi-key deletion via scatter-gather across workers
-		// (similar to FLUSHDB broadcast pattern, not MGET/MSET which are for get/set)
-		if let Some(key) = args.first() {
-			match storage.del(key.clone()).await {
-				Ok(true) => RespValue::Integer(1),
-				Ok(false) => RespValue::Integer(0),
-				Err(e) => RespValue::error(e.to_string()),
-			}
-		} else {
-			RespValue::Integer(0)
+		match storage.del_many(args.iter().cloned()).await {
+			Ok(deleted) => RespValue::Integer(deleted),
+			Err(e) => RespValue::error(e.to_string()),
 		}
 	}
 }
