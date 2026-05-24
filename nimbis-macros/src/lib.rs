@@ -66,11 +66,11 @@ pub fn storage_lock(attr: TokenStream, item: TokenStream) -> TokenStream {
 		},
 		("read_many", Some(keys)) => quote! {
 			let #keys: Vec<_> = #keys.into_iter().collect();
-			let _guard = self.read_lock(#keys.clone()).await;
+			let _guard = self.read_lock(#keys.iter().cloned()).await;
 		},
 		("write_many", Some(keys)) => quote! {
 			let #keys: Vec<_> = #keys.into_iter().collect();
-			let _guard = self.write_lock(#keys.clone()).await;
+			let _guard = self.write_lock(#keys.iter().cloned()).await;
 		},
 		("global_write", None) => quote! {
 			let _guard = self.global_write_lock().await;

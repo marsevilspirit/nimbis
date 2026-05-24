@@ -411,7 +411,7 @@ mod tests {
 		assert_eq!(stored, vec![Bytes::from("old_member")]);
 
 		// DEL (Logical Delete - only Meta)
-		ctx.storage.del(key.clone()).await.unwrap();
+		ctx.storage.del([key.clone()]).await.unwrap();
 
 		// Verify empty
 		let exists = ctx.storage.exists(key.clone()).await.unwrap();
@@ -462,8 +462,8 @@ mod tests {
 		assert_eq!(stored.len(), 10);
 
 		// DEL: Logical delete (O(1) - only meta is removed)
-		let deleted = ctx.storage.del(key.clone()).await.unwrap();
-		assert!(deleted, "DEL should succeed");
+		let deleted = ctx.storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1, "DEL should delete one key");
 
 		// Verify logically empty
 		let exists = ctx.storage.exists(key.clone()).await.unwrap();

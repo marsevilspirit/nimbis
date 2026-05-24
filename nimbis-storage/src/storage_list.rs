@@ -403,8 +403,8 @@ mod tests {
 			.version;
 		assert_eq!(version_after_pop, version_v1);
 
-		let deleted = storage.del(key.clone()).await.unwrap();
-		assert!(deleted);
+		let deleted = storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
 
 		let len = storage
 			.rpush(key.clone(), vec![Bytes::from("x")])

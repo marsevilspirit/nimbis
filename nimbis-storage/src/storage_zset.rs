@@ -508,8 +508,8 @@ mod tests {
 			.version;
 		assert_eq!(version_after_new_member, version_v1);
 
-		let deleted = storage.del(key.clone()).await.unwrap();
-		assert!(deleted);
+		let deleted = storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
 
 		let added = storage
 			.zadd(key.clone(), vec![(10.0, Bytes::from("m1"))])

@@ -40,18 +40,16 @@ impl Storage {
 		Ok(())
 	}
 
-	#[fastrace::trace]
-	pub async fn del(&self, key: Bytes) -> Result<bool, StorageError> {
-		Ok(self.del_many([key]).await? == 1)
-	}
-
 	#[storage_lock(write_many, keys)]
 	#[fastrace::trace]
-	pub async fn del_many<I>(&self, keys: I) -> Result<i64, StorageError>
+	pub async fn del<I>(&self, keys: I) -> Result<i64, StorageError>
 	where
 		I: IntoIterator<Item = Bytes>,
 	{
 		let mut deleted = 0;
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
 
 		for key in keys {
 			let key = StringKey::new(key);
@@ -61,10 +59,6 @@ impl Storage {
 			if self.string_db.get(key.encode()).await?.is_none() {
 				continue;
 			}
-
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
 
 			self.string_db
 				.delete_with_options(key.encode(), &write_opts)
@@ -381,8 +375,8 @@ mod tests {
 		assert!(err.to_string().contains("WRONGTYPE"));
 
 		// Delete String
-		let deleted = storage.del(k.clone()).await.unwrap();
-		assert!(deleted);
+		let deleted = storage.del([k.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
 
 		// HSET should succeed
 		let res = storage.hset(k.clone(), f.clone(), v.clone()).await.unwrap();

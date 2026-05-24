@@ -413,8 +413,8 @@ mod tests {
 			.unwrap();
 		assert_eq!(created, 1);
 
-		let deleted = storage.del(key.clone()).await.unwrap();
-		assert!(deleted);
+		let deleted = storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
 
 		let recreated = storage
 			.hset(key.clone(), field.clone(), Bytes::from("v2"))

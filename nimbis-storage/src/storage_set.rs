@@ -336,8 +336,8 @@ mod tests {
 			.version;
 		assert_eq!(version_after_update, version_v1);
 
-		let deleted = storage.del(key.clone()).await.unwrap();
-		assert!(deleted);
+		let deleted = storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
 
 		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(added, 1);
