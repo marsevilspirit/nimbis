@@ -16,10 +16,6 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
 		let _guard = self.read_lock([key.clone()]).await;
-		self.get_unlocked(key).await
-	}
-
-	pub(crate) async fn get_unlocked(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
 		match self.get_meta::<AnyValue>(&key).await? {
 			Some(AnyValue::String(val)) => Ok(Some(val.value)),
 			Some(val) => Err(StorageError::wrong_type(DataType::String, val.data_type())),
@@ -196,7 +192,11 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn incr(&self, key: Bytes) -> Result<i64, StorageError> {
 		let _guard = self.write_lock([key.clone()]).await;
-		let current_val = self.get_unlocked(key.clone()).await?;
+		let current_val = match self.get_meta::<AnyValue>(&key).await? {
+			Some(AnyValue::String(val)) => Some(val.value),
+			Some(val) => return Err(StorageError::wrong_type(DataType::String, val.data_type())),
+			None => None,
+		};
 
 		let mut int_val: i64 = match current_val {
 			Some(bytes) => {
@@ -225,7 +225,11 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
 		let _guard = self.write_lock([key.clone()]).await;
-		let current_val = self.get_unlocked(key.clone()).await?;
+		let current_val = match self.get_meta::<AnyValue>(&key).await? {
+			Some(AnyValue::String(val)) => Some(val.value),
+			Some(val) => return Err(StorageError::wrong_type(DataType::String, val.data_type())),
+			None => None,
+		};
 
 		let mut int_val: i64 = match current_val {
 			Some(bytes) => {
@@ -254,7 +258,11 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, StorageError> {
 		let _guard = self.write_lock([key.clone()]).await;
-		let current_val = self.get_unlocked(key.clone()).await?;
+		let current_val = match self.get_meta::<AnyValue>(&key).await? {
+			Some(AnyValue::String(val)) => Some(val.value),
+			Some(val) => return Err(StorageError::wrong_type(DataType::String, val.data_type())),
+			None => None,
+		};
 
 		let new_val = match current_val {
 			Some(bytes) => {
