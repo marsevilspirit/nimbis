@@ -1,5 +1,6 @@
 use bytes::Buf;
 use bytes::Bytes;
+use nimbis_macros::storage_lock;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -11,9 +12,9 @@ use crate::string::meta::SetMetaValue;
 use crate::utils::user_key_prefix;
 
 impl Storage {
+	#[storage_lock(write, key)]
 	#[fastrace::trace]
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
-		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let write_opts = WriteOptions {
@@ -84,9 +85,9 @@ impl Storage {
 		Ok(added_count)
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};
@@ -127,9 +128,9 @@ impl Storage {
 		Ok(members)
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? else {
 			return Ok(false);
 		};
@@ -143,9 +144,9 @@ impl Storage {
 		Ok(found)
 	}
 
+	#[storage_lock(write, key)]
 	#[fastrace::trace]
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
-		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -193,9 +194,9 @@ impl Storage {
 		Ok(removed_count)
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn scard(&self, key: Bytes) -> Result<u64, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta_val) = self.get_meta::<SetMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -335,8 +336,8 @@ mod tests {
 			.version;
 		assert_eq!(version_after_update, version_v1);
 
-		let deleted = storage.del(key.clone()).await.unwrap();
-		assert!(deleted);
+		let deleted = storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
 
 		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(added, 1);

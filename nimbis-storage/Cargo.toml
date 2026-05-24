@@ -13,6 +13,7 @@ chrono = { workspace = true }
 fastrace.workspace = true
 futures = { workspace = true }
 log = { workspace = true }
+nimbis-macros = { workspace = true }
 slatedb = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

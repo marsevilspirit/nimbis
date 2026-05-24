@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use nimbis_macros::storage_lock;
 use slatedb::Db;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
@@ -251,10 +252,9 @@ impl Storage {
 		Ok(())
 	}
 
+	#[storage_lock(global_write)]
 	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
-		let _guard = self.global_write_lock().await;
-
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
 		// Scanning and deleting everything is slow but correct for tests.
@@ -411,7 +411,7 @@ mod tests {
 		assert_eq!(stored, vec![Bytes::from("old_member")]);
 
 		// DEL (Logical Delete - only Meta)
-		ctx.storage.del(key.clone()).await.unwrap();
+		ctx.storage.del([key.clone()]).await.unwrap();
 
 		// Verify empty
 		let exists = ctx.storage.exists(key.clone()).await.unwrap();
@@ -462,8 +462,8 @@ mod tests {
 		assert_eq!(stored.len(), 10);
 
 		// DEL: Logical delete (O(1) - only meta is removed)
-		let deleted = ctx.storage.del(key.clone()).await.unwrap();
-		assert!(deleted, "DEL should succeed");
+		let deleted = ctx.storage.del([key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1, "DEL should delete one key");
 
 		// Verify logically empty
 		let exists = ctx.storage.exists(key.clone()).await.unwrap();
