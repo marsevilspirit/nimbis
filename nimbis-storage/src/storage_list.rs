@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use futures::future;
 use log::warn;
+use nimbis_macros::storage_lock;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 
@@ -21,14 +22,13 @@ impl Storage {
 		self.list_push(key, elements, false).await
 	}
 
+	#[storage_lock(write, key)]
 	async fn list_push(
 		&self,
 		key: Bytes,
 		elements: Vec<Bytes>,
 		is_left: bool,
 	) -> Result<u64, StorageError> {
-		let _guard = self.write_lock([key.clone()]).await;
-
 		if elements.is_empty() {
 			// If key exists, return len. If not, return 0.
 			if let Some(meta) = self.get_meta::<ListMetaValue>(&key).await? {
@@ -103,14 +103,13 @@ impl Storage {
 		self.list_pop(key, count, false).await
 	}
 
+	#[storage_lock(write, key)]
 	async fn list_pop(
 		&self,
 		key: Bytes,
 		count: Option<usize>,
 		is_left: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
-		let _guard = self.write_lock([key.clone()]).await;
-
 		let Some(mut meta_val) = self.get_meta::<ListMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};
@@ -184,9 +183,9 @@ impl Storage {
 		Ok(results)
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn llen(&self, key: Bytes) -> Result<u64, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {
@@ -194,6 +193,7 @@ impl Storage {
 		}
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn lrange(
 		&self,
@@ -201,7 +201,6 @@ impl Storage {
 		start: i64,
 		stop: i64,
 	) -> Result<Vec<Bytes>, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		let Some(meta_val) = self.get_meta::<ListMetaValue>(&key).await? else {
 			return Ok(Vec::new());
 		};

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use nimbis_macros::storage_lock;
 use slatedb::Db;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
@@ -251,10 +252,9 @@ impl Storage {
 		Ok(())
 	}
 
+	#[storage_lock(global_write)]
 	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
-		let _guard = self.global_write_lock().await;
-
 		// Iterate over all DBs and delete all keys
 		// Since we don't have atomic flush_all, we do best effort sequential
 		// Scanning and deleting everything is slow but correct for tests.

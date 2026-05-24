@@ -1782,6 +1782,7 @@ dependencies = [
  "quote",
  "rstest",
  "syn 2.0.117",
+ "tokio",
 ]
 
 [[package]]
@@ -1806,6 +1807,7 @@ dependencies = [
  "fastrace",
  "futures",
  "log",
+ "nimbis-macros",
  "rstest",
  "slatedb",
  "thiserror 2.0.18",

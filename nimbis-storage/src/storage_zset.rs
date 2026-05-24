@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::future;
+use nimbis_macros::storage_lock;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
@@ -13,13 +14,13 @@ use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
 impl Storage {
+	#[storage_lock(write, key)]
 	#[fastrace::trace]
 	pub async fn zadd(
 		&self,
 		key: Bytes,
 		elements: Vec<(f64, Bytes)>, // (score, member)
 	) -> Result<u64, StorageError> {
-		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 		let write_opts = WriteOptions {
@@ -157,6 +158,7 @@ impl Storage {
 		Ok(added_count)
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn zrange(
 		&self,
@@ -165,7 +167,6 @@ impl Storage {
 		stop: isize,
 		with_scores: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			// Adjust indices
 			let len = meta.len as isize;
@@ -227,9 +228,9 @@ impl Storage {
 		}
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? else {
 			return Ok(None);
 		};
@@ -246,9 +247,9 @@ impl Storage {
 		}
 	}
 
+	#[storage_lock(write, key)]
 	#[fastrace::trace]
 	pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
-		let _guard = self.write_lock([key.clone()]).await;
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
 
@@ -321,9 +322,9 @@ impl Storage {
 		Ok(removed_count)
 	}
 
+	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn zcard(&self, key: Bytes) -> Result<u64, StorageError> {
-		let _guard = self.read_lock([key.clone()]).await;
 		if let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? {
 			Ok(meta_val.len)
 		} else {

@@ -5,7 +5,109 @@ use syn::Data;
 use syn::DeriveInput;
 use syn::Error;
 use syn::Fields;
+use syn::FnArg;
+use syn::Ident;
+use syn::ItemFn;
+use syn::Result;
+use syn::Token;
+use syn::parse::Parse;
+use syn::parse::ParseStream;
 use syn::parse_macro_input;
+
+struct StorageLockArgs {
+	mode: Ident,
+	key: Option<Ident>,
+}
+
+impl Parse for StorageLockArgs {
+	fn parse(input: ParseStream<'_>) -> Result<Self> {
+		let mode = input.parse()?;
+		let key = if input.peek(Token![,]) {
+			input.parse::<Token![,]>()?;
+			Some(input.parse()?)
+		} else {
+			None
+		};
+
+		if !input.is_empty() {
+			return Err(input.error(
+				"unsupported storage_lock arguments; expected `read, key`, `write, key`, `read_many, keys`, `write_many, keys`, or `global_write`",
+			));
+		}
+
+		Ok(Self { mode, key })
+	}
+}
+
+#[proc_macro_attribute]
+pub fn storage_lock(attr: TokenStream, item: TokenStream) -> TokenStream {
+	let args = parse_macro_input!(attr as StorageLockArgs);
+	let input = parse_macro_input!(item as ItemFn);
+
+	if input.sig.asyncness.is_none() {
+		return Error::new_spanned(input.sig.fn_token, "storage_lock only supports async fn")
+			.to_compile_error()
+			.into();
+	}
+
+	if !matches!(input.sig.inputs.first(), Some(FnArg::Receiver(_))) {
+		return Error::new_spanned(input.sig.ident, "storage_lock requires a method with self")
+			.to_compile_error()
+			.into();
+	}
+
+	let mode = args.mode.to_string();
+	let lock = match (mode.as_str(), args.key) {
+		("read", Some(key)) => quote! {
+			let _guard = self.read_lock([#key.clone()]).await;
+		},
+		("write", Some(key)) => quote! {
+			let _guard = self.write_lock([#key.clone()]).await;
+		},
+		("read_many", Some(keys)) => quote! {
+			let #keys: Vec<_> = #keys.into_iter().collect();
+			let _guard = self.read_lock(#keys.clone()).await;
+		},
+		("write_many", Some(keys)) => quote! {
+			let #keys: Vec<_> = #keys.into_iter().collect();
+			let _guard = self.write_lock(#keys.clone()).await;
+		},
+		("global_write", None) => quote! {
+			let _guard = self.global_write_lock().await;
+		},
+		("global_write", Some(key)) => {
+			return Error::new_spanned(key, "global_write storage_lock does not take a key")
+				.to_compile_error()
+				.into();
+		}
+		("read" | "write" | "read_many" | "write_many", None) => {
+			return Error::new_spanned(args.mode, "storage_lock mode requires a key argument")
+				.to_compile_error()
+				.into();
+		}
+		_ => {
+			return Error::new_spanned(
+				args.mode,
+				"unsupported storage_lock mode; expected `read`, `write`, `read_many`, `write_many`, or `global_write`",
+			)
+			.to_compile_error()
+			.into();
+		}
+	};
+
+	let attrs = input.attrs;
+	let vis = input.vis;
+	let sig = input.sig;
+	let block = input.block;
+
+	TokenStream::from(quote! {
+		#(#attrs)*
+		#vis #sig {
+			#lock
+			#block
+		}
+	})
+}
 
 #[proc_macro_derive(OnlineConfig, attributes(online_config))]
 pub fn online_config_derive(input: TokenStream) -> TokenStream {
