@@ -2,11 +2,12 @@ use bytes::Bytes;
 use futures::future;
 use log::warn;
 use nimbis_macros::storage_lock;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
 use crate::list::element_key::ListElementKey;
+use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
@@ -39,17 +40,14 @@ impl Storage {
 		}
 
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 		let put_opts = PutOptions::default();
 
 		let (mut meta_val, meta_missing) = match self.get_meta::<ListMetaValue>(&key).await? {
 			Some(m) => (m, false),
 			None => (ListMetaValue::new(0), true),
 		};
-		let mut first_insert_seq: Option<u64> = None;
+		let mut batch = WriteBatch::new();
 
 		for element in elements {
 			let seq = if is_left {
@@ -62,33 +60,22 @@ impl Storage {
 			};
 
 			let element_key = ListElementKey::new(key.clone(), seq);
-			let wh = self
-				.list_db
-				.put_with_options(element_key.encode(), element, &put_opts, &write_opts)
-				.await?;
-			if meta_missing && first_insert_seq.is_none() {
-				first_insert_seq = Some(wh.seqnum());
-			}
+			batch.put_with_options(Segment::List.wrap(element_key.encode()), element, &put_opts);
 			meta_val.len += 1;
 		}
 
-		if meta_missing {
-			meta_val.version = first_insert_seq.ok_or_else(|| StorageError::DataInconsistency {
-				message: "missing first new list element seq after write".to_string(),
-			})?;
-		}
+		self.write_batch_with_seq(|seq| {
+			if meta_missing {
+				meta_val.version = seq;
+			}
 
-		// Update metadata
-		let meta_put_opts = Storage::meta_put_opts(&meta_val);
+			// Update metadata
+			let meta_put_opts = Storage::meta_put_opts(&meta_val);
 
-		self.string_db
-			.put_with_options(
-				meta_encoded_key,
-				meta_val.encode(),
-				&meta_put_opts,
-				&write_opts,
-			)
-			.await?;
+			batch.put_with_options(meta_encoded_key, meta_val.encode(), &meta_put_opts);
+			batch
+		})
+		.await?;
 
 		Ok(meta_val.len)
 	}
@@ -120,9 +107,7 @@ impl Storage {
 		}
 
 		let mut results = Vec::with_capacity(num);
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let mut batch = WriteBatch::new();
 
 		// We will pop up to `num` elements
 		let loop_count = std::cmp::min(num as u64, meta_val.len);
@@ -135,10 +120,11 @@ impl Storage {
 			};
 
 			let element_key = ListElementKey::new(key.clone(), seq);
+			let encoded_key = Segment::List.wrap(element_key.encode());
 			// Get element
 			if let Some(val) = self
-				.list_db
-				.get_key_value(element_key.encode())
+				.db
+				.get_key_value(encoded_key.clone())
 				.await?
 				.filter(|kv| kv.seq >= meta_val.version)
 				.map(|kv| kv.value)
@@ -153,31 +139,25 @@ impl Storage {
 				}
 				meta_val.len -= 1;
 
-				self.list_db
-					.delete_with_options(element_key.encode(), &write_opts)
-					.await?;
+				batch.delete(encoded_key);
 			}
 		}
 
 		// Update metadata
 		let meta_key = MetaKey::new(key.clone());
+		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 
 		if meta_val.len == 0 {
 			// List empty, delete metadata
-			self.string_db
-				.delete_with_options(meta_key.encode(), &write_opts)
-				.await?;
+			batch.delete(meta_encoded_key);
 		} else {
 			let meta_put_opts = Storage::meta_put_opts(&meta_val);
 
-			self.string_db
-				.put_with_options(
-					meta_key.encode(),
-					meta_val.encode(),
-					&meta_put_opts,
-					&write_opts,
-				)
-				.await?;
+			batch.put_with_options(meta_encoded_key, meta_val.encode(), &meta_put_opts);
+		}
+
+		if !results.is_empty() {
+			self.write_batch(batch).await?;
 		}
 
 		Ok(results)
@@ -244,8 +224,8 @@ impl Storage {
 			.map(|seq| {
 				let element_key = ListElementKey::new(key.clone(), seq);
 				async move {
-					self.list_db
-						.get_key_value(element_key.encode())
+					self.db
+						.get_key_value(Segment::List.wrap(element_key.encode()))
 						.await
 						.map_err(StorageError::from)
 				}

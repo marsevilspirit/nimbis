@@ -13,20 +13,21 @@ use slatedb::CompactionJobContext;
 use slatedb::Db;
 use slatedb::RowEntry;
 use slatedb::ValueDeletable;
+use tokio::sync::OnceCell;
 
 use crate::data_type::DataType;
+use crate::segment::Segment;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 
-// CollectionCompactionFilter used by hash_db, list_db, set_db, zset_db
+// CollectionCompactionFilter is installed on the single segmented DB.
 pub struct CollectionCompactionFilter {
-	pub(crate) string_db: Arc<Db>,
-	pub(crate) data_type: DataType,
+	pub(crate) db: Arc<OnceCell<Arc<Db>>>,
 }
 
 impl CollectionCompactionFilter {
 	/// Decode a sub-key to extract the user_key portion.
-	/// Sub-key format: key_len(u16 BE) + user_key + ...
+	/// Payload format after the segment byte: key_len(u16 BE) + user_key + ...
 	fn decode_sub_key(key: &[u8]) -> Option<Bytes> {
 		if key.len() < 2 {
 			return None;
@@ -38,6 +39,16 @@ impl CollectionCompactionFilter {
 		}
 		let user_key = Bytes::copy_from_slice(&buf[..key_len]);
 		Some(user_key)
+	}
+
+	fn collection_type(segment: u8) -> Option<DataType> {
+		match segment {
+			b'h' => Some(DataType::Hash),
+			b'l' => Some(DataType::List),
+			b'S' => Some(DataType::Set),
+			b'z' => Some(DataType::ZSet),
+			_ => None,
+		}
 	}
 }
 
@@ -52,31 +63,45 @@ impl CompactionFilter for CollectionCompactionFilter {
 			return Ok(CompactionFilterDecision::Keep);
 		}
 
+		let Some(segment) = entry.key.first().copied() else {
+			return Ok(CompactionFilterDecision::Keep);
+		};
+		let Some(data_type) = Self::collection_type(segment) else {
+			return Ok(CompactionFilterDecision::Keep);
+		};
+		let Some(db) = self.db.get() else {
+			warn!("[{:?}Filter] Keep[DB handle not initialized]", data_type);
+			return Ok(CompactionFilterDecision::Keep);
+		};
+
 		// Decode sub-key to get user_key
-		let Some(user_key) = Self::decode_sub_key(&entry.key) else {
+		let Some(user_key) = Self::decode_sub_key(&entry.key[1..]) else {
 			info!(
 				"[{:?}Filter] Invalid key format: {:?}",
-				self.data_type, entry.key
+				data_type, entry.key
 			);
 			return Ok(CompactionFilterDecision::Keep);
 		};
 
-		// Lookup metadata in string_db
+		// Lookup metadata in the meta segment.
 		let meta_key = MetaKey::new(user_key.clone());
-		let kv = match self.string_db.get_key_value(meta_key.encode()).await {
+		let kv = match db
+			.get_key_value(Segment::Meta.wrap(meta_key.encode()))
+			.await
+		{
 			Ok(Some(v)) => v,
 			Ok(None) => {
 				// Metadata missing -> Orphaned sub-key -> Delete
 				info!(
 					"[{:?}Filter] Drop[Meta missing] key: {:?}",
-					self.data_type, user_key
+					data_type, user_key
 				);
 				return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 			}
 			Err(e) => {
 				warn!(
 					"[{:?}Filter] Keep[Get meta failed: {:?}] key: {:?}",
-					self.data_type, e, user_key
+					data_type, e, user_key
 				);
 				return Ok(CompactionFilterDecision::Keep);
 			}
@@ -89,18 +114,18 @@ impl CompactionFilter for CollectionCompactionFilter {
 			Err(e) => {
 				warn!(
 					"[{:?}Filter] Keep[Decode meta failed: {:?}] key: {:?}",
-					self.data_type, e, user_key
+					data_type, e, user_key
 				);
 				return Ok(CompactionFilterDecision::Keep);
 			}
 		};
 
 		// Check type — type mismatch means orphaned sub-key from a type collision
-		if any_val.data_type() != self.data_type {
+		if any_val.data_type() != data_type {
 			info!(
 				"[{:?}Filter] Drop[Type mismatch: expected {:?}, found {:?}] key: {:?}",
-				self.data_type,
-				self.data_type,
+				data_type,
+				data_type,
 				any_val.data_type(),
 				user_key
 			);
@@ -113,7 +138,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 		{
 			info!(
 				"[{:?}Filter] Drop[old seq: meta_version {}, data_seq {}] key: {:?}",
-				self.data_type, meta_version, entry.seq, user_key
+				data_type, meta_version, entry.seq, user_key
 			);
 			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
@@ -127,8 +152,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 }
 
 pub struct CollectionCompactionFilterSupplier {
-	pub string_db: Arc<Db>,
-	pub data_type: DataType,
+	pub db: Arc<OnceCell<Arc<Db>>>,
 }
 
 #[async_trait]
@@ -138,8 +162,7 @@ impl CompactionFilterSupplier for CollectionCompactionFilterSupplier {
 		_context: &CompactionJobContext,
 	) -> Result<Box<dyn CompactionFilter>, CompactionFilterError> {
 		Ok(Box::new(CollectionCompactionFilter {
-			string_db: self.string_db.clone(),
-			data_type: self.data_type,
+			db: self.db.clone(),
 		}))
 	}
 }
@@ -163,31 +186,29 @@ mod tests {
 
 		use crate::string::meta::HashMetaValue;
 
-		// Setup string_db using local temp dir
+		// Setup single DB using local temp dir
 		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::new()));
 		tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 		let object_store = Arc::new(LocalFileSystem::new_with_prefix(&temp_dir).unwrap());
 
-		let string_db = Db::builder(Path::from("/string"), object_store)
+		let db = Db::builder(Path::from("/db"), object_store)
 			.build()
 			.await
 			.unwrap();
-		let string_db = Arc::new(string_db);
+		let db = Arc::new(db);
 
 		// Put Metadata (version 10)
 		let user_key = Bytes::from("myhash");
 		let meta_key = MetaKey::new(user_key.clone());
 		let meta_val = HashMetaValue::new(10, 5);
-		string_db
-			.put(meta_key.encode(), meta_val.encode())
+		db.put(Segment::Meta.wrap(meta_key.encode()), meta_val.encode())
 			.await
 			.unwrap();
 
 		// Setup Filter
-		let mut filter = CollectionCompactionFilter {
-			string_db: string_db.clone(),
-			data_type: DataType::Hash,
-		};
+		let filter_db = Arc::new(OnceCell::new());
+		let _ = filter_db.set(db.clone());
+		let mut filter = CollectionCompactionFilter { db: filter_db };
 
 		// Test Valid seq (10)
 		let mut valid_key = BytesMut::new();
@@ -196,7 +217,7 @@ mod tests {
 		valid_key.put_u32(5); // field len
 		valid_key.put_slice(b"field");
 		let valid_entry = RowEntry {
-			key: valid_key.freeze(),
+			key: Segment::Hash.wrap(valid_key.freeze()),
 			value: ValueDeletable::Value(Bytes::from("val")),
 			seq: 10,
 			create_ts: None,
@@ -214,7 +235,7 @@ mod tests {
 		invalid_key.put_u32(5);
 		invalid_key.put_slice(b"field");
 		let invalid_entry = RowEntry {
-			key: invalid_key.freeze(),
+			key: Segment::Hash.wrap(invalid_key.freeze()),
 			value: ValueDeletable::Value(Bytes::from("val")),
 			seq: 9,
 			create_ts: None,
@@ -239,30 +260,28 @@ mod tests {
 
 		use crate::string::meta::SetMetaValue;
 
-		// Setup string_db
+		// Setup single DB
 		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::new()));
 		tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 		let object_store = Arc::new(LocalFileSystem::new_with_prefix(&temp_dir).unwrap());
 
-		let string_db = Db::builder(Path::from("/string"), object_store)
+		let db = Db::builder(Path::from("/db"), object_store)
 			.build()
 			.await
 			.unwrap();
-		let string_db = Arc::new(string_db);
+		let db = Arc::new(db);
 
 		// Put Metadata for a Set (version=42, len=3)
 		let user_key = Bytes::from("myset");
 		let meta_key = MetaKey::new(user_key.clone());
 		let meta_val = SetMetaValue::new(42, 3);
-		string_db
-			.put(meta_key.encode(), meta_val.encode())
+		db.put(Segment::Meta.wrap(meta_key.encode()), meta_val.encode())
 			.await
 			.unwrap();
 
-		let mut filter = CollectionCompactionFilter {
-			string_db: string_db.clone(),
-			data_type: DataType::Set,
-		};
+		let filter_db = Arc::new(OnceCell::new());
+		let _ = filter_db.set(db.clone());
+		let mut filter = CollectionCompactionFilter { db: filter_db };
 
 		let build_sub_key = |member: &[u8]| -> Bytes {
 			let mut key = BytesMut::new();
@@ -270,7 +289,7 @@ mod tests {
 			key.extend_from_slice(&user_key);
 			key.put_u32(member.len() as u32);
 			key.extend_from_slice(member);
-			key.freeze()
+			Segment::Set.wrap(key.freeze())
 		};
 
 		let members: &[&[u8]] = &[b"alice", b"bob", b"carol"];
@@ -293,9 +312,9 @@ mod tests {
 		// Simulate DEL: remove the metadata
 		let write_opts = WriteOptions {
 			await_durable: false,
+			..WriteOptions::default()
 		};
-		string_db
-			.delete_with_options(meta_key.encode(), &write_opts)
+		db.delete_with_options(Segment::Meta.wrap(meta_key.encode()), &write_opts)
 			.await
 			.unwrap();
 
@@ -318,8 +337,7 @@ mod tests {
 
 		// Simulate re-creation with new version: put meta with version=100
 		let new_meta_val = SetMetaValue::new(100, 1);
-		string_db
-			.put(meta_key.encode(), new_meta_val.encode())
+		db.put(Segment::Meta.wrap(meta_key.encode()), new_meta_val.encode())
 			.await
 			.unwrap();
 

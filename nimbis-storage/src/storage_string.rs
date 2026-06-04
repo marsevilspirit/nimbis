@@ -1,12 +1,13 @@
 use bytes::Bytes;
 use chrono::Utc;
 use nimbis_macros::storage_lock;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::Ttl;
-use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::error::StorageError;
+use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::meta::AnyValue;
@@ -30,13 +31,10 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(value);
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		self.write_batch(batch).await?;
 		Ok(())
 	}
 
@@ -47,24 +45,24 @@ impl Storage {
 		I: IntoIterator<Item = Bytes>,
 	{
 		let mut deleted = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let mut batch = WriteBatch::new();
 
 		for key in keys {
-			let key = StringKey::new(key);
+			let user_key = key;
+			let key = StringKey::new(user_key.clone());
 
 			// We need to check existence to return correct number of deleted keys (0 or 1).
 			// Even if we don't use the meta value, we need to know if it exists.
-			if self.string_db.get(key.encode()).await?.is_none() {
+			if self.get_meta::<AnyValue>(&user_key).await?.is_none() {
 				continue;
 			}
 
-			self.string_db
-				.delete_with_options(key.encode(), &write_opts)
-				.await?;
-
+			batch.delete(Segment::Meta.wrap(key.encode()));
 			deleted += 1;
+		}
+
+		if deleted > 0 {
+			self.write_batch(batch).await?;
 		}
 
 		Ok(deleted)
@@ -75,26 +73,23 @@ impl Storage {
 	pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, StorageError> {
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
-		let encoded_key = skey.encode();
+		let encoded_key = Segment::Meta.wrap(skey.encode());
 
 		// EXPIRE applies to all data types; only existence matters.
 		if self.get_meta::<AnyValue>(&user_key).await?.is_none() {
 			return Ok(false);
 		}
 
-		let encoded_val = match self.string_db.get(encoded_key.clone()).await? {
+		let encoded_val = match self.db.get(encoded_key.clone()).await? {
 			Some(v) => v,
 			None => return Ok(false),
 		};
 
 		let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
 		if expire_time > 0 && expire_time <= now {
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			self.string_db
-				.delete_with_options(encoded_key, &write_opts)
-				.await?;
+			let mut batch = WriteBatch::new();
+			batch.delete(encoded_key);
+			self.write_batch(batch).await?;
 			return Ok(true);
 		}
 
@@ -104,34 +99,26 @@ impl Storage {
 			Ttl::NoExpiry
 		};
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-
 		let put_opts = PutOptions { ttl };
-
-		self.string_db
-			.put_with_options(encoded_key, encoded_val, &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(encoded_key, encoded_val, &put_opts);
+		self.write_batch(batch).await?;
 		Ok(true)
 	}
 
 	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
-		let encoded_key = StringKey::new(key).encode();
-		let kv = match self.string_db.get_key_value(encoded_key.clone()).await? {
+		let encoded_key = Segment::Meta.wrap(StringKey::new(key).encode());
+		let kv = match self.db.get_key_value(encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
 		};
 
 		if is_expired(kv.expire_ts) {
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			self.string_db
-				.delete_with_options(encoded_key, &write_opts)
-				.await?;
+			let mut batch = WriteBatch::new();
+			batch.delete(encoded_key);
+			self.write_batch(batch).await?;
 			return Ok(None);
 		}
 
@@ -196,13 +183,10 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(Bytes::from(int_val.to_string()));
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		self.write_batch(batch).await?;
 
 		Ok(int_val)
 	}
@@ -237,13 +221,10 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(Bytes::from(int_val.to_string()));
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		self.write_batch(batch).await?;
 
 		Ok(int_val)
 	}
@@ -271,13 +252,10 @@ impl Storage {
 		let key = StringKey::new(key);
 		let value = StringValue::new(Bytes::from(new_val));
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		self.write_batch(batch).await?;
 
 		Ok(len)
 	}

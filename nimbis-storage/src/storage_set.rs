@@ -1,10 +1,11 @@
 use bytes::Buf;
 use bytes::Bytes;
 use nimbis_macros::storage_lock;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
+use crate::segment::Segment;
 use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
@@ -16,10 +17,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 		let put_opts = PutOptions::default();
 
 		let (mut meta_val, meta_missing) = match self.get_meta::<SetMetaValue>(&key).await? {
@@ -35,51 +33,43 @@ impl Storage {
 			.collect();
 
 		let mut added_count = 0;
-		let mut first_added_seq: Option<u64> = None;
+		let mut batch = WriteBatch::new();
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), member);
-			let encoded_member_key = member_key.encode();
+			let encoded_member_key = Segment::Set.wrap(member_key.encode());
 			let exists = if meta_missing {
 				false
 			} else {
-				self.set_db
+				self.db
 					.get_key_value(encoded_member_key.clone())
 					.await?
 					.is_some_and(|kv| kv.seq >= meta_val.version)
 			};
 
 			if !exists {
-				let wh = self
-					.set_db
-					.put_with_options(
-						encoded_member_key,
-						Bytes::new(), // value is empty for set members
-						&put_opts,
-						&write_opts,
-					)
-					.await?;
-				if meta_missing && first_added_seq.is_none() {
-					first_added_seq = Some(wh.seqnum());
-				}
+				batch.put_with_options(
+					encoded_member_key,
+					Bytes::new(), // value is empty for set members
+					&put_opts,
+				);
 				added_count += 1;
 			}
 		}
 
 		if added_count > 0 {
-			if meta_missing {
-				meta_val.version =
-					first_added_seq.ok_or_else(|| StorageError::DataInconsistency {
-						message: "missing first new set member seq after write".to_string(),
-					})?;
-			}
-			meta_val.len += added_count;
+			self.write_batch_with_seq(|seq| {
+				if meta_missing {
+					meta_val.version = seq;
+				}
+				meta_val.len += added_count;
 
-			let put_opts = Storage::meta_put_opts(&meta_val);
+				let put_opts = Storage::meta_put_opts(&meta_val);
 
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+				batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
+				batch
+			})
+			.await?;
 		}
 
 		Ok(added_count)
@@ -93,10 +83,10 @@ impl Storage {
 		};
 
 		// Construct prefix: len(user_key) + user_key
-		let prefix = user_key_prefix(&key);
+		let prefix = Segment::Set.wrap(user_key_prefix(&key));
 
 		let range = prefix.clone()..;
-		let mut stream = self.set_db.scan(range).await?;
+		let mut stream = self.db.scan(range).await?;
 		let mut members = Vec::new();
 
 		while let Some(kv) = stream.next().await? {
@@ -137,8 +127,8 @@ impl Storage {
 
 		let member_key = SetMemberKey::new(key, member);
 		let found = self
-			.set_db
-			.get_key_value(member_key.encode())
+			.db
+			.get_key_value(Segment::Set.wrap(member_key.encode()))
 			.await?
 			.is_some_and(|kv| kv.seq >= meta_val.version);
 		Ok(found)
@@ -148,7 +138,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
+		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 
 		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
 			Some(val) => val,
@@ -156,23 +146,19 @@ impl Storage {
 		};
 
 		let mut removed_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let mut batch = WriteBatch::new();
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), member);
-			let encoded_key = member_key.encode();
+			let encoded_key = Segment::Set.wrap(member_key.encode());
 			let exists = self
-				.set_db
+				.db
 				.get_key_value(encoded_key.clone())
 				.await?
 				.is_some_and(|kv| kv.seq >= meta_val.version);
 
 			if exists {
-				self.set_db
-					.delete_with_options(encoded_key, &write_opts)
-					.await?;
+				batch.delete(encoded_key);
 				removed_count += 1;
 			}
 		}
@@ -180,15 +166,12 @@ impl Storage {
 		if removed_count > 0 {
 			meta_val.len -= removed_count;
 			if meta_val.len == 0 {
-				self.string_db
-					.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
+				batch.delete(meta_encoded_key);
 			} else {
 				let put_opts = Storage::meta_put_opts(&meta_val);
-				self.string_db
-					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-					.await?;
+				batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
 			}
+			self.write_batch(batch).await?;
 		}
 
 		Ok(removed_count)

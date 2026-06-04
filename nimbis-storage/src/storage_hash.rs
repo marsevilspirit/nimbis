@@ -2,11 +2,12 @@ use bytes::Buf;
 use bytes::Bytes;
 use futures::future;
 use nimbis_macros::storage_lock;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
 use crate::hash::field_key::HashFieldKey;
+use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
@@ -17,56 +18,49 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 		let put_opts = PutOptions::default();
 
 		// Now create field key with the version from metadata
 		let field_key = HashFieldKey::new(key.clone(), field);
-		let encoded_field_key = field_key.encode();
+		let encoded_field_key = Segment::Hash.wrap(field_key.encode());
 
-		let Some(mut meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
-			let wh = self
-				.hash_db
-				.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
-				.await?;
+		let meta_val = self.get_meta::<HashMetaValue>(&key).await?;
 
-			let new_meta = HashMetaValue::new(wh.seqnum(), 1);
-			self.string_db
-				.put_with_options(meta_encoded_key, new_meta.encode(), &put_opts, &write_opts)
-				.await?;
+		let Some(mut meta_val) = meta_val else {
+			self.write_batch_with_seq(|seq| {
+				let mut batch = WriteBatch::new();
+				batch.put_with_options(encoded_field_key, value, &put_opts);
+				let new_meta = HashMetaValue::new(seq, 1);
+				batch.put_with_options(meta_encoded_key, new_meta.encode(), &put_opts);
+				batch
+			})
+			.await?;
 			return Ok(1);
 		};
 
 		// Check if field already exists in current generation
-		let existing_field_raw = self
-			.hash_db
-			.get_key_value(encoded_field_key.clone())
-			.await?;
+		let existing_field_raw = self.db.get_key_value(encoded_field_key.clone()).await?;
 
 		let field_exists = existing_field_raw
 			.as_ref()
 			.is_some_and(|kv| kv.seq >= meta_val.version);
 		let is_new_field = !field_exists;
 
-		// Set the field in hash_db
-		self.hash_db
-			.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(encoded_field_key, value, &put_opts);
 
-		// Update metadata in string_db if needed
+		// Update metadata if needed.
 		if is_new_field {
 			meta_val.len += 1;
 
 			let put_opts = Storage::meta_put_opts(&meta_val);
 
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+			batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
+			self.write_batch(batch).await?;
 			Ok(1)
 		} else {
+			self.write_batch(batch).await?;
 			Ok(0)
 		}
 	}
@@ -80,7 +74,10 @@ impl Storage {
 		};
 
 		let field_key = HashFieldKey::new(key, field);
-		let result = self.hash_db.get_key_value(field_key.encode()).await?;
+		let result = self
+			.db
+			.get_key_value(Segment::Hash.wrap(field_key.encode()))
+			.await?;
 		if let Some(kv) = result
 			&& kv.seq >= meta_val.version
 		{
@@ -117,23 +114,19 @@ impl Storage {
 		let futures: Vec<_> = fields
 			.iter()
 			.map(|field| {
-				// We don't need to call self.hget() which repeats the check, we can access
-				// hash_db directly
+				// We don't need to call self.hget() which repeats the metadata check.
 				let field_key = HashFieldKey::new(key.clone(), field.clone());
-				// We need to clone the db handle for the closure/future if needed, but
-				// self.hash_db is Arc Actually self.hash_db.get is async.
-				// We can just call self.hash_db.get
 				async move {
 					let k = field_key.encode();
-					self.hash_db
-						.get_key_value(k)
+					self.db
+						.get_key_value(Segment::Hash.wrap(k))
 						.await
 						.map_err(StorageError::from)
 				}
 			})
 			.collect();
 
-		// The error handling types need to match. hash_db.get returns SlateDB error.
+		// The error handling types need to match. SlateDB returns its own error.
 		// hget returns Box<dyn Error>.
 		// try_join_all expects futures to return Result<T, E> where E is same.
 		// slateDB errors satisfy Into<Box<dyn Error>>? Maybe.
@@ -160,10 +153,10 @@ impl Storage {
 		};
 
 		// Construct prefix: len(user_key) + user_key
-		let prefix = user_key_prefix(&key);
+		let prefix = Segment::Hash.wrap(user_key_prefix(&key));
 
 		let range = prefix.clone()..;
-		let mut stream = self.hash_db.scan(range).await?;
+		let mut stream = self.db.scan(range).await?;
 		let mut results = Vec::new();
 
 		while let Some(kv) = stream.next().await? {
@@ -201,7 +194,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
+		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 
 		// check meta
 		let mut meta_val = match self.get_meta::<HashMetaValue>(&key).await? {
@@ -210,24 +203,20 @@ impl Storage {
 		};
 
 		let mut deleted_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let mut batch = WriteBatch::new();
 
 		for field in fields {
 			let field_key = HashFieldKey::new(key.clone(), field.clone());
-			let encoded_field_key = field_key.encode();
+			let encoded_field_key = Segment::Hash.wrap(field_key.encode());
 
 			// check if field exists
 			let exists = self
-				.hash_db
+				.db
 				.get_key_value(encoded_field_key.clone())
 				.await?
 				.is_some_and(|kv| kv.seq >= meta_val.version);
 			if exists {
-				self.hash_db
-					.delete_with_options(encoded_field_key, &write_opts)
-					.await?;
+				batch.delete(encoded_field_key);
 				deleted_count += 1;
 			}
 		}
@@ -235,19 +224,16 @@ impl Storage {
 		if deleted_count > 0 {
 			if meta_val.len <= deleted_count as u64 {
 				// Hash is empty, delete meta
-				self.string_db
-					.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
+				batch.delete(meta_encoded_key);
 			} else {
 				// Update meta
 				meta_val.len -= deleted_count as u64;
 
 				let put_opts = Storage::meta_put_opts(&meta_val);
 
-				self.string_db
-					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-					.await?;
+				batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
 			}
+			self.write_batch(batch).await?;
 		}
 
 		Ok(deleted_count)
