@@ -188,8 +188,12 @@ impl Storage {
 
 		let mut deleted_count = 0;
 		let mut batch = WriteBatch::new();
+		let mut seen_fields = std::collections::HashSet::new();
 
 		for field in fields {
+			if !seen_fields.insert(field.clone()) {
+				continue;
+			}
 			let field_key = HashFieldKey::new(key.clone(), meta_val.version, field.clone());
 			let encoded_field_key = field_key.encode();
 
@@ -397,6 +401,33 @@ mod tests {
 
 		let got = storage.hget(key.clone(), field.clone()).await.unwrap();
 		assert_eq!(got, Some(Bytes::from("v2")));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_hdel_counts_duplicate_fields_once() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("hash_hdel_duplicates");
+		let f1 = Bytes::from("f1");
+		let f2 = Bytes::from("f2");
+
+		storage
+			.hset(key.clone(), f1.clone(), Bytes::from("v1"))
+			.await
+			.unwrap();
+		storage
+			.hset(key.clone(), f2.clone(), Bytes::from("v2"))
+			.await
+			.unwrap();
+
+		let removed = storage.hdel(key.clone(), &[f1.clone(), f1]).await.unwrap();
+		assert_eq!(removed, 1);
+		assert_eq!(storage.hlen(key.clone()).await.unwrap(), 1);
+		assert_eq!(
+			storage.hget(key.clone(), f2.clone()).await.unwrap(),
+			Some(Bytes::from("v2"))
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

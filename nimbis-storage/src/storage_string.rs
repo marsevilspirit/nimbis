@@ -10,6 +10,7 @@ use crate::error::StorageError;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::meta::AnyValue;
+use crate::string::meta::MetaKey;
 use crate::string::value::StringValue;
 use crate::utils::is_expired;
 
@@ -45,10 +46,14 @@ impl Storage {
 	{
 		let mut deleted = 0;
 		let mut batch = WriteBatch::new();
+		let mut seen = std::collections::HashSet::new();
 
 		for key in keys {
 			let user_key = key;
-			let key = StringKey::new(user_key.clone());
+			if !seen.insert(user_key.clone()) {
+				continue;
+			}
+			let key = MetaKey::new(user_key.clone());
 
 			// We need to check existence to return correct number of deleted keys (0 or 1).
 			// Even if we don't use the meta value, we need to know if it exists.
@@ -71,7 +76,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, StorageError> {
 		let user_key = key.clone();
-		let skey = StringKey::new(key);
+		let skey = MetaKey::new(key);
 		let encoded_key = skey.encode();
 
 		// EXPIRE applies to all data types; only existence matters.
@@ -108,7 +113,7 @@ impl Storage {
 	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
-		let encoded_key = StringKey::new(key).encode();
+		let encoded_key = MetaKey::new(key).encode();
 		let kv = match self.db.get_key_value(encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
@@ -371,6 +376,43 @@ mod tests {
 		// Since meta is now String, HGET returns WRONGTYPE. Correct.
 		let err = storage.hget(k.clone(), f.clone()).await.unwrap_err();
 		assert!(err.to_string().contains("WRONGTYPE"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_del_counts_duplicate_keys_once() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("duplicate_del_key");
+
+		storage
+			.set(key.clone(), Bytes::from("value"))
+			.await
+			.unwrap();
+
+		let deleted = storage.del([key.clone(), key.clone()]).await.unwrap();
+		assert_eq!(deleted, 1);
+		assert!(!storage.exists(key.clone()).await.unwrap());
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_expire_and_ttl_apply_to_collection_metadata() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("hash_with_ttl");
+
+		storage
+			.hset(key.clone(), Bytes::from("field"), Bytes::from("value"))
+			.await
+			.unwrap();
+
+		let expire_at = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10_000;
+		assert!(storage.expire(key.clone(), expire_at).await.unwrap());
+
+		let ttl = storage.ttl(key.clone()).await.unwrap().unwrap();
+		assert!(ttl > 0);
+		assert!(ttl <= 10_000);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

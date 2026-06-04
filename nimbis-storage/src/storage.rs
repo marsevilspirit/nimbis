@@ -34,6 +34,8 @@ pub struct Storage {
 	locks: Arc<StorageLocks>,
 }
 
+const FLUSH_BATCH_SIZE: usize = 1024;
+
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
 	match shard_id {
 		Some(id) => base_path.join(format!("shard-{}", id)),
@@ -200,7 +202,10 @@ impl Storage {
 			.await
 			.map_err(StorageError::from)?;
 		let db = Arc::new(db);
-		let _ = filter_db.set(db.clone());
+		assert!(
+			filter_db.set(db.clone()).is_ok(),
+			"compaction filter DB handle should only be initialized once"
+		);
 
 		Ok(Self::new(db))
 	}
@@ -230,13 +235,19 @@ impl Storage {
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
 		let mut stream = self.db.scan::<Bytes, _>(..).await?;
 		let mut batch = WriteBatch::new();
-		let mut has_deletes = false;
+		let mut batch_len = 0;
 		while let Some(kv) = stream.next().await? {
 			batch.delete(kv.key);
-			has_deletes = true;
+			batch_len += 1;
+
+			if batch_len >= FLUSH_BATCH_SIZE {
+				let batch_to_write = std::mem::replace(&mut batch, WriteBatch::new());
+				self.write_batch(batch_to_write).await?;
+				batch_len = 0;
+			}
 		}
 
-		if has_deletes {
+		if batch_len > 0 {
 			self.write_batch(batch).await?;
 		}
 
@@ -386,6 +397,27 @@ mod tests {
 		}
 
 		assert_eq!(seen, vec![Some(META_PREFIX)]);
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn flush_all_handles_more_than_one_delete_batch(#[future] ctx: TestContext) {
+		let ctx = ctx.await;
+
+		for i in 0..=FLUSH_BATCH_SIZE {
+			ctx.storage
+				.set(
+					Bytes::from(format!("flush_key_{i}")),
+					Bytes::from_static(b"value"),
+				)
+				.await
+				.unwrap();
+		}
+
+		ctx.storage.flush_all().await.unwrap();
+
+		let mut stream = ctx.storage.db.scan::<Bytes, _>(..).await.unwrap();
+		assert!(stream.next().await.unwrap().is_none());
 	}
 
 	#[rstest]

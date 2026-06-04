@@ -129,10 +129,14 @@ impl Storage {
 			None => return Ok(0),
 		};
 
+		let mut seen_members = std::collections::HashSet::new();
 		let mut removed_count = 0;
 		let mut batch = WriteBatch::new();
 
 		for member in members {
+			if !seen_members.insert(member.clone()) {
+				continue;
+			}
 			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
 			let encoded_key = member_key.encode();
 			let exists = self.db.get_key_value(encoded_key.clone()).await?.is_some();
@@ -256,6 +260,29 @@ mod tests {
 
 		storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(storage.scard(key.clone()).await.unwrap(), 1);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_srem_counts_duplicate_members_once() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("set_srem_duplicates");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+
+		storage
+			.sadd(key.clone(), vec![m1.clone(), m2.clone()])
+			.await
+			.unwrap();
+
+		let removed = storage
+			.srem(key.clone(), vec![m1.clone(), m1])
+			.await
+			.unwrap();
+		assert_eq!(removed, 1);
+		assert_eq!(storage.scard(key.clone()).await.unwrap(), 1);
+		assert!(storage.sismember(key.clone(), m2).await.unwrap());
 
 		let _ = std::fs::remove_dir_all(path);
 	}

@@ -78,8 +78,9 @@ impl Storage {
 
 			if let Some(old_score_bytes) = old_score_bytes {
 				// Update existing member
-				let old_score =
-					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
+				let old_score = ScoreKey::decode_score(u64::from_be_bytes(
+					old_score_bytes.as_ref().try_into()?,
+				));
 				if old_score != score {
 					has_writes = true;
 					// Delete old ScoreKey
@@ -209,7 +210,7 @@ impl Storage {
 		let member_key = MemberKey::new(key, meta_val.version, member);
 		if let Some(kv) = self.db.get_key_value(member_key.encode()).await? {
 			// Val is encoded score (u64 BE)
-			let encoded_score = u64::from_be_bytes(kv.value[..8].try_into()?);
+			let encoded_score = u64::from_be_bytes(kv.value.as_ref().try_into()?);
 			Ok(Some(ScoreKey::decode_score(encoded_score)))
 		} else {
 			Ok(None)
@@ -227,14 +228,21 @@ impl Storage {
 			None => return Ok(0),
 		};
 
+		let mut seen_members = std::collections::HashSet::new();
+		let members = members
+			.into_iter()
+			.filter(|member| seen_members.insert(member.clone()))
+			.collect::<Vec<_>>();
+
 		// Fetch all member keys in parallel
 		let mut member_encoded_keys = Vec::with_capacity(members.len());
-		let fetch_futures = members.iter().map(|member| {
+		let mut fetch_futures = Vec::with_capacity(members.len());
+		for member in &members {
 			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
 			let encoded_key = member_key.encode();
 			member_encoded_keys.push(encoded_key.clone());
-			self.db.get_key_value(encoded_key)
-		});
+			fetch_futures.push(self.db.get_key_value(encoded_key));
+		}
 
 		let old_values: Result<Vec<_>, _> =
 			future::join_all(fetch_futures).await.into_iter().collect();
@@ -256,7 +264,7 @@ impl Storage {
 				batch.delete(&member_encoded_keys[idx]);
 
 				// Delete ScoreKey
-				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
+				let encoded_score = u64::from_be_bytes(val.as_ref().try_into()?);
 				let score = ScoreKey::decode_score(encoded_score);
 				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
 				batch.delete(score_key.encode());
@@ -486,6 +494,58 @@ mod tests {
 
 		let members = storage.zrange(key.clone(), 0, -1, false).await.unwrap();
 		assert_eq!(members, vec![Bytes::from("m1")]);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zrem_counts_duplicate_members_once() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_zrem_duplicates");
+		let one = Bytes::from("one");
+		let two = Bytes::from("two");
+
+		storage
+			.zadd(key.clone(), vec![(1.0, one.clone()), (2.0, two.clone())])
+			.await
+			.unwrap();
+
+		let removed = storage
+			.zrem(key.clone(), vec![one.clone(), one])
+			.await
+			.unwrap();
+		assert_eq!(removed, 1);
+		assert_eq!(storage.zcard(key.clone()).await.unwrap(), 1);
+		assert_eq!(storage.zscore(key.clone(), two).await.unwrap(), Some(2.0));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zscore_and_zrem_return_error_for_short_score_value() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_short_score");
+		let member = Bytes::from("one");
+
+		storage
+			.zadd(key.clone(), vec![(1.0, member.clone())])
+			.await
+			.unwrap();
+		let version = storage
+			.get_meta::<ZSetMetaValue>(&key)
+			.await
+			.unwrap()
+			.unwrap()
+			.version;
+		let member_key = MemberKey::new(key.clone(), version, member.clone()).encode();
+		storage
+			.db
+			.put(member_key, Bytes::from_static(b"bad"))
+			.await
+			.unwrap();
+
+		assert!(storage.zscore(key.clone(), member.clone()).await.is_err());
+		assert!(storage.zrem(key.clone(), vec![member]).await.is_err());
 
 		let _ = std::fs::remove_dir_all(path);
 	}
