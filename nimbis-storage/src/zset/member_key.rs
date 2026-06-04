@@ -2,6 +2,8 @@ use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
 
+use crate::segment::ZSET_PREFIX;
+
 #[derive(Debug, PartialEq)]
 pub struct MemberKey {
 	user_key: Bytes,
@@ -19,13 +21,14 @@ impl MemberKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: len(user_key) (u16 BE) + user_key + version (u64 BE) + b'M' +
-		// len(member) (u32 BE) + member
+		// Key format: b'z' + len(user_key) (u16 BE) + user_key + version (u64 BE) +
+		// b'M' + len(member) (u32 BE) + member
 		let user_key_len = self.user_key.len() as u16;
 		let member_len = self.member.len() as u32;
 
 		let mut bytes =
-			BytesMut::with_capacity(2 + self.user_key.len() + 8 + 1 + 4 + self.member.len());
+			BytesMut::with_capacity(1 + 2 + self.user_key.len() + 8 + 1 + 4 + self.member.len());
+		bytes.put_u8(ZSET_PREFIX);
 		bytes.put_u16(user_key_len);
 		bytes.extend_from_slice(&self.user_key);
 		bytes.put_u64(self.version);
@@ -51,10 +54,11 @@ mod tests {
 		let key = Bytes::from("myzset");
 		let member = Bytes::from("member");
 		let encoded = MemberKey::new(key.clone(), version, member).encode();
-		let version_start = 2 + key.len();
+		let version_start = 3 + key.len();
 
-		assert_eq!(&encoded[..2], &(key.len() as u16).to_be_bytes());
-		assert_eq!(&encoded[2..2 + key.len()], key.as_ref());
+		assert_eq!(encoded[0], b'z');
+		assert_eq!(&encoded[1..3], &(key.len() as u16).to_be_bytes());
+		assert_eq!(&encoded[3..3 + key.len()], key.as_ref());
 		assert_eq!(
 			&encoded[version_start..version_start + 8],
 			&version.to_be_bytes()

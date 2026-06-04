@@ -15,7 +15,10 @@ use slatedb::ValueDeletable;
 use tokio::sync::OnceCell;
 
 use crate::data_type::DataType;
-use crate::segment::Segment;
+use crate::segment::HASH_PREFIX;
+use crate::segment::LIST_PREFIX;
+use crate::segment::SET_PREFIX;
+use crate::segment::ZSET_PREFIX;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 use crate::utils::decode_collection_version;
@@ -36,10 +39,10 @@ impl CollectionCompactionFilter {
 
 	fn collection_type(segment: u8) -> Option<DataType> {
 		match segment {
-			b'h' => Some(DataType::Hash),
-			b'l' => Some(DataType::List),
-			b'S' => Some(DataType::Set),
-			b'z' => Some(DataType::ZSet),
+			HASH_PREFIX => Some(DataType::Hash),
+			LIST_PREFIX => Some(DataType::List),
+			SET_PREFIX => Some(DataType::Set),
+			ZSET_PREFIX => Some(DataType::ZSet),
 			_ => None,
 		}
 	}
@@ -78,10 +81,7 @@ impl CompactionFilter for CollectionCompactionFilter {
 
 		// Lookup metadata in the meta segment.
 		let meta_key = MetaKey::new(user_key.clone());
-		let kv = match db
-			.get_key_value(Segment::Meta.wrap(meta_key.encode()))
-			.await
-		{
+		let kv = match db.get_key_value(meta_key.encode()).await {
 			Ok(Some(v)) => v,
 			Ok(None) => {
 				// Metadata missing -> Orphaned sub-key -> Delete
@@ -174,13 +174,13 @@ mod tests {
 	use slatedb::ValueDeletable;
 
 	use super::*;
+	use crate::hash::field_key::HashFieldKey;
+	use crate::set::member_key::SetMemberKey;
 
 	#[tokio::test]
 	async fn test_collection_filter_version_mismatch() {
 		use std::sync::Arc;
 
-		use bytes::BufMut;
-		use bytes::BytesMut;
 		use slatedb::Db;
 		use slatedb::object_store::local::LocalFileSystem;
 		use slatedb::object_store::path::Path;
@@ -202,9 +202,7 @@ mod tests {
 		let user_key = Bytes::from("myhash");
 		let meta_key = MetaKey::new(user_key.clone());
 		let meta_val = HashMetaValue::new(10, 5);
-		db.put(Segment::Meta.wrap(meta_key.encode()), meta_val.encode())
-			.await
-			.unwrap();
+		db.put(meta_key.encode(), meta_val.encode()).await.unwrap();
 
 		// Setup Filter
 		let filter_db = Arc::new(OnceCell::new());
@@ -212,14 +210,9 @@ mod tests {
 		let mut filter = CollectionCompactionFilter { db: filter_db };
 
 		// Test valid version (10)
-		let mut valid_key = BytesMut::new();
-		valid_key.put_u16(user_key.len() as u16);
-		valid_key.extend_from_slice(&user_key);
-		valid_key.put_u64(10);
-		valid_key.put_u32(5); // field len
-		valid_key.put_slice(b"field");
+		let valid_key = HashFieldKey::new(user_key.clone(), 10, Bytes::from("field")).encode();
 		let valid_entry = RowEntry {
-			key: Segment::Hash.wrap(valid_key.freeze()),
+			key: valid_key,
 			value: ValueDeletable::Value(Bytes::from("val")),
 			seq: 1,
 			create_ts: None,
@@ -231,14 +224,9 @@ mod tests {
 		);
 
 		// Test stale version (9)
-		let mut invalid_key = BytesMut::new();
-		invalid_key.put_u16(user_key.len() as u16);
-		invalid_key.extend_from_slice(&user_key);
-		invalid_key.put_u64(9);
-		invalid_key.put_u32(5);
-		invalid_key.put_slice(b"field");
+		let invalid_key = HashFieldKey::new(user_key.clone(), 9, Bytes::from("field")).encode();
 		let invalid_entry = RowEntry {
-			key: Segment::Hash.wrap(invalid_key.freeze()),
+			key: invalid_key,
 			value: ValueDeletable::Value(Bytes::from("val")),
 			seq: 1,
 			create_ts: None,
@@ -254,8 +242,6 @@ mod tests {
 	async fn test_collection_filter_reclaims_orphaned_data() {
 		use std::sync::Arc;
 
-		use bytes::BufMut;
-		use bytes::BytesMut;
 		use slatedb::Db;
 		use slatedb::config::WriteOptions;
 		use slatedb::object_store::local::LocalFileSystem;
@@ -278,22 +264,14 @@ mod tests {
 		let user_key = Bytes::from("myset");
 		let meta_key = MetaKey::new(user_key.clone());
 		let meta_val = SetMetaValue::new(42, 3);
-		db.put(Segment::Meta.wrap(meta_key.encode()), meta_val.encode())
-			.await
-			.unwrap();
+		db.put(meta_key.encode(), meta_val.encode()).await.unwrap();
 
 		let filter_db = Arc::new(OnceCell::new());
 		let _ = filter_db.set(db.clone());
 		let mut filter = CollectionCompactionFilter { db: filter_db };
 
 		let build_sub_key = |version: u64, member: &[u8]| -> Bytes {
-			let mut key = BytesMut::new();
-			key.put_u16(user_key.len() as u16);
-			key.extend_from_slice(&user_key);
-			key.put_u64(version);
-			key.put_u32(member.len() as u32);
-			key.extend_from_slice(member);
-			Segment::Set.wrap(key.freeze())
+			SetMemberKey::new(user_key.clone(), version, Bytes::copy_from_slice(member)).encode()
 		};
 
 		let members: &[&[u8]] = &[b"alice", b"bob", b"carol"];
@@ -318,7 +296,7 @@ mod tests {
 			await_durable: false,
 			..WriteOptions::default()
 		};
-		db.delete_with_options(Segment::Meta.wrap(meta_key.encode()), &write_opts)
+		db.delete_with_options(meta_key.encode(), &write_opts)
 			.await
 			.unwrap();
 
@@ -341,7 +319,7 @@ mod tests {
 
 		// Simulate re-creation with new version: put meta with version=100
 		let new_meta_val = SetMetaValue::new(100, 1);
-		db.put(Segment::Meta.wrap(meta_key.encode()), new_meta_val.encode())
+		db.put(meta_key.encode(), new_meta_val.encode())
 			.await
 			.unwrap();
 

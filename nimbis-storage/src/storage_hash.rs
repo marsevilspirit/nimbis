@@ -7,18 +7,16 @@ use slatedb::config::PutOptions;
 
 use crate::error::StorageError;
 use crate::hash::field_key::HashFieldKey;
-use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
-use crate::utils::collection_version_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
 	#[fastrace::trace]
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 		let put_opts = PutOptions::default();
 
 		let meta_val = self.get_meta::<HashMetaValue>(&key).await?;
@@ -26,7 +24,7 @@ impl Storage {
 		let Some(mut meta_val) = meta_val else {
 			let version = self.next_version();
 			let field_key = HashFieldKey::new(key.clone(), version, field);
-			let encoded_field_key = Segment::Hash.wrap(field_key.encode());
+			let encoded_field_key = field_key.encode();
 			let mut batch = WriteBatch::new();
 			batch.put_with_options(encoded_field_key, value, &put_opts);
 			let new_meta = HashMetaValue::new(version, 1);
@@ -37,7 +35,7 @@ impl Storage {
 		};
 
 		let field_key = HashFieldKey::new(key.clone(), meta_val.version, field);
-		let encoded_field_key = Segment::Hash.wrap(field_key.encode());
+		let encoded_field_key = field_key.encode();
 
 		// Check if field already exists in current version
 		let existing_field_raw = self.db.get_key_value(encoded_field_key.clone()).await?;
@@ -72,10 +70,7 @@ impl Storage {
 		};
 
 		let field_key = HashFieldKey::new(key, meta_val.version, field);
-		let result = self
-			.db
-			.get_key_value(Segment::Hash.wrap(field_key.encode()))
-			.await?;
+		let result = self.db.get_key_value(field_key.encode()).await?;
 		if let Some(kv) = result {
 			return Ok(Some(kv.value));
 		}
@@ -114,10 +109,7 @@ impl Storage {
 				let field_key = HashFieldKey::new(key.clone(), version, field.clone());
 				async move {
 					let k = field_key.encode();
-					self.db
-						.get_key_value(Segment::Hash.wrap(k))
-						.await
-						.map_err(StorageError::from)
+					self.db.get_key_value(k).await.map_err(StorageError::from)
 				}
 			})
 			.collect();
@@ -149,7 +141,7 @@ impl Storage {
 		};
 
 		// Construct prefix: len(user_key) + user_key + version
-		let prefix = Segment::Hash.wrap(collection_version_prefix(&key, meta_val.version));
+		let prefix = HashFieldKey::prefix(&key, meta_val.version);
 
 		let range = prefix.clone()..;
 		let mut stream = self.db.scan(range).await?;
@@ -186,7 +178,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 
 		// check meta
 		let mut meta_val = match self.get_meta::<HashMetaValue>(&key).await? {
@@ -199,7 +191,7 @@ impl Storage {
 
 		for field in fields {
 			let field_key = HashFieldKey::new(key.clone(), meta_val.version, field.clone());
-			let encoded_field_key = Segment::Hash.wrap(field_key.encode());
+			let encoded_field_key = field_key.encode();
 
 			// check if field exists
 			let exists = self

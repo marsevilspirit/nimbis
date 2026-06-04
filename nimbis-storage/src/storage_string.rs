@@ -7,7 +7,6 @@ use slatedb::config::Ttl;
 
 use crate::data_type::DataType;
 use crate::error::StorageError;
-use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::key::StringKey;
 use crate::string::meta::AnyValue;
@@ -33,7 +32,7 @@ impl Storage {
 
 		let put_opts = PutOptions::default();
 		let mut batch = WriteBatch::new();
-		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		batch.put_with_options(key.encode(), value.encode(), &put_opts);
 		self.write_batch(batch).await?;
 		Ok(())
 	}
@@ -57,7 +56,7 @@ impl Storage {
 				continue;
 			}
 
-			batch.delete(Segment::Meta.wrap(key.encode()));
+			batch.delete(key.encode());
 			deleted += 1;
 		}
 
@@ -73,7 +72,7 @@ impl Storage {
 	pub async fn expire(&self, key: Bytes, expire_time: u64) -> Result<bool, StorageError> {
 		let user_key = key.clone();
 		let skey = StringKey::new(key);
-		let encoded_key = Segment::Meta.wrap(skey.encode());
+		let encoded_key = skey.encode();
 
 		// EXPIRE applies to all data types; only existence matters.
 		if self.get_meta::<AnyValue>(&user_key).await?.is_none() {
@@ -109,7 +108,7 @@ impl Storage {
 	#[storage_lock(read, key)]
 	#[fastrace::trace]
 	pub async fn ttl(&self, key: Bytes) -> Result<Option<i64>, StorageError> {
-		let encoded_key = Segment::Meta.wrap(StringKey::new(key).encode());
+		let encoded_key = StringKey::new(key).encode();
 		let kv = match self.db.get_key_value(encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
@@ -185,7 +184,7 @@ impl Storage {
 
 		let put_opts = PutOptions::default();
 		let mut batch = WriteBatch::new();
-		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		batch.put_with_options(key.encode(), value.encode(), &put_opts);
 		self.write_batch(batch).await?;
 
 		Ok(int_val)
@@ -223,7 +222,7 @@ impl Storage {
 
 		let put_opts = PutOptions::default();
 		let mut batch = WriteBatch::new();
-		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		batch.put_with_options(key.encode(), value.encode(), &put_opts);
 		self.write_batch(batch).await?;
 
 		Ok(int_val)
@@ -254,7 +253,7 @@ impl Storage {
 
 		let put_opts = PutOptions::default();
 		let mut batch = WriteBatch::new();
-		batch.put_with_options(Segment::Meta.wrap(key.encode()), value.encode(), &put_opts);
+		batch.put_with_options(key.encode(), value.encode(), &put_opts);
 		self.write_batch(batch).await?;
 
 		Ok(len)

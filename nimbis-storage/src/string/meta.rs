@@ -7,6 +7,7 @@ use bytes::BytesMut;
 
 use crate::data_type::DataType;
 use crate::error::DecoderError;
+use crate::segment::META_PREFIX;
 use crate::string::value::StringValue;
 
 /// Trait for values stored in the string database that carry TTL and type
@@ -82,7 +83,8 @@ impl MetaKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut buf = BytesMut::with_capacity(2 + self.user_key.len());
+		let mut buf = BytesMut::with_capacity(1 + 2 + self.user_key.len());
+		buf.put_u8(META_PREFIX);
 		buf.put_u16(self.user_key.len() as u16);
 		buf.extend_from_slice(&self.user_key);
 		buf.freeze()
@@ -528,8 +530,8 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("mykey", b"\x00\x05mykey")]
-	#[case("", b"\x00\x00")]
+	#[case("mykey", b"m\x00\x05mykey")]
+	#[case("", b"m\x00\x00")]
 	fn test_meta_key_encode(#[case] key: &str, #[case] expected: &[u8]) {
 		let meta_key = MetaKey::new(Bytes::copy_from_slice(key.as_bytes()));
 		assert_eq!(&meta_key.encode()[..], expected);

@@ -22,7 +22,6 @@ use crate::lock::StorageLock;
 use crate::lock::StorageLockGuard;
 use crate::lock::StorageLocks;
 use crate::segment::NimbisSegmentExtractor;
-use crate::segment::Segment;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 use crate::utils::is_expired;
@@ -255,7 +254,7 @@ impl Storage {
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 		let kv = match self.db.get_key_value(meta_encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
@@ -331,7 +330,6 @@ mod tests {
 	#[tokio::test]
 	async fn hset_writes_meta_and_field_in_one_segmented_batch(#[future] ctx: TestContext) {
 		use crate::hash::field_key::HashFieldKey;
-		use crate::segment::Segment;
 		use crate::string::meta::HashMetaValue;
 
 		let ctx = ctx.await;
@@ -346,7 +344,7 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 1);
 
-		let meta_key = Segment::Meta.wrap(MetaKey::new(key.clone()).encode());
+		let meta_key = MetaKey::new(key.clone()).encode();
 
 		let meta_entry = ctx
 			.storage
@@ -358,7 +356,7 @@ mod tests {
 		let meta = HashMetaValue::decode(&meta_entry.value).unwrap();
 		assert!(meta.version > 0);
 
-		let field_key = Segment::Hash.wrap(HashFieldKey::new(key, meta.version, field).encode());
+		let field_key = HashFieldKey::new(key, meta.version, field).encode();
 		let field_entry = ctx
 			.storage
 			.db
@@ -373,7 +371,7 @@ mod tests {
 	#[rstest]
 	#[tokio::test]
 	async fn string_set_does_not_write_internal_seq_or_collection_keys(#[future] ctx: TestContext) {
-		use crate::segment::Segment;
+		use crate::segment::META_PREFIX;
 
 		let ctx = ctx.await;
 		ctx.storage
@@ -387,7 +385,7 @@ mod tests {
 			seen.push(kv.key.first().copied());
 		}
 
-		assert_eq!(seen, vec![Some(Segment::Meta.prefix())]);
+		assert_eq!(seen, vec![Some(META_PREFIX)]);
 	}
 
 	#[rstest]
@@ -457,9 +455,7 @@ mod tests {
 		use slatedb::CompactionFilter;
 
 		use crate::compaction_filter::CollectionCompactionFilter;
-		use crate::segment::Segment;
-		use crate::utils::user_key_prefix;
-
+		use crate::set::member_key::SetMemberKey;
 		let ctx = ctx.await;
 		let key = Bytes::from("leak_test_set");
 
@@ -487,7 +483,7 @@ mod tests {
 		assert!(!exists);
 
 		// KEY VERIFICATION: Scan raw set segment to prove physical data still exists
-		let prefix = Segment::Set.wrap(user_key_prefix(&key));
+		let prefix = SetMemberKey::user_prefix(&key);
 		let mut stream = ctx.storage.db.scan(prefix.clone()..).await.unwrap();
 		let mut raw_count = 0;
 		let mut raw_entries = Vec::new();

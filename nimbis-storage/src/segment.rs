@@ -1,40 +1,13 @@
-use bytes::Bytes;
-use bytes::BytesMut;
 use slatedb::PrefixExtractor;
 use slatedb::PrefixTarget;
 
 pub const EXTRACTOR_NAME: &str = "nimbis-storage-segment-v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Segment {
-	Internal = 0,
-	Meta = b'm',
-	Hash = b'h',
-	List = b'l',
-	Set = b'S',
-	ZSet = b'z',
-}
-
-impl Segment {
-	pub fn prefix(self) -> u8 {
-		self as u8
-	}
-
-	pub fn wrap(self, payload: Bytes) -> Bytes {
-		let mut key = BytesMut::with_capacity(1 + payload.len());
-		key.extend_from_slice(&[self.prefix()]);
-		key.extend_from_slice(&payload);
-		key.freeze()
-	}
-
-	pub fn strip(self, encoded: &Bytes) -> Option<Bytes> {
-		if encoded.first().copied()? != self.prefix() {
-			return None;
-		}
-		Some(encoded.slice(1..))
-	}
-}
+pub const META_PREFIX: u8 = b'm';
+pub const HASH_PREFIX: u8 = b'h';
+pub const LIST_PREFIX: u8 = b'l';
+pub const SET_PREFIX: u8 = b'S';
+pub const ZSET_PREFIX: u8 = b'z';
 
 #[derive(Debug, Default)]
 pub struct NimbisSegmentExtractor;

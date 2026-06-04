@@ -2,6 +2,8 @@ use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
 
+use crate::segment::HASH_PREFIX;
+
 #[derive(Debug, PartialEq)]
 pub struct HashFieldKey {
 	user_key: Bytes,
@@ -20,16 +22,27 @@ impl HashFieldKey {
 
 	pub fn encode(&self) -> Bytes {
 		// Key format:
-		// len(user_key) (u16 BE) + user_key + version (u64 BE) + len(field) (u32 BE)
-		// + field
+		// b'h' + len(user_key) (u16 BE) + user_key + version (u64 BE) +
+		// len(field) (u32 BE) + field
 		let field_len = self.field.len() as u32;
 
-		let mut bytes = BytesMut::with_capacity(2 + self.user_key.len() + 8 + 4 + self.field.len());
+		let mut bytes =
+			BytesMut::with_capacity(1 + 2 + self.user_key.len() + 8 + 4 + self.field.len());
+		bytes.put_u8(HASH_PREFIX);
 		bytes.put_u16(self.user_key.len() as u16);
 		bytes.extend_from_slice(&self.user_key);
 		bytes.put_u64(self.version);
 		bytes.put_u32(field_len);
 		bytes.extend_from_slice(&self.field);
+		bytes.freeze()
+	}
+
+	pub fn prefix(user_key: &Bytes, version: u64) -> Bytes {
+		let mut bytes = BytesMut::with_capacity(1 + 2 + user_key.len() + 8);
+		bytes.put_u8(HASH_PREFIX);
+		bytes.put_u16(user_key.len() as u16);
+		bytes.extend_from_slice(user_key);
+		bytes.put_u64(version);
 		bytes.freeze()
 	}
 
@@ -56,10 +69,12 @@ mod tests {
 			Bytes::copy_from_slice(field.as_bytes()),
 		);
 		let encoded = field_key.encode();
-		// Verify format: key_len(u16) + key + version(u64) + field_len(u32) + field
-		assert_eq!(&encoded[..2], &(key.len() as u16).to_be_bytes());
-		assert_eq!(&encoded[2..2 + key.len()], key.as_bytes());
-		let version_start = 2 + key.len();
+		// Verify format: b'h' + key_len(u16) + key + version(u64) +
+		// field_len(u32) + field
+		assert_eq!(encoded[0], b'h');
+		assert_eq!(&encoded[1..3], &(key.len() as u16).to_be_bytes());
+		assert_eq!(&encoded[3..3 + key.len()], key.as_bytes());
+		let version_start = 3 + key.len();
 		assert_eq!(
 			&encoded[version_start..version_start + 8],
 			&version.to_be_bytes()

@@ -1,17 +1,27 @@
 use bytes::Bytes;
+use nimbis_storage::hash::field_key::HashFieldKey;
+use nimbis_storage::segment::HASH_PREFIX;
 use nimbis_storage::segment::NimbisSegmentExtractor;
-use nimbis_storage::segment::Segment;
+use nimbis_storage::segment::SET_PREFIX;
+use nimbis_storage::set::member_key::SetMemberKey;
 use slatedb::PrefixExtractor;
 use slatedb::PrefixTarget;
 
 #[test]
-fn segment_keys_are_one_byte_prefixes_over_existing_payloads() {
-	let payload = Bytes::from_static(b"\x00\x04user\x00\x05field");
-	let encoded = Segment::Hash.wrap(payload.clone());
+fn typed_keys_encode_segment_prefix_directly() {
+	let hash_key =
+		HashFieldKey::new(Bytes::from_static(b"user"), 7, Bytes::from_static(b"field")).encode();
+	let set_key = SetMemberKey::new(
+		Bytes::from_static(b"user"),
+		7,
+		Bytes::from_static(b"member"),
+	)
+	.encode();
 
-	assert_eq!(encoded, Bytes::from_static(b"h\x00\x04user\x00\x05field"));
-	assert_eq!(Segment::Hash.strip(&encoded), Some(payload));
-	assert_eq!(Segment::Set.strip(&encoded), None);
+	assert_eq!(hash_key[0], HASH_PREFIX);
+	assert_eq!(set_key[0], SET_PREFIX);
+	assert_eq!(&hash_key[1..3], &4u16.to_be_bytes());
+	assert_eq!(&set_key[1..3], &4u16.to_be_bytes());
 }
 
 #[test]

@@ -7,7 +7,6 @@ use slatedb::config::PutOptions;
 
 use crate::error::StorageError;
 use crate::list::element_key::ListElementKey;
-use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::ListMetaValue;
 use crate::string::meta::MetaKey;
@@ -40,7 +39,7 @@ impl Storage {
 		}
 
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 		let put_opts = PutOptions::default();
 
 		let mut meta_val = match self.get_meta::<ListMetaValue>(&key).await? {
@@ -60,7 +59,7 @@ impl Storage {
 			};
 
 			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
-			batch.put_with_options(Segment::List.wrap(element_key.encode()), element, &put_opts);
+			batch.put_with_options(element_key.encode(), element, &put_opts);
 			meta_val.len += 1;
 		}
 
@@ -112,7 +111,7 @@ impl Storage {
 			};
 
 			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
-			let encoded_key = Segment::List.wrap(element_key.encode());
+			let encoded_key = element_key.encode();
 			// Get element
 			if let Some(val) = self
 				.db
@@ -136,7 +135,7 @@ impl Storage {
 
 		// Update metadata
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 
 		if meta_val.len == 0 {
 			// List empty, delete metadata
@@ -216,7 +215,7 @@ impl Storage {
 				let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 				async move {
 					self.db
-						.get_key_value(Segment::List.wrap(element_key.encode()))
+						.get_key_value(element_key.encode())
 						.await
 						.map_err(StorageError::from)
 				}

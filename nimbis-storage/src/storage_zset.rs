@@ -5,11 +5,9 @@ use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 
 use crate::error::StorageError;
-use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::ZSetMetaValue;
-use crate::utils::zset_score_user_key_prefix;
 use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
@@ -22,7 +20,7 @@ impl Storage {
 		elements: Vec<(f64, Bytes)>, // (score, member)
 	) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 		let put_opts = PutOptions::default();
 
 		// Get metadata first to obtain version
@@ -46,8 +44,7 @@ impl Storage {
 		let member_encoded_keys: Vec<_> = elements
 			.iter()
 			.map(|(_, member)| {
-				Segment::ZSet
-					.wrap(MemberKey::new(key.clone(), meta_val.version, member.clone()).encode())
+				MemberKey::new(key.clone(), meta_val.version, member.clone()).encode()
 			})
 			.collect();
 
@@ -88,16 +85,12 @@ impl Storage {
 					// Delete old ScoreKey
 					let old_score_key =
 						ScoreKey::new(key.clone(), meta_val.version, old_score, member.clone());
-					batch.delete(Segment::ZSet.wrap(old_score_key.encode()));
+					batch.delete(old_score_key.encode());
 
 					// Add new ScoreKey
 					let new_score_key =
 						ScoreKey::new(key.clone(), meta_val.version, score, member.clone());
-					batch.put_with_options(
-						Segment::ZSet.wrap(new_score_key.encode()),
-						Bytes::new(),
-						&put_opts,
-					);
+					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
 
 					// Update MemberKey
 					let encoded_score = ScoreKey::encode_score(score);
@@ -122,11 +115,7 @@ impl Storage {
 
 				// Add ScoreKey
 				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
-				batch.put_with_options(
-					Segment::ZSet.wrap(score_key.encode()),
-					Bytes::new(),
-					&put_opts,
-				);
+				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
 			}
 		}
 
@@ -165,7 +154,7 @@ impl Storage {
 
 			// We need to scan ScoreKeys.
 			// Key format: len(user_key) + user_key + b'S' + score + member
-			let prefix = Segment::ZSet.wrap(zset_score_user_key_prefix(&key, meta.version));
+			let prefix = ScoreKey::prefix(&key, meta.version);
 
 			let range = prefix.as_ref()..;
 			let mut stream = self.db.scan(range).await?;
@@ -218,11 +207,7 @@ impl Storage {
 		};
 
 		let member_key = MemberKey::new(key, meta_val.version, member);
-		if let Some(kv) = self
-			.db
-			.get_key_value(Segment::ZSet.wrap(member_key.encode()))
-			.await?
-		{
+		if let Some(kv) = self.db.get_key_value(member_key.encode()).await? {
 			// Val is encoded score (u64 BE)
 			let encoded_score = u64::from_be_bytes(kv.value[..8].try_into()?);
 			Ok(Some(ScoreKey::decode_score(encoded_score)))
@@ -235,7 +220,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 
 		let mut meta_val = match self.get_meta::<ZSetMetaValue>(&key).await? {
 			Some(val) => val,
@@ -246,7 +231,7 @@ impl Storage {
 		let mut member_encoded_keys = Vec::with_capacity(members.len());
 		let fetch_futures = members.iter().map(|member| {
 			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
-			let encoded_key = Segment::ZSet.wrap(member_key.encode());
+			let encoded_key = member_key.encode();
 			member_encoded_keys.push(encoded_key.clone());
 			self.db.get_key_value(encoded_key)
 		});
@@ -274,7 +259,7 @@ impl Storage {
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
 				let score = ScoreKey::decode_score(encoded_score);
 				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
-				batch.delete(Segment::ZSet.wrap(score_key.encode()));
+				batch.delete(score_key.encode());
 
 				removed_count += 1;
 			}

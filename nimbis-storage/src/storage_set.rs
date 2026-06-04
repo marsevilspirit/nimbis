@@ -5,19 +5,17 @@ use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 
 use crate::error::StorageError;
-use crate::segment::Segment;
 use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
-use crate::utils::collection_version_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
 	#[fastrace::trace]
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 		let put_opts = PutOptions::default();
 
 		let (mut meta_val, meta_missing) = match self.get_meta::<SetMetaValue>(&key).await? {
@@ -37,7 +35,7 @@ impl Storage {
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
-			let encoded_member_key = Segment::Set.wrap(member_key.encode());
+			let encoded_member_key = member_key.encode();
 			let exists = if meta_missing {
 				false
 			} else {
@@ -77,7 +75,7 @@ impl Storage {
 		};
 
 		// Construct prefix: len(user_key) + user_key + version
-		let prefix = Segment::Set.wrap(collection_version_prefix(&key, meta_val.version));
+		let prefix = SetMemberKey::prefix(&key, meta_val.version);
 
 		let range = prefix.clone()..;
 		let mut stream = self.db.scan(range).await?;
@@ -116,11 +114,7 @@ impl Storage {
 		};
 
 		let member_key = SetMemberKey::new(key, meta_val.version, member);
-		let found = self
-			.db
-			.get_key_value(Segment::Set.wrap(member_key.encode()))
-			.await?
-			.is_some();
+		let found = self.db.get_key_value(member_key.encode()).await?.is_some();
 		Ok(found)
 	}
 
@@ -128,7 +122,7 @@ impl Storage {
 	#[fastrace::trace]
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
+		let meta_encoded_key = meta_key.encode();
 
 		let mut meta_val = match self.get_meta::<SetMetaValue>(&key).await? {
 			Some(val) => val,
@@ -140,7 +134,7 @@ impl Storage {
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
-			let encoded_key = Segment::Set.wrap(member_key.encode());
+			let encoded_key = member_key.encode();
 			let exists = self.db.get_key_value(encoded_key.clone()).await?.is_some();
 
 			if exists {
