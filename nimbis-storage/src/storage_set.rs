@@ -10,7 +10,7 @@ use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
-use crate::utils::user_key_prefix;
+use crate::utils::collection_generation_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
@@ -22,7 +22,7 @@ impl Storage {
 
 		let (mut meta_val, meta_missing) = match self.get_meta::<SetMetaValue>(&key).await? {
 			Some(meta) => (meta, false),
-			None => (SetMetaValue::new(0, 0), true),
+			None => (SetMetaValue::new(self.next_generation(), 0), true),
 		};
 
 		// Deduplicate members, keeping the first occurrence
@@ -36,7 +36,7 @@ impl Storage {
 		let mut batch = WriteBatch::new();
 
 		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), member);
+			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
 			let encoded_member_key = Segment::Set.wrap(member_key.encode());
 			let exists = if meta_missing {
 				false
@@ -44,7 +44,7 @@ impl Storage {
 				self.db
 					.get_key_value(encoded_member_key.clone())
 					.await?
-					.is_some_and(|kv| kv.seq >= meta_val.version)
+					.is_some()
 			};
 
 			if !exists {
@@ -58,18 +58,12 @@ impl Storage {
 		}
 
 		if added_count > 0 {
-			self.write_batch_with_seq(|seq| {
-				if meta_missing {
-					meta_val.version = seq;
-				}
-				meta_val.len += added_count;
+			meta_val.len += added_count;
 
-				let put_opts = Storage::meta_put_opts(&meta_val);
+			let put_opts = Storage::meta_put_opts(&meta_val);
 
-				batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
-				batch
-			})
-			.await?;
+			batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
+			self.write_batch(batch).await?;
 		}
 
 		Ok(added_count)
@@ -82,8 +76,8 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key
-		let prefix = Segment::Set.wrap(user_key_prefix(&key));
+		// Construct prefix: len(user_key) + user_key + generation
+		let prefix = Segment::Set.wrap(collection_generation_prefix(&key, meta_val.version));
 
 		let range = prefix.clone()..;
 		let mut stream = self.db.scan(range).await?;
@@ -94,11 +88,7 @@ impl Storage {
 			if !k.starts_with(&prefix) {
 				break;
 			}
-			if kv.seq < meta_val.version {
-				continue;
-			}
-
-			// Parse member: prefix (key_len+key) + member_len(u32) + member
+			// Parse member: prefix (key_len+key+generation) + member_len(u32) + member
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -125,12 +115,12 @@ impl Storage {
 			return Ok(false);
 		};
 
-		let member_key = SetMemberKey::new(key, member);
+		let member_key = SetMemberKey::new(key, meta_val.version, member);
 		let found = self
 			.db
 			.get_key_value(Segment::Set.wrap(member_key.encode()))
 			.await?
-			.is_some_and(|kv| kv.seq >= meta_val.version);
+			.is_some();
 		Ok(found)
 	}
 
@@ -149,13 +139,9 @@ impl Storage {
 		let mut batch = WriteBatch::new();
 
 		for member in members {
-			let member_key = SetMemberKey::new(key.clone(), member);
+			let member_key = SetMemberKey::new(key.clone(), meta_val.version, member);
 			let encoded_key = Segment::Set.wrap(member_key.encode());
-			let exists = self
-				.db
-				.get_key_value(encoded_key.clone())
-				.await?
-				.is_some_and(|kv| kv.seq >= meta_val.version);
+			let exists = self.db.get_key_value(encoded_key.clone()).await?.is_some();
 
 			if exists {
 				batch.delete(encoded_key);

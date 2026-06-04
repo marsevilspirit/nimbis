@@ -28,7 +28,7 @@ impl Storage {
 		// Get metadata first to obtain version
 		let (mut meta_val, meta_missing) = match self.get_meta::<ZSetMetaValue>(&key).await? {
 			Some(val) => (val, false),
-			None => (ZSetMetaValue::new(0, 0), true),
+			None => (ZSetMetaValue::new(self.next_generation(), 0), true),
 		};
 
 		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD
@@ -46,7 +46,8 @@ impl Storage {
 		let member_encoded_keys: Vec<_> = elements
 			.iter()
 			.map(|(_, member)| {
-				Segment::ZSet.wrap(MemberKey::new(key.clone(), member.clone()).encode())
+				Segment::ZSet
+					.wrap(MemberKey::new(key.clone(), meta_val.version, member.clone()).encode())
 			})
 			.collect();
 
@@ -64,7 +65,7 @@ impl Storage {
 				.collect::<Result<Vec<_>, _>>()?
 				.into_iter()
 				.map(|entry| match entry {
-					Some(kv) if kv.seq >= meta_val.version => Some(kv.value),
+					Some(kv) => Some(kv.value),
 					_ => None,
 				})
 				.collect()
@@ -85,11 +86,13 @@ impl Storage {
 				if old_score != score {
 					has_writes = true;
 					// Delete old ScoreKey
-					let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
+					let old_score_key =
+						ScoreKey::new(key.clone(), meta_val.version, old_score, member.clone());
 					batch.delete(Segment::ZSet.wrap(old_score_key.encode()));
 
 					// Add new ScoreKey
-					let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
+					let new_score_key =
+						ScoreKey::new(key.clone(), meta_val.version, score, member.clone());
 					batch.put_with_options(
 						Segment::ZSet.wrap(new_score_key.encode()),
 						Bytes::new(),
@@ -118,7 +121,7 @@ impl Storage {
 				);
 
 				// Add ScoreKey
-				let score_key = ScoreKey::new(key.clone(), score, member);
+				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
 				batch.put_with_options(
 					Segment::ZSet.wrap(score_key.encode()),
 					Bytes::new(),
@@ -128,20 +131,14 @@ impl Storage {
 		}
 
 		if has_writes {
-			self.write_batch_with_seq(|seq| {
-				if meta_missing && added_count > 0 {
-					meta_val.version = seq;
-				}
-				if added_count > 0 {
-					meta_val.len += added_count;
+			if added_count > 0 {
+				meta_val.len += added_count;
 
-					let put_opts = Storage::meta_put_opts(&meta_val);
+				let put_opts = Storage::meta_put_opts(&meta_val);
 
-					batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
-				}
-				batch
-			})
-			.await?;
+				batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
+			}
+			self.write_batch(batch).await?;
 		}
 
 		Ok(added_count)
@@ -168,7 +165,7 @@ impl Storage {
 
 			// We need to scan ScoreKeys.
 			// Key format: len(user_key) + user_key + b'S' + score + member
-			let prefix = Segment::ZSet.wrap(zset_score_user_key_prefix(&key));
+			let prefix = Segment::ZSet.wrap(zset_score_user_key_prefix(&key, meta.version));
 
 			let range = prefix.as_ref()..;
 			let mut stream = self.db.scan(range).await?;
@@ -185,10 +182,6 @@ impl Storage {
 				if !k.starts_with(&prefix) {
 					break;
 				}
-				if kv.seq < meta.version {
-					continue;
-				}
-
 				if current_idx >= start && current_idx <= stop {
 					// Extract member and score
 					// Key: len(user_key) + user_key + b'S' + score(8) + member
@@ -224,11 +217,11 @@ impl Storage {
 			return Ok(None);
 		};
 
-		let member_key = MemberKey::new(key, member);
+		let member_key = MemberKey::new(key, meta_val.version, member);
 		if let Some(kv) = self
 			.db
 			.get_key_value(Segment::ZSet.wrap(member_key.encode()))
-			.await? && kv.seq >= meta_val.version
+			.await?
 		{
 			// Val is encoded score (u64 BE)
 			let encoded_score = u64::from_be_bytes(kv.value[..8].try_into()?);
@@ -252,7 +245,7 @@ impl Storage {
 		// Fetch all member keys in parallel
 		let mut member_encoded_keys = Vec::with_capacity(members.len());
 		let fetch_futures = members.iter().map(|member| {
-			let member_key = MemberKey::new(key.clone(), member.clone());
+			let member_key = MemberKey::new(key.clone(), meta_val.version, member.clone());
 			let encoded_key = Segment::ZSet.wrap(member_key.encode());
 			member_encoded_keys.push(encoded_key.clone());
 			self.db.get_key_value(encoded_key)
@@ -263,7 +256,7 @@ impl Storage {
 		let old_values = old_values?
 			.into_iter()
 			.map(|entry| match entry {
-				Some(kv) if kv.seq >= meta_val.version => Some(kv.value),
+				Some(kv) => Some(kv.value),
 				_ => None,
 			})
 			.collect::<Vec<_>>();
@@ -280,7 +273,7 @@ impl Storage {
 				// Delete ScoreKey
 				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
 				let score = ScoreKey::decode_score(encoded_score);
-				let score_key = ScoreKey::new(key.clone(), score, member);
+				let score_key = ScoreKey::new(key.clone(), meta_val.version, score, member);
 				batch.delete(Segment::ZSet.wrap(score_key.encode()));
 
 				removed_count += 1;

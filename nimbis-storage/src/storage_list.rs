@@ -43,9 +43,9 @@ impl Storage {
 		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 		let put_opts = PutOptions::default();
 
-		let (mut meta_val, meta_missing) = match self.get_meta::<ListMetaValue>(&key).await? {
-			Some(m) => (m, false),
-			None => (ListMetaValue::new(0), true),
+		let mut meta_val = match self.get_meta::<ListMetaValue>(&key).await? {
+			Some(m) => m,
+			None => ListMetaValue::new(self.next_generation()),
 		};
 		let mut batch = WriteBatch::new();
 
@@ -59,23 +59,15 @@ impl Storage {
 				s
 			};
 
-			let element_key = ListElementKey::new(key.clone(), seq);
+			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 			batch.put_with_options(Segment::List.wrap(element_key.encode()), element, &put_opts);
 			meta_val.len += 1;
 		}
 
-		self.write_batch_with_seq(|seq| {
-			if meta_missing {
-				meta_val.version = seq;
-			}
-
-			// Update metadata
-			let meta_put_opts = Storage::meta_put_opts(&meta_val);
-
-			batch.put_with_options(meta_encoded_key, meta_val.encode(), &meta_put_opts);
-			batch
-		})
-		.await?;
+		// Update metadata
+		let meta_put_opts = Storage::meta_put_opts(&meta_val);
+		batch.put_with_options(meta_encoded_key, meta_val.encode(), &meta_put_opts);
+		self.write_batch(batch).await?;
 
 		Ok(meta_val.len)
 	}
@@ -119,14 +111,13 @@ impl Storage {
 				meta_val.tail - 1
 			};
 
-			let element_key = ListElementKey::new(key.clone(), seq);
+			let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 			let encoded_key = Segment::List.wrap(element_key.encode());
 			// Get element
 			if let Some(val) = self
 				.db
 				.get_key_value(encoded_key.clone())
 				.await?
-				.filter(|kv| kv.seq >= meta_val.version)
 				.map(|kv| kv.value)
 			{
 				results.push(val);
@@ -222,7 +213,7 @@ impl Storage {
 
 		let futures: Vec<_> = (start_seq..=stop_seq)
 			.map(|seq| {
-				let element_key = ListElementKey::new(key.clone(), seq);
+				let element_key = ListElementKey::new(key.clone(), meta_val.version, seq);
 				async move {
 					self.db
 						.get_key_value(Segment::List.wrap(element_key.encode()))
@@ -235,9 +226,7 @@ impl Storage {
 		let found_results = future::try_join_all(futures).await?;
 
 		for res in found_results {
-			if let Some(kv) = res
-				&& kv.seq >= meta_val.version
-			{
+			if let Some(kv) = res {
 				results.push(kv.value);
 			} else {
 				// Should not happen if consistency is maintained

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Buf;
 use bytes::Bytes;
 use log::info;
 use log::warn;
@@ -19,6 +18,8 @@ use crate::data_type::DataType;
 use crate::segment::Segment;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
+use crate::utils::decode_collection_generation;
+use crate::utils::is_expired;
 
 // CollectionCompactionFilter is installed on the single segmented DB.
 pub struct CollectionCompactionFilter {
@@ -26,19 +27,11 @@ pub struct CollectionCompactionFilter {
 }
 
 impl CollectionCompactionFilter {
-	/// Decode a sub-key to extract the user_key portion.
-	/// Payload format after the segment byte: key_len(u16 BE) + user_key + ...
-	fn decode_sub_key(key: &[u8]) -> Option<Bytes> {
-		if key.len() < 2 {
-			return None;
-		}
-		let mut buf = key;
-		let key_len = buf.get_u16() as usize;
-		if buf.len() < key_len {
-			return None;
-		}
-		let user_key = Bytes::copy_from_slice(&buf[..key_len]);
-		Some(user_key)
+	/// Decode a sub-key to extract the user key and collection generation.
+	/// Payload format after the segment byte: key_len(u16 BE) + user_key +
+	/// generation(u64 BE) + ...
+	fn decode_sub_key(key: &[u8]) -> Option<(Bytes, u64)> {
+		decode_collection_generation(key)
 	}
 
 	fn collection_type(segment: u8) -> Option<DataType> {
@@ -74,8 +67,8 @@ impl CompactionFilter for CollectionCompactionFilter {
 			return Ok(CompactionFilterDecision::Keep);
 		};
 
-		// Decode sub-key to get user_key
-		let Some(user_key) = Self::decode_sub_key(&entry.key[1..]) else {
+		// Decode sub-key to get user key and embedded generation.
+		let Some((user_key, key_generation)) = Self::decode_sub_key(&entry.key[1..]) else {
 			info!(
 				"[{:?}Filter] Invalid key format: {:?}",
 				data_type, entry.key
@@ -107,6 +100,14 @@ impl CompactionFilter for CollectionCompactionFilter {
 			}
 		};
 
+		if is_expired(kv.expire_ts) {
+			info!(
+				"[{:?}Filter] Drop[Meta expired] key: {:?}",
+				data_type, user_key
+			);
+			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
+		}
+
 		let meta_encoded = kv.value;
 
 		let any_val = match AnyValue::decode(&meta_encoded) {
@@ -132,13 +133,13 @@ impl CompactionFilter for CollectionCompactionFilter {
 			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
 
-		// Check version — old generation sub-keys should be tombstoned
-		if let Some(meta_version) = any_val.version()
-			&& entry.seq < meta_version
+		// Check generation — old generation sub-keys should be tombstoned.
+		if let Some(meta_generation) = any_val.version()
+			&& meta_generation != key_generation
 		{
 			info!(
-				"[{:?}Filter] Drop[old seq: meta_version {}, data_seq {}] key: {:?}",
-				data_type, meta_version, entry.seq, user_key
+				"[{:?}Filter] Drop[stale generation: meta {}, key {}] key: {:?}",
+				data_type, meta_generation, key_generation, user_key
 			);
 			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
@@ -210,16 +211,17 @@ mod tests {
 		let _ = filter_db.set(db.clone());
 		let mut filter = CollectionCompactionFilter { db: filter_db };
 
-		// Test Valid seq (10)
+		// Test valid generation (10)
 		let mut valid_key = BytesMut::new();
 		valid_key.put_u16(user_key.len() as u16);
 		valid_key.extend_from_slice(&user_key);
+		valid_key.put_u64(10);
 		valid_key.put_u32(5); // field len
 		valid_key.put_slice(b"field");
 		let valid_entry = RowEntry {
 			key: Segment::Hash.wrap(valid_key.freeze()),
 			value: ValueDeletable::Value(Bytes::from("val")),
-			seq: 10,
+			seq: 1,
 			create_ts: None,
 			expire_ts: None,
 		};
@@ -228,16 +230,17 @@ mod tests {
 			CompactionFilterDecision::Keep
 		);
 
-		// Test Invalid seq (9)
+		// Test stale generation (9)
 		let mut invalid_key = BytesMut::new();
 		invalid_key.put_u16(user_key.len() as u16);
 		invalid_key.extend_from_slice(&user_key);
+		invalid_key.put_u64(9);
 		invalid_key.put_u32(5);
 		invalid_key.put_slice(b"field");
 		let invalid_entry = RowEntry {
 			key: Segment::Hash.wrap(invalid_key.freeze()),
 			value: ValueDeletable::Value(Bytes::from("val")),
-			seq: 9,
+			seq: 1,
 			create_ts: None,
 			expire_ts: None,
 		};
@@ -283,10 +286,11 @@ mod tests {
 		let _ = filter_db.set(db.clone());
 		let mut filter = CollectionCompactionFilter { db: filter_db };
 
-		let build_sub_key = |member: &[u8]| -> Bytes {
+		let build_sub_key = |generation: u64, member: &[u8]| -> Bytes {
 			let mut key = BytesMut::new();
 			key.put_u16(user_key.len() as u16);
 			key.extend_from_slice(&user_key);
+			key.put_u64(generation);
 			key.put_u32(member.len() as u32);
 			key.extend_from_slice(member);
 			Segment::Set.wrap(key.freeze())
@@ -295,9 +299,9 @@ mod tests {
 		let members: &[&[u8]] = &[b"alice", b"bob", b"carol"];
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(member),
+				key: build_sub_key(42, member),
 				value: ValueDeletable::Value(Bytes::new()),
-				seq: 42,
+				seq: 1,
 				create_ts: None,
 				expire_ts: None,
 			};
@@ -321,9 +325,9 @@ mod tests {
 		// Now all sub-keys should be marked for deletion (orphaned)
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(member),
+				key: build_sub_key(42, member),
 				value: ValueDeletable::Value(Bytes::new()),
-				seq: 42,
+				seq: 1,
 				create_ts: None,
 				expire_ts: None,
 			};
@@ -341,12 +345,12 @@ mod tests {
 			.await
 			.unwrap();
 
-		// Old seq=42 data should still be reclaimed
+		// Old generation=42 data should still be reclaimed
 		for member in members {
 			let entry = RowEntry {
-				key: build_sub_key(member),
+				key: build_sub_key(42, member),
 				value: ValueDeletable::Value(Bytes::new()),
-				seq: 42,
+				seq: 1,
 				create_ts: None,
 				expire_ts: None,
 			};
@@ -358,11 +362,11 @@ mod tests {
 			);
 		}
 
-		// New seq=100 data should be kept
+		// New generation=100 data should be kept
 		let new_entry = RowEntry {
-			key: build_sub_key(b"dave"),
+			key: build_sub_key(100, b"dave"),
 			value: ValueDeletable::Value(Bytes::new()),
-			seq: 100,
+			seq: 1,
 			create_ts: None,
 			expire_ts: None,
 		};

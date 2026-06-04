@@ -1,6 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use nimbis_macros::storage_lock;
@@ -15,7 +13,6 @@ use slatedb::object_store::ObjectStoreScheme;
 use slatedb::object_store::local::LocalFileSystem;
 use slatedb::object_store::parse_url_opts;
 use slatedb::object_store::path::Path as ObjectStorePath;
-use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
@@ -29,16 +26,14 @@ use crate::segment::Segment;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 use crate::utils::is_expired;
+use crate::version::VersionGenerator;
 
 #[derive(Clone)]
 pub struct Storage {
 	pub(crate) db: Arc<Db>,
-	next_seq: Arc<AtomicU64>,
-	seq_write_lock: Arc<Mutex<()>>,
+	version_generator: Arc<VersionGenerator>,
 	locks: Arc<StorageLocks>,
 }
-
-const INTERNAL_SEQ_KEY: &[u8] = b"seq";
 
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
 	match shard_id {
@@ -116,13 +111,16 @@ where
 }
 
 impl Storage {
-	pub fn new(db: Arc<Db>, last_seq: u64) -> Self {
+	pub fn new(db: Arc<Db>) -> Self {
 		Self {
 			db,
-			next_seq: Arc::new(AtomicU64::new(last_seq)),
-			seq_write_lock: Arc::new(Mutex::new(())),
+			version_generator: Arc::new(VersionGenerator::new()),
 			locks: Arc::new(StorageLocks::new()),
 		}
+	}
+
+	pub(crate) fn next_generation(&self) -> u64 {
+		self.version_generator.next()
 	}
 
 	pub(crate) async fn read_lock(
@@ -204,9 +202,8 @@ impl Storage {
 			.map_err(StorageError::from)?;
 		let db = Arc::new(db);
 		let _ = filter_db.set(db.clone());
-		let last_seq = Self::load_last_seq(&db).await?;
 
-		Ok(Self::new(db, last_seq))
+		Ok(Self::new(db))
 	}
 
 	pub async fn close(&self) -> Result<(), StorageError> {
@@ -214,48 +211,19 @@ impl Storage {
 		Ok(())
 	}
 
-	pub(crate) fn internal_seq_key() -> Bytes {
-		Segment::Internal.wrap(Bytes::from_static(INTERNAL_SEQ_KEY))
-	}
-
-	async fn load_last_seq(db: &Db) -> Result<u64, StorageError> {
-		let Some(value) = db.get(Self::internal_seq_key()).await? else {
-			return Ok(0);
-		};
-		let bytes: [u8; 8] = value[..].try_into()?;
-		Ok(u64::from_be_bytes(bytes))
-	}
-
-	pub(crate) fn write_opts(seq: u64) -> WriteOptions {
+	pub(crate) fn write_opts() -> WriteOptions {
 		WriteOptions {
 			await_durable: false,
-			seqnum: seq,
+			..WriteOptions::default()
 		}
 	}
 
-	fn next_write_seq(&self) -> u64 {
-		self.next_seq.fetch_add(1, Ordering::SeqCst) + 1
-	}
-
-	pub(crate) async fn write_batch_with_seq<F>(&self, build_batch: F) -> Result<u64, StorageError>
-	where
-		F: FnOnce(u64) -> WriteBatch,
-	{
-		let _guard = self.seq_write_lock.lock().await;
-		let seq = self.next_write_seq();
-		let mut batch = build_batch(seq);
-		batch.put(
-			Self::internal_seq_key(),
-			Bytes::copy_from_slice(&seq.to_be_bytes()),
-		);
-		self.db
-			.write_with_options(batch, &Self::write_opts(seq))
-			.await?;
-		Ok(seq)
-	}
-
 	pub(crate) async fn write_batch(&self, batch: WriteBatch) -> Result<u64, StorageError> {
-		self.write_batch_with_seq(|_| batch).await
+		let handle = self
+			.db
+			.write_with_options(batch, &Self::write_opts())
+			.await?;
+		Ok(handle.seqnum())
 	}
 
 	#[storage_lock(global_write)]
@@ -265,9 +233,6 @@ impl Storage {
 		let mut batch = WriteBatch::new();
 		let mut has_deletes = false;
 		while let Some(kv) = stream.next().await? {
-			if kv.key.first().copied() == Some(Segment::Internal.prefix()) {
-				continue;
-			}
 			batch.delete(kv.key);
 			has_deletes = true;
 		}
@@ -382,7 +347,6 @@ mod tests {
 		assert_eq!(added, 1);
 
 		let meta_key = Segment::Meta.wrap(MetaKey::new(key.clone()).encode());
-		let field_key = Segment::Hash.wrap(HashFieldKey::new(key, field).encode());
 
 		let meta_entry = ctx
 			.storage
@@ -391,6 +355,10 @@ mod tests {
 			.await
 			.unwrap()
 			.unwrap();
+		let meta = HashMetaValue::decode(&meta_entry.value).unwrap();
+		assert!(meta.version > 0);
+
+		let field_key = Segment::Hash.wrap(HashFieldKey::new(key, meta.version, field).encode());
 		let field_entry = ctx
 			.storage
 			.db
@@ -399,10 +367,27 @@ mod tests {
 			.unwrap()
 			.unwrap();
 
-		let meta = HashMetaValue::decode(&meta_entry.value).unwrap();
-		assert_eq!(meta.version, meta_entry.seq);
-		assert_eq!(meta_entry.seq, field_entry.seq);
 		assert_eq!(field_entry.value, value);
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn string_set_does_not_write_internal_seq_or_collection_keys(#[future] ctx: TestContext) {
+		use crate::segment::Segment;
+
+		let ctx = ctx.await;
+		ctx.storage
+			.set(Bytes::from("plain_string"), Bytes::from("value"))
+			.await
+			.unwrap();
+
+		let mut stream = ctx.storage.db.scan::<Bytes, _>(..).await.unwrap();
+		let mut seen = Vec::new();
+		while let Some(kv) = stream.next().await.unwrap() {
+			seen.push(kv.key.first().copied());
+		}
+
+		assert_eq!(seen, vec![Some(Segment::Meta.prefix())]);
 	}
 
 	#[rstest]

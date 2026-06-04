@@ -11,7 +11,7 @@ use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
-use crate::utils::user_key_prefix;
+use crate::utils::collection_generation_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
@@ -21,30 +21,28 @@ impl Storage {
 		let meta_encoded_key = Segment::Meta.wrap(meta_key.encode());
 		let put_opts = PutOptions::default();
 
-		// Now create field key with the version from metadata
-		let field_key = HashFieldKey::new(key.clone(), field);
-		let encoded_field_key = Segment::Hash.wrap(field_key.encode());
-
 		let meta_val = self.get_meta::<HashMetaValue>(&key).await?;
 
 		let Some(mut meta_val) = meta_val else {
-			self.write_batch_with_seq(|seq| {
-				let mut batch = WriteBatch::new();
-				batch.put_with_options(encoded_field_key, value, &put_opts);
-				let new_meta = HashMetaValue::new(seq, 1);
-				batch.put_with_options(meta_encoded_key, new_meta.encode(), &put_opts);
-				batch
-			})
-			.await?;
+			let generation = self.next_generation();
+			let field_key = HashFieldKey::new(key.clone(), generation, field);
+			let encoded_field_key = Segment::Hash.wrap(field_key.encode());
+			let mut batch = WriteBatch::new();
+			batch.put_with_options(encoded_field_key, value, &put_opts);
+			let new_meta = HashMetaValue::new(generation, 1);
+			let meta_put_opts = Storage::meta_put_opts(&new_meta);
+			batch.put_with_options(meta_encoded_key, new_meta.encode(), &meta_put_opts);
+			self.write_batch(batch).await?;
 			return Ok(1);
 		};
+
+		let field_key = HashFieldKey::new(key.clone(), meta_val.version, field);
+		let encoded_field_key = Segment::Hash.wrap(field_key.encode());
 
 		// Check if field already exists in current generation
 		let existing_field_raw = self.db.get_key_value(encoded_field_key.clone()).await?;
 
-		let field_exists = existing_field_raw
-			.as_ref()
-			.is_some_and(|kv| kv.seq >= meta_val.version);
+		let field_exists = existing_field_raw.as_ref().is_some();
 		let is_new_field = !field_exists;
 
 		let mut batch = WriteBatch::new();
@@ -73,14 +71,12 @@ impl Storage {
 			return Ok(None);
 		};
 
-		let field_key = HashFieldKey::new(key, field);
+		let field_key = HashFieldKey::new(key, meta_val.version, field);
 		let result = self
 			.db
 			.get_key_value(Segment::Hash.wrap(field_key.encode()))
 			.await?;
-		if let Some(kv) = result
-			&& kv.seq >= meta_val.version
-		{
+		if let Some(kv) = result {
 			return Ok(Some(kv.value));
 		}
 		Ok(None)
@@ -115,7 +111,7 @@ impl Storage {
 			.iter()
 			.map(|field| {
 				// We don't need to call self.hget() which repeats the metadata check.
-				let field_key = HashFieldKey::new(key.clone(), field.clone());
+				let field_key = HashFieldKey::new(key.clone(), version, field.clone());
 				async move {
 					let k = field_key.encode();
 					self.db
@@ -138,7 +134,7 @@ impl Storage {
 		Ok(results
 			.into_iter()
 			.map(|kv| match kv {
-				Some(kv) if kv.seq >= version => Some(kv.value),
+				Some(kv) => Some(kv.value),
 				_ => None,
 			})
 			.collect())
@@ -152,8 +148,8 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key
-		let prefix = Segment::Hash.wrap(user_key_prefix(&key));
+		// Construct prefix: len(user_key) + user_key + generation
+		let prefix = Segment::Hash.wrap(collection_generation_prefix(&key, meta_val.version));
 
 		let range = prefix.clone()..;
 		let mut stream = self.db.scan(range).await?;
@@ -166,11 +162,7 @@ impl Storage {
 				break;
 			}
 
-			if kv.seq < meta_val.version {
-				continue;
-			}
-
-			// Parse field: prefix (key_len+key) + field_len(u32) + field
+			// Parse field: prefix (key_len+key+generation) + field_len(u32) + field
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -206,7 +198,7 @@ impl Storage {
 		let mut batch = WriteBatch::new();
 
 		for field in fields {
-			let field_key = HashFieldKey::new(key.clone(), field.clone());
+			let field_key = HashFieldKey::new(key.clone(), meta_val.version, field.clone());
 			let encoded_field_key = Segment::Hash.wrap(field_key.encode());
 
 			// check if field exists
@@ -214,7 +206,7 @@ impl Storage {
 				.db
 				.get_key_value(encoded_field_key.clone())
 				.await?
-				.is_some_and(|kv| kv.seq >= meta_val.version);
+				.is_some();
 			if exists {
 				batch.delete(encoded_field_key);
 				deleted_count += 1;
