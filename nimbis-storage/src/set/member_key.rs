@@ -5,22 +5,22 @@ use bytes::BytesMut;
 #[derive(Debug, PartialEq)]
 pub struct SetMemberKey {
 	user_key: Bytes,
-	generation: u64,
+	version: u64,
 	member: Bytes,
 }
 
 impl SetMemberKey {
-	pub fn new(user_key: impl Into<Bytes>, generation: u64, member: impl Into<Bytes>) -> Self {
+	pub fn new(user_key: impl Into<Bytes>, version: u64, member: impl Into<Bytes>) -> Self {
 		Self {
 			user_key: user_key.into(),
-			generation,
+			version,
 			member: member.into(),
 		}
 	}
 
 	pub fn encode(&self) -> Bytes {
 		// Key format:
-		// len(user_key) (u16 BE) + user_key + generation (u64 BE) + len(member) (u32
+		// len(user_key) (u16 BE) + user_key + version (u64 BE) + len(member) (u32
 		// BE) + member
 		let member_len = self.member.len() as u32;
 
@@ -28,7 +28,7 @@ impl SetMemberKey {
 			BytesMut::with_capacity(2 + self.user_key.len() + 8 + 4 + self.member.len());
 		bytes.put_u16(self.user_key.len() as u16);
 		bytes.extend_from_slice(&self.user_key);
-		bytes.put_u64(self.generation);
+		bytes.put_u64(self.version);
 		bytes.put_u32(member_len);
 		bytes.extend_from_slice(&self.member);
 		bytes.freeze()
@@ -50,21 +50,21 @@ mod tests {
 	#[case("user", "member")]
 	#[case("key", "m")]
 	fn test_set_member_key_encode(#[case] key: &str, #[case] member: &str) {
-		let generation = 0x0102_0304_0506_0708;
+		let version = 0x0102_0304_0506_0708;
 		let member_key = SetMemberKey::new(
 			Bytes::copy_from_slice(key.as_bytes()),
-			generation,
+			version,
 			Bytes::copy_from_slice(member.as_bytes()),
 		);
 		let encoded = member_key.encode();
-		// Verify format: key_len(u16) + key + generation(u64) + member_len(u32) +
+		// Verify format: key_len(u16) + key + version(u64) + member_len(u32) +
 		// member
 		assert_eq!(&encoded[..2], &(key.len() as u16).to_be_bytes());
 		assert_eq!(&encoded[2..2 + key.len()], key.as_bytes());
-		let generation_start = 2 + key.len();
+		let version_start = 2 + key.len();
 		assert_eq!(
-			&encoded[generation_start..generation_start + 8],
-			&generation.to_be_bytes()
+			&encoded[version_start..version_start + 8],
+			&version.to_be_bytes()
 		);
 	}
 }

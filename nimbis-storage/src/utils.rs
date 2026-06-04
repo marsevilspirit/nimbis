@@ -17,30 +17,30 @@ pub fn user_key_prefix(key: &Bytes) -> Bytes {
 	prefix.freeze()
 }
 
-/// Build the current collection generation prefix:
-/// len(user_key) (u16 BE) + user_key + generation (u64 BE).
-pub fn collection_generation_prefix(key: &Bytes, generation: u64) -> Bytes {
+/// Build the current collection version prefix:
+/// len(user_key) (u16 BE) + user_key + version (u64 BE).
+pub fn collection_version_prefix(key: &Bytes, version: u64) -> Bytes {
 	let mut prefix = BytesMut::with_capacity(2 + key.len() + 8);
 	prefix.put_u16(key.len() as u16);
 	prefix.extend_from_slice(key);
-	prefix.put_u64(generation);
+	prefix.put_u64(version);
 	prefix.freeze()
 }
 
 /// Build zset score-key prefix:
-/// len(user_key) (u16 BE) + user_key + generation (u64 BE) + b'S'.
-pub fn zset_score_user_key_prefix(key: &Bytes, generation: u64) -> Bytes {
+/// len(user_key) (u16 BE) + user_key + version (u64 BE) + b'S'.
+pub fn zset_score_user_key_prefix(key: &Bytes, version: u64) -> Bytes {
 	let mut prefix = BytesMut::with_capacity(2 + key.len() + 8 + 1);
 	prefix.put_u16(key.len() as u16);
 	prefix.extend_from_slice(key);
-	prefix.put_u64(generation);
+	prefix.put_u64(version);
 	prefix.put_u8(b'S');
 	prefix.freeze()
 }
 
 /// Decode the common collection sub-key header:
-/// len(user_key) (u16 BE) + user_key + generation (u64 BE) + ...
-pub fn decode_collection_generation(payload: &[u8]) -> Option<(Bytes, u64)> {
+/// len(user_key) (u16 BE) + user_key + version (u64 BE) + ...
+pub fn decode_collection_version(payload: &[u8]) -> Option<(Bytes, u64)> {
 	if payload.len() < 2 {
 		return None;
 	}
@@ -51,6 +51,6 @@ pub fn decode_collection_generation(payload: &[u8]) -> Option<(Bytes, u64)> {
 	}
 	let user_key = Bytes::copy_from_slice(&buf[..key_len]);
 	buf.advance(key_len);
-	let generation = buf.get_u64();
-	Some((user_key, generation))
+	let version = buf.get_u64();
+	Some((user_key, version))
 }

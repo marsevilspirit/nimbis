@@ -5,26 +5,26 @@ use bytes::BytesMut;
 #[derive(Debug, PartialEq)]
 pub struct ListElementKey {
 	user_key: Bytes,
-	generation: u64,
+	version: u64,
 	seq: u64,
 }
 
 impl ListElementKey {
-	pub fn new(user_key: impl Into<Bytes>, generation: u64, seq: u64) -> Self {
+	pub fn new(user_key: impl Into<Bytes>, version: u64, seq: u64) -> Self {
 		Self {
 			user_key: user_key.into(),
-			generation,
+			version,
 			seq,
 		}
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: len(user_key) (u16 BE) + user_key + generation (u64 BE) + seq
+		// Key format: len(user_key) (u16 BE) + user_key + version (u64 BE) + seq
 		// (u64 BE)
 		let mut bytes = BytesMut::with_capacity(2 + self.user_key.len() + 8 + 8);
 		bytes.put_u16(self.user_key.len() as u16);
 		bytes.extend_from_slice(&self.user_key);
-		bytes.put_u64(self.generation);
+		bytes.put_u64(self.version);
 		bytes.put_u64(self.seq);
 		bytes.freeze()
 	}
@@ -45,20 +45,19 @@ mod tests {
 	#[case("mykey", 100u64)]
 	#[case("key", 255u64)]
 	fn test_list_element_key_encode(#[case] key: &str, #[case] seq: u64) {
-		let generation = 0x0102_0304_0506_0708;
-		let element_key =
-			ListElementKey::new(Bytes::copy_from_slice(key.as_bytes()), generation, seq);
+		let version = 0x0102_0304_0506_0708;
+		let element_key = ListElementKey::new(Bytes::copy_from_slice(key.as_bytes()), version, seq);
 		let encoded = element_key.encode();
-		// Verify format: key_len(u16) + key + generation(u64) + seq(u64)
+		// Verify format: key_len(u16) + key + version(u64) + seq(u64)
 		assert_eq!(&encoded[..2], &(key.len() as u16).to_be_bytes());
 		assert_eq!(&encoded[2..2 + key.len()], key.as_bytes());
-		let generation_start = 2 + key.len();
+		let version_start = 2 + key.len();
 		assert_eq!(
-			&encoded[generation_start..generation_start + 8],
-			&generation.to_be_bytes()
+			&encoded[version_start..version_start + 8],
+			&version.to_be_bytes()
 		);
 		assert_eq!(
-			&encoded[generation_start + 8..generation_start + 16],
+			&encoded[version_start + 8..version_start + 16],
 			&seq.to_be_bytes()
 		);
 	}

@@ -11,7 +11,7 @@ use crate::segment::Segment;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
-use crate::utils::collection_generation_prefix;
+use crate::utils::collection_version_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
@@ -24,12 +24,12 @@ impl Storage {
 		let meta_val = self.get_meta::<HashMetaValue>(&key).await?;
 
 		let Some(mut meta_val) = meta_val else {
-			let generation = self.next_generation();
-			let field_key = HashFieldKey::new(key.clone(), generation, field);
+			let version = self.next_version();
+			let field_key = HashFieldKey::new(key.clone(), version, field);
 			let encoded_field_key = Segment::Hash.wrap(field_key.encode());
 			let mut batch = WriteBatch::new();
 			batch.put_with_options(encoded_field_key, value, &put_opts);
-			let new_meta = HashMetaValue::new(generation, 1);
+			let new_meta = HashMetaValue::new(version, 1);
 			let meta_put_opts = Storage::meta_put_opts(&new_meta);
 			batch.put_with_options(meta_encoded_key, new_meta.encode(), &meta_put_opts);
 			self.write_batch(batch).await?;
@@ -39,7 +39,7 @@ impl Storage {
 		let field_key = HashFieldKey::new(key.clone(), meta_val.version, field);
 		let encoded_field_key = Segment::Hash.wrap(field_key.encode());
 
-		// Check if field already exists in current generation
+		// Check if field already exists in current version
 		let existing_field_raw = self.db.get_key_value(encoded_field_key.clone()).await?;
 
 		let field_exists = existing_field_raw.as_ref().is_some();
@@ -148,8 +148,8 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key + generation
-		let prefix = Segment::Hash.wrap(collection_generation_prefix(&key, meta_val.version));
+		// Construct prefix: len(user_key) + user_key + version
+		let prefix = Segment::Hash.wrap(collection_version_prefix(&key, meta_val.version));
 
 		let range = prefix.clone()..;
 		let mut stream = self.db.scan(range).await?;
@@ -162,7 +162,7 @@ impl Storage {
 				break;
 			}
 
-			// Parse field: prefix (key_len+key+generation) + field_len(u32) + field
+			// Parse field: prefix (key_len+key+version) + field_len(u32) + field
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;

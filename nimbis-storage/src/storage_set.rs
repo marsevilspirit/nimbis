@@ -10,7 +10,7 @@ use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
 use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
-use crate::utils::collection_generation_prefix;
+use crate::utils::collection_version_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
@@ -22,7 +22,7 @@ impl Storage {
 
 		let (mut meta_val, meta_missing) = match self.get_meta::<SetMetaValue>(&key).await? {
 			Some(meta) => (meta, false),
-			None => (SetMetaValue::new(self.next_generation(), 0), true),
+			None => (SetMetaValue::new(self.next_version(), 0), true),
 		};
 
 		// Deduplicate members, keeping the first occurrence
@@ -76,8 +76,8 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key + generation
-		let prefix = Segment::Set.wrap(collection_generation_prefix(&key, meta_val.version));
+		// Construct prefix: len(user_key) + user_key + version
+		let prefix = Segment::Set.wrap(collection_version_prefix(&key, meta_val.version));
 
 		let range = prefix.clone()..;
 		let mut stream = self.db.scan(range).await?;
@@ -88,7 +88,7 @@ impl Storage {
 			if !k.starts_with(&prefix) {
 				break;
 			}
-			// Parse member: prefix (key_len+key+generation) + member_len(u32) + member
+			// Parse member: prefix (key_len+key+version) + member_len(u32) + member
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;

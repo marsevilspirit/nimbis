@@ -28,7 +28,7 @@ impl Storage {
 		// Get metadata first to obtain version
 		let (mut meta_val, meta_missing) = match self.get_meta::<ZSetMetaValue>(&key).await? {
 			Some(val) => (val, false),
-			None => (ZSetMetaValue::new(self.next_generation(), 0), true),
+			None => (ZSetMetaValue::new(self.next_version(), 0), true),
 		};
 
 		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD

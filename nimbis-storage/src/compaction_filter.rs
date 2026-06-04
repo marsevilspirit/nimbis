@@ -18,7 +18,7 @@ use crate::data_type::DataType;
 use crate::segment::Segment;
 use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
-use crate::utils::decode_collection_generation;
+use crate::utils::decode_collection_version;
 use crate::utils::is_expired;
 
 // CollectionCompactionFilter is installed on the single segmented DB.
@@ -27,11 +27,11 @@ pub struct CollectionCompactionFilter {
 }
 
 impl CollectionCompactionFilter {
-	/// Decode a sub-key to extract the user key and collection generation.
+	/// Decode a sub-key to extract the user key and collection version.
 	/// Payload format after the segment byte: key_len(u16 BE) + user_key +
-	/// generation(u64 BE) + ...
+	/// version(u64 BE) + ...
 	fn decode_sub_key(key: &[u8]) -> Option<(Bytes, u64)> {
-		decode_collection_generation(key)
+		decode_collection_version(key)
 	}
 
 	fn collection_type(segment: u8) -> Option<DataType> {
@@ -67,8 +67,8 @@ impl CompactionFilter for CollectionCompactionFilter {
 			return Ok(CompactionFilterDecision::Keep);
 		};
 
-		// Decode sub-key to get user key and embedded generation.
-		let Some((user_key, key_generation)) = Self::decode_sub_key(&entry.key[1..]) else {
+		// Decode sub-key to get user key and embedded version.
+		let Some((user_key, key_version)) = Self::decode_sub_key(&entry.key[1..]) else {
 			info!(
 				"[{:?}Filter] Invalid key format: {:?}",
 				data_type, entry.key
@@ -133,13 +133,13 @@ impl CompactionFilter for CollectionCompactionFilter {
 			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
 
-		// Check generation — old generation sub-keys should be tombstoned.
-		if let Some(meta_generation) = any_val.version()
-			&& meta_generation != key_generation
+		// Check version — old version sub-keys should be tombstoned.
+		if let Some(meta_version) = any_val.version()
+			&& meta_version != key_version
 		{
 			info!(
-				"[{:?}Filter] Drop[stale generation: meta {}, key {}] key: {:?}",
-				data_type, meta_generation, key_generation, user_key
+				"[{:?}Filter] Drop[stale version: meta {}, key {}] key: {:?}",
+				data_type, meta_version, key_version, user_key
 			);
 			return Ok(CompactionFilterDecision::Modify(ValueDeletable::Tombstone));
 		}
@@ -211,7 +211,7 @@ mod tests {
 		let _ = filter_db.set(db.clone());
 		let mut filter = CollectionCompactionFilter { db: filter_db };
 
-		// Test valid generation (10)
+		// Test valid version (10)
 		let mut valid_key = BytesMut::new();
 		valid_key.put_u16(user_key.len() as u16);
 		valid_key.extend_from_slice(&user_key);
@@ -230,7 +230,7 @@ mod tests {
 			CompactionFilterDecision::Keep
 		);
 
-		// Test stale generation (9)
+		// Test stale version (9)
 		let mut invalid_key = BytesMut::new();
 		invalid_key.put_u16(user_key.len() as u16);
 		invalid_key.extend_from_slice(&user_key);
@@ -286,11 +286,11 @@ mod tests {
 		let _ = filter_db.set(db.clone());
 		let mut filter = CollectionCompactionFilter { db: filter_db };
 
-		let build_sub_key = |generation: u64, member: &[u8]| -> Bytes {
+		let build_sub_key = |version: u64, member: &[u8]| -> Bytes {
 			let mut key = BytesMut::new();
 			key.put_u16(user_key.len() as u16);
 			key.extend_from_slice(&user_key);
-			key.put_u64(generation);
+			key.put_u64(version);
 			key.put_u32(member.len() as u32);
 			key.extend_from_slice(member);
 			Segment::Set.wrap(key.freeze())
@@ -345,7 +345,7 @@ mod tests {
 			.await
 			.unwrap();
 
-		// Old generation=42 data should still be reclaimed
+		// Old version=42 data should still be reclaimed
 		for member in members {
 			let entry = RowEntry {
 				key: build_sub_key(42, member),
@@ -362,7 +362,7 @@ mod tests {
 			);
 		}
 
-		// New generation=100 data should be kept
+		// New version=100 data should be kept
 		let new_entry = RowEntry {
 			key: build_sub_key(100, b"dave"),
 			value: ValueDeletable::Value(Bytes::new()),

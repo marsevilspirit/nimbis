@@ -45,7 +45,7 @@ impl Storage {
 
 		let mut meta_val = match self.get_meta::<ListMetaValue>(&key).await? {
 			Some(m) => m,
-			None => ListMetaValue::new(self.next_generation()),
+			None => ListMetaValue::new(self.next_version()),
 		};
 		let mut batch = WriteBatch::new();
 

@@ -1,12 +1,12 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
-/// Generates monotonically increasing collection generations.
+/// Generates monotonically increasing collection versions.
 ///
 /// The layout follows Kvrocks' timestamp-plus-counter style:
 /// high 53 bits are microseconds since epoch, low 11 bits are a per-process
 /// counter. If the clock does not move forward, this falls back to `last + 1`
-/// to keep generations unique and monotonic in this process.
+/// to keep versions unique and monotonic in this process.
 pub struct VersionGenerator {
 	last_version: AtomicU64,
 }

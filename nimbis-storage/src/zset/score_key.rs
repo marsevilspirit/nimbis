@@ -5,7 +5,7 @@ use bytes::BytesMut;
 #[derive(Debug, PartialEq)]
 pub struct ScoreKey {
 	user_key: Bytes,
-	generation: u64,
+	version: u64,
 	score: f64,
 	member: Bytes,
 }
@@ -13,20 +13,20 @@ pub struct ScoreKey {
 impl ScoreKey {
 	pub fn new(
 		user_key: impl Into<Bytes>,
-		generation: u64,
+		version: u64,
 		score: f64,
 		member: impl Into<Bytes>,
 	) -> Self {
 		Self {
 			user_key: user_key.into(),
-			generation,
+			version,
 			score,
 			member: member.into(),
 		}
 	}
 
 	pub fn encode(&self) -> Bytes {
-		// Key format: len(user_key) (u16 BE) + user_key + generation (u64 BE) + b'S' +
+		// Key format: len(user_key) (u16 BE) + user_key + version (u64 BE) + b'S' +
 		// score (u64 big endian, bit flipped) + member We use a custom encoding for
 		// f64 to ensure correct sorting order. IEEE 754 floats don't sort correctly
 		// when treated as bytes (especially negative numbers). A common trick is to
@@ -47,7 +47,7 @@ impl ScoreKey {
 			BytesMut::with_capacity(2 + self.user_key.len() + 8 + 1 + 8 + self.member.len());
 		bytes.put_u16(user_key_len);
 		bytes.extend_from_slice(&self.user_key);
-		bytes.put_u64(self.generation);
+		bytes.put_u64(self.version);
 		bytes.put_u8(b'S');
 		bytes.put_u64(encoded_score);
 		bytes.extend_from_slice(&self.member);
@@ -165,18 +165,18 @@ mod tests {
 	}
 
 	#[test]
-	fn test_zset_score_key_encode_includes_generation() {
-		let generation = 0x0102_0304_0506_0708;
+	fn test_zset_score_key_encode_includes_version() {
+		let version = 0x0102_0304_0506_0708;
 		let key = Bytes::from("myzset");
-		let encoded = ScoreKey::new(key.clone(), generation, 1.5, Bytes::from("member")).encode();
-		let generation_start = 2 + key.len();
+		let encoded = ScoreKey::new(key.clone(), version, 1.5, Bytes::from("member")).encode();
+		let version_start = 2 + key.len();
 
 		assert_eq!(&encoded[..2], &(key.len() as u16).to_be_bytes());
 		assert_eq!(&encoded[2..2 + key.len()], key.as_ref());
 		assert_eq!(
-			&encoded[generation_start..generation_start + 8],
-			&generation.to_be_bytes()
+			&encoded[version_start..version_start + 8],
+			&version.to_be_bytes()
 		);
-		assert_eq!(encoded[generation_start + 8], b'S');
+		assert_eq!(encoded[version_start + 8], b'S');
 	}
 }

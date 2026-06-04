@@ -119,7 +119,7 @@ impl Storage {
 		}
 	}
 
-	pub(crate) fn next_generation(&self) -> u64 {
+	pub(crate) fn next_version(&self) -> u64 {
 		self.version_generator.next()
 	}
 
