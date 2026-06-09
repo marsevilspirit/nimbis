@@ -1,28 +1,41 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
-/// Generates monotonically increasing versions based on seconds timestamps.
-/// If the current timestamp is not greater than the last generated version,
-/// it increments the last version by 1 to guarantee monotonicity.
+/// Generates monotonically increasing collection versions.
+///
+/// The layout follows Kvrocks' timestamp-plus-counter style:
+/// high 53 bits are microseconds since epoch, low 11 bits are a per-process
+/// counter. If the clock does not move forward, this falls back to `last + 1`
+/// to keep versions unique and monotonic in this process.
 pub struct VersionGenerator {
 	last_version: AtomicU64,
 }
 
 impl VersionGenerator {
+	pub const COUNTER_BITS: u64 = 11;
+	pub const COUNTER_MASK: u64 = (1 << Self::COUNTER_BITS) - 1;
+
 	pub fn new() -> Self {
+		let timestamp = Self::timestamp_micros();
+		let seed = timestamp & Self::COUNTER_MASK;
 		Self {
-			last_version: AtomicU64::new(0),
+			last_version: AtomicU64::new((timestamp << Self::COUNTER_BITS) | seed),
 		}
 	}
 
 	/// Generates a new version that is guaranteed to be greater than any
 	/// previously generated version from this generator.
 	pub fn next(&self) -> u64 {
-		let now = chrono::Utc::now().timestamp() as u64;
-
 		loop {
+			let now = Self::timestamp_micros();
 			let last = self.last_version.load(Ordering::Acquire);
-			let next = if now > last { now } else { last + 1 };
+			let next_counter = (last.wrapping_add(1)) & Self::COUNTER_MASK;
+			let timestamp_candidate = (now << Self::COUNTER_BITS) | next_counter;
+			let next = if timestamp_candidate > last {
+				timestamp_candidate
+			} else {
+				last + 1
+			};
 
 			if self
 				.last_version
@@ -33,6 +46,10 @@ impl VersionGenerator {
 			}
 			// CAS failed, another thread updated; retry
 		}
+	}
+
+	fn timestamp_micros() -> u64 {
+		chrono::Utc::now().timestamp_micros().max(0) as u64
 	}
 }
 
@@ -55,6 +72,18 @@ mod tests {
 			assert!(v > prev, "Version should be strictly increasing");
 			prev = v;
 		}
+	}
+
+	#[test]
+	fn test_version_layout_uses_11_bit_counter() {
+		let generator = VersionGenerator::new();
+		let version = generator.next();
+
+		assert_ne!(version >> 11, 0);
+		assert_eq!(
+			version & !VersionGenerator::COUNTER_MASK,
+			(version >> 11) << 11
+		);
 	}
 
 	#[test]

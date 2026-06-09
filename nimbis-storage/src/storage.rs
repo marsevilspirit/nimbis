@@ -3,14 +3,17 @@ use std::sync::Arc;
 use bytes::Bytes;
 use nimbis_macros::storage_lock;
 use slatedb::Db;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
+use slatedb::object_store::ObjectStoreExt;
 use slatedb::object_store::ObjectStoreScheme;
 use slatedb::object_store::local::LocalFileSystem;
 use slatedb::object_store::parse_url_opts;
 use slatedb::object_store::path::Path as ObjectStorePath;
+use tokio::sync::OnceCell;
 
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
@@ -18,23 +21,24 @@ use crate::error::StorageError;
 use crate::lock::StorageLock;
 use crate::lock::StorageLockGuard;
 use crate::lock::StorageLocks;
+use crate::segment::NimbisSegmentExtractor;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 use crate::utils::is_expired;
+use crate::version::VersionGenerator;
 
 #[derive(Clone)]
 pub struct Storage {
-	pub(crate) string_db: Arc<Db>,
-	pub(crate) hash_db: Arc<Db>,
-	pub(crate) list_db: Arc<Db>,
-	pub(crate) set_db: Arc<Db>,
-	pub(crate) zset_db: Arc<Db>,
+	pub(crate) db: Arc<Db>,
+	version_generator: Arc<VersionGenerator>,
 	locks: Arc<StorageLocks>,
 }
 
+const FLUSH_BATCH_SIZE: usize = 1024;
+
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
 	match shard_id {
-		Some(id) => base_path.child(format!("shard-{}", id)),
+		Some(id) => base_path.join(format!("shard-{}", id)),
 		None => base_path,
 	}
 }
@@ -108,21 +112,16 @@ where
 }
 
 impl Storage {
-	pub fn new(
-		string_db: Arc<Db>,
-		hash_db: Arc<Db>,
-		list_db: Arc<Db>,
-		set_db: Arc<Db>,
-		zset_db: Arc<Db>,
-	) -> Self {
+	pub fn new(db: Arc<Db>) -> Self {
 		Self {
-			string_db,
-			hash_db,
-			list_db,
-			set_db,
-			zset_db,
+			db,
+			version_generator: Arc::new(VersionGenerator::new()),
 			locks: Arc::new(StorageLocks::new()),
 		}
+	}
+
+	pub(crate) fn next_version(&self) -> u64 {
+		self.version_generator.next()
 	}
 
 	pub(crate) async fn read_lock(
@@ -178,7 +177,7 @@ impl Storage {
 		object_store: Arc<dyn ObjectStore>,
 		root_path: ObjectStorePath,
 	) -> Result<Self, StorageError> {
-		let child_path = |name: &'static str| root_path.child(name);
+		let child_path = |name: &'static str| root_path.clone().join(name);
 
 		let marker = child_path(".nimbis");
 		object_store
@@ -186,100 +185,71 @@ impl Storage {
 			.await
 			.map_err(StorageError::from)?;
 
-		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
+		let db_path = child_path("db");
+		let filter_db = Arc::new(OnceCell::new());
+		let compactor_builder =
+			slatedb::CompactorBuilder::new(db_path.clone(), object_store.clone())
+				.with_compaction_filter_supplier(Arc::new(CollectionCompactionFilterSupplier {
+					db: filter_db.clone(),
+				}));
 
-		// Open string_db — no custom compaction filter needed;
-		// SlateDB's built-in TTL mechanism handles expiration during compaction.
-		let string_db = {
-			let db_path = child_path("string");
-			let db = Db::builder(db_path, object_store.clone())
-				.with_db_cache(cache.clone())
-				.build()
-				.await
-				.map_err(StorageError::from)?;
-			Arc::new(db)
-		};
+		let db = Db::builder(db_path, object_store)
+			.with_db_cache(cache)
+			.with_segment_extractor(Arc::new(NimbisSegmentExtractor))
+			.with_compactor_builder(compactor_builder)
+			.build()
+			.await
+			.map_err(StorageError::from)?;
+		let db = Arc::new(db);
+		assert!(
+			filter_db.set(db.clone()).is_ok(),
+			"compaction filter DB handle should only be initialized once"
+		);
 
-		// Open collection DBs with CollectionCompactionFilter referencing string_db
-		let open_db_with_collection_filter = |name: &'static str, data_type: DataType| {
-			let store = object_store.clone();
-			let cache = cache.clone();
-			let string_db = string_db.clone();
-			let db_path = child_path(name);
-			async move {
-				let compactor_builder =
-					slatedb::CompactorBuilder::new(db_path.clone(), store.clone())
-						.with_compaction_filter_supplier(Arc::new(
-							CollectionCompactionFilterSupplier {
-								string_db,
-								data_type,
-							},
-						));
-				let db: Result<Db, slatedb::Error> = Db::builder(db_path, store)
-					.with_db_cache(cache)
-					.with_compactor_builder(compactor_builder)
-					.build()
-					.await;
-				db.map_err(StorageError::from)
-			}
-		};
-
-		let (hash_db, list_db, set_db, zset_db) = tokio::try_join!(
-			open_db_with_collection_filter("hash", DataType::Hash),
-			open_db_with_collection_filter("list", DataType::List),
-			open_db_with_collection_filter("set", DataType::Set),
-			open_db_with_collection_filter("zset", DataType::ZSet)
-		)?;
-
-		Ok(Self::new(
-			string_db,
-			Arc::new(hash_db),
-			Arc::new(list_db),
-			Arc::new(set_db),
-			Arc::new(zset_db),
-		))
+		Ok(Self::new(db))
 	}
 
 	pub async fn close(&self) -> Result<(), StorageError> {
-		tokio::try_join!(
-			self.hash_db.close(),
-			self.list_db.close(),
-			self.set_db.close(),
-			self.zset_db.close(),
-		)?;
-		self.string_db.close().await?;
+		self.db.close().await?;
 		Ok(())
+	}
+
+	pub(crate) fn write_opts() -> WriteOptions {
+		WriteOptions {
+			await_durable: false,
+			..WriteOptions::default()
+		}
+	}
+
+	pub(crate) async fn write_batch(&self, batch: WriteBatch) -> Result<u64, StorageError> {
+		let handle = self
+			.db
+			.write_with_options(batch, &Self::write_opts())
+			.await?;
+		Ok(handle.seqnum())
 	}
 
 	#[storage_lock(global_write)]
 	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
-		// Iterate over all DBs and delete all keys
-		// Since we don't have atomic flush_all, we do best effort sequential
-		// Scanning and deleting everything is slow but correct for tests.
-		// For production this is blocking and bad, but it's FLUSHDB.
+		let mut stream = self.db.scan::<Bytes, _>(..).await?;
+		let mut batch = WriteBatch::new();
+		let mut batch_len = 0;
+		while let Some(kv) = stream.next().await? {
+			batch.delete(kv.key);
+			batch_len += 1;
 
-		// Helper to clear a DB
-		async fn clear_db(
-			db: &slatedb::Db,
-		) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-			let scan_range = ..;
-			let mut stream = db.scan::<bytes::Bytes, _>(scan_range).await?;
-			let write_opts = slatedb::config::WriteOptions {
-				await_durable: false,
-			};
-			while let Some(kv) = stream.next().await? {
-				db.delete_with_options(kv.key, &write_opts).await?;
+			if batch_len >= FLUSH_BATCH_SIZE {
+				let batch_to_write = std::mem::replace(&mut batch, WriteBatch::new());
+				self.write_batch(batch_to_write).await?;
+				batch_len = 0;
 			}
-			Ok(())
 		}
 
-		clear_db(&self.string_db).await?;
-		clear_db(&self.hash_db).await?;
-		clear_db(&self.list_db).await?;
-		clear_db(&self.set_db).await?;
-		clear_db(&self.zset_db).await?;
+		if batch_len > 0 {
+			self.write_batch(batch).await?;
+		}
 
 		Ok(())
 	}
@@ -296,22 +266,15 @@ impl Storage {
 	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let kv = match self
-			.string_db
-			.get_key_value(meta_encoded_key.clone())
-			.await?
-		{
+		let kv = match self.db.get_key_value(meta_encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
 		};
 
 		if is_expired(kv.expire_ts) {
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			self.string_db
-				.delete_with_options(meta_encoded_key, &write_opts)
-				.await?;
+			let mut batch = WriteBatch::new();
+			batch.delete(meta_encoded_key);
+			self.write_batch(batch).await?;
 			return Ok(None);
 		}
 
@@ -372,6 +335,89 @@ mod tests {
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
 		TestContext { storage, path }
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn hset_writes_meta_and_field_in_one_segmented_batch(#[future] ctx: TestContext) {
+		use crate::hash::field_key::HashFieldKey;
+		use crate::string::meta::HashMetaValue;
+
+		let ctx = ctx.await;
+		let key = Bytes::from("segmented_hash");
+		let field = Bytes::from("field");
+		let value = Bytes::from("value");
+
+		let added = ctx
+			.storage
+			.hset(key.clone(), field.clone(), value.clone())
+			.await
+			.unwrap();
+		assert_eq!(added, 1);
+
+		let meta_key = MetaKey::new(key.clone()).encode();
+
+		let meta_entry = ctx
+			.storage
+			.db
+			.get_key_value(meta_key)
+			.await
+			.unwrap()
+			.unwrap();
+		let meta = HashMetaValue::decode(&meta_entry.value).unwrap();
+		assert!(meta.version > 0);
+
+		let field_key = HashFieldKey::new(key, meta.version, field).encode();
+		let field_entry = ctx
+			.storage
+			.db
+			.get_key_value(field_key)
+			.await
+			.unwrap()
+			.unwrap();
+
+		assert_eq!(field_entry.value, value);
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn string_set_does_not_write_internal_seq_or_collection_keys(#[future] ctx: TestContext) {
+		use crate::segment::META_PREFIX;
+
+		let ctx = ctx.await;
+		ctx.storage
+			.set(Bytes::from("plain_string"), Bytes::from("value"))
+			.await
+			.unwrap();
+
+		let mut stream = ctx.storage.db.scan::<Bytes, _>(..).await.unwrap();
+		let mut seen = Vec::new();
+		while let Some(kv) = stream.next().await.unwrap() {
+			seen.push(kv.key.first().copied());
+		}
+
+		assert_eq!(seen, vec![Some(META_PREFIX)]);
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn flush_all_handles_more_than_one_delete_batch(#[future] ctx: TestContext) {
+		let ctx = ctx.await;
+
+		for i in 0..=FLUSH_BATCH_SIZE {
+			ctx.storage
+				.set(
+					Bytes::from(format!("flush_key_{i}")),
+					Bytes::from_static(b"value"),
+				)
+				.await
+				.unwrap();
+		}
+
+		ctx.storage.flush_all().await.unwrap();
+
+		let mut stream = ctx.storage.db.scan::<Bytes, _>(..).await.unwrap();
+		assert!(stream.next().await.unwrap().is_none());
 	}
 
 	#[rstest]
@@ -441,8 +487,7 @@ mod tests {
 		use slatedb::CompactionFilter;
 
 		use crate::compaction_filter::CollectionCompactionFilter;
-		use crate::data_type::DataType;
-
+		use crate::set::member_key::SetMemberKey;
 		let ctx = ctx.await;
 		let key = Bytes::from("leak_test_set");
 
@@ -469,17 +514,15 @@ mod tests {
 		let exists = ctx.storage.exists(key.clone()).await.unwrap();
 		assert!(!exists);
 
-		// KEY VERIFICATION: Scan raw set_db to prove physical data still exists
-		let scan_range = ..;
-		let mut stream = ctx
-			.storage
-			.set_db
-			.scan::<Bytes, _>(scan_range)
-			.await
-			.unwrap();
+		// KEY VERIFICATION: Scan raw set segment to prove physical data still exists
+		let prefix = SetMemberKey::user_prefix(&key);
+		let mut stream = ctx.storage.db.scan(prefix.clone()..).await.unwrap();
 		let mut raw_count = 0;
 		let mut raw_entries = Vec::new();
 		while let Some(kv) = stream.next().await.unwrap() {
+			if !kv.key.starts_with(&prefix) {
+				break;
+			}
 			raw_count += 1;
 			raw_entries.push(kv);
 		}
@@ -491,17 +534,16 @@ mod tests {
 		);
 
 		// Run compaction filter logic on all raw entries
-		let mut filter = CollectionCompactionFilter {
-			string_db: ctx.storage.string_db.clone(),
-			data_type: DataType::Set,
-		};
+		let filter_db = Arc::new(OnceCell::new());
+		let _ = filter_db.set(ctx.storage.db.clone());
+		let mut filter = CollectionCompactionFilter { db: filter_db };
 
 		let mut reclaimed_count = 0;
 		for kv in &raw_entries {
 			let entry = slatedb::RowEntry {
 				key: kv.key.clone(),
 				value: slatedb::ValueDeletable::Value(kv.value.clone()),
-				seq: 0,
+				seq: kv.seq,
 				create_ts: None,
 				expire_ts: None,
 			};

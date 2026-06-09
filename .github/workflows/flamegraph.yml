@@ -3,6 +3,10 @@ name: Performance Flamegraph
 on:
   workflow_dispatch:
     inputs:
+      target_ref:
+        description: Git ref to profile. Defaults to the workflow ref.
+        required: false
+        type: string
       pr_number:
         description: Optional pull request number to comment flamegraph result on
         required: false
@@ -17,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
 
       - name: Install dependencies
         run: |
@@ -43,12 +49,28 @@ jobs:
         run: |
           # Enable debug symbols in release mode for meaningful flamegraphs
           RUSTFLAGS="-g" cargo build --release
+          # Build xtask before profiling so perf does not sample an idle server
+          # while Cargo compiles the benchmark driver.
+          cargo build -p xtask
 
       - name: Run Benchmark and Capture Profile
         run: |
+          set -euo pipefail
+
           # 1. Start Nimbis in background
-          ./target/release/nimbis &
+          NIMBIS_OBJECT_STORE_URL=file:nimbis_flamegraph_store ./target/release/nimbis &
           NIMBIS_PID=$!
+          PERF_PID=""
+          cleanup() {
+            if [ -n "$PERF_PID" ]; then
+              sudo kill -INT "$PERF_PID" >/dev/null 2>&1 || true
+              wait "$PERF_PID" || true
+            fi
+            kill "$NIMBIS_PID" >/dev/null 2>&1 || true
+            wait "$NIMBIS_PID" || true
+          }
+          trap cleanup EXIT
+
           echo "Nimbis started with PID $NIMBIS_PID"
           
           # Give it a moment to start
@@ -65,18 +87,22 @@ jobs:
           PERF_PID=$!
           
           # 3. Run Redis Benchmark
-          echo "Running redis-benchmark..."
-          # Run a decent workload
-          redis-benchmark -q -t set,get,hset,hget,lpush,lpop,sadd,srem,zadd,zrem -n 100000 -c 100 -r 100000 -d 512 || true
-          
+          echo "Running redis-benchmark comparison profile..."
+          N=100000 C=100 R=100000 D=512 P=1 OUTPUT_DIR=benchmark_flamegraph \
+            cargo xtask redis-benchmark --profile comparison \
+            > benchmark.txt
+
           # 4. Stop perf
           echo "Stopping perf..."
           sudo kill -INT $PERF_PID
           # Wait for perf to write data
           wait $PERF_PID || true
+          PERF_PID=""
           
           # 5. Stop Nimbis
           kill $NIMBIS_PID
+          wait $NIMBIS_PID || true
+          trap - EXIT
           
           # 6. Generate Flamegraph
           echo "Generating flamegraph..."
@@ -96,7 +122,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: flamegraph
-          path: flamegraph.svg
+          path: |
+            flamegraph.svg
+            out.folded
+            benchmark.txt
 
       - name: Comment on PR
         if: inputs.pr_number
@@ -106,6 +135,7 @@ jobs:
             const run_id = context.runId;
             const repo_url = context.payload.repository.html_url;
             const rawPrNumber = (context.payload.inputs?.pr_number ?? '').trim();
+            const targetRef = (context.payload.inputs?.target_ref ?? '').trim() || context.ref;
             const validPrNumberPattern = /^[1-9]\d*$/;
 
             if (!validPrNumberPattern.test(rawPrNumber)) {
@@ -118,8 +148,10 @@ jobs:
             const body = `### 🔥 Performance Flamegraph
             
             A flamegraph has been generated for this Pull Request.
+
+            Target ref: \`${targetRef}\`
             
-            You can download the **flamegraph.svg** from the [Artifacts section of this Run](${repo_url}/actions/runs/${run_id}).
+            You can download **flamegraph.svg**, **out.folded**, and **benchmark.txt** from the [Artifacts section of this Run](${repo_url}/actions/runs/${run_id}).
             
             _Note: Download the file and open it in a browser to explore the stack traces interactively._`;
             
