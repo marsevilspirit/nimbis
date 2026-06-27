@@ -2,15 +2,14 @@ use bytes::Buf;
 use bytes::Bytes;
 use futures::future;
 use nimbis_macros::storage_lock;
+use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
 use crate::error::StorageError;
 use crate::hash::field_key::HashFieldKey;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
 use crate::string::meta::MetaKey;
-use crate::utils::user_key_prefix;
 
 impl Storage {
 	#[storage_lock(write, key)]
@@ -18,55 +17,46 @@ impl Storage {
 	pub async fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> Result<i64, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
 
-		// Now create field key with the version from metadata
-		let field_key = HashFieldKey::new(key.clone(), field);
-		let encoded_field_key = field_key.encode();
+		let meta_val = self.get_meta::<HashMetaValue>(&key).await?;
 
-		let Some(mut meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
-			let wh = self
-				.hash_db
-				.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
-				.await?;
-
-			let new_meta = HashMetaValue::new(wh.seqnum(), 1);
-			self.string_db
-				.put_with_options(meta_encoded_key, new_meta.encode(), &put_opts, &write_opts)
-				.await?;
+		let Some(mut meta_val) = meta_val else {
+			let version = self.next_version();
+			let field_key = HashFieldKey::new(key.clone(), version, field);
+			let encoded_field_key = field_key.encode();
+			let mut batch = WriteBatch::new();
+			batch.put_with_options(encoded_field_key, value, &put_opts);
+			let new_meta = HashMetaValue::new(version, 1);
+			let meta_put_opts = Storage::meta_put_opts(&new_meta);
+			batch.put_with_options(meta_encoded_key, new_meta.encode(), &meta_put_opts);
+			self.write_batch(batch).await?;
 			return Ok(1);
 		};
 
-		// Check if field already exists in current generation
-		let existing_field_raw = self
-			.hash_db
-			.get_key_value(encoded_field_key.clone())
-			.await?;
+		let field_key = HashFieldKey::new(key.clone(), meta_val.version, field);
+		let encoded_field_key = field_key.encode();
 
-		let field_exists = existing_field_raw
-			.as_ref()
-			.is_some_and(|kv| kv.seq >= meta_val.version);
+		// Check if field already exists in current version
+		let existing_field_raw = self.db.get_key_value(encoded_field_key.clone()).await?;
+
+		let field_exists = existing_field_raw.as_ref().is_some();
 		let is_new_field = !field_exists;
 
-		// Set the field in hash_db
-		self.hash_db
-			.put_with_options(encoded_field_key, value, &put_opts, &write_opts)
-			.await?;
+		let mut batch = WriteBatch::new();
+		batch.put_with_options(encoded_field_key, value, &put_opts);
 
-		// Update metadata in string_db if needed
+		// Update metadata if needed.
 		if is_new_field {
 			meta_val.len += 1;
 
 			let put_opts = Storage::meta_put_opts(&meta_val);
 
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+			batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
+			self.write_batch(batch).await?;
 			Ok(1)
 		} else {
+			self.write_batch(batch).await?;
 			Ok(0)
 		}
 	}
@@ -79,11 +69,9 @@ impl Storage {
 			return Ok(None);
 		};
 
-		let field_key = HashFieldKey::new(key, field);
-		let result = self.hash_db.get_key_value(field_key.encode()).await?;
-		if let Some(kv) = result
-			&& kv.seq >= meta_val.version
-		{
+		let field_key = HashFieldKey::new(key, meta_val.version, field);
+		let result = self.db.get_key_value(field_key.encode()).await?;
+		if let Some(kv) = result {
 			return Ok(Some(kv.value));
 		}
 		Ok(None)
@@ -117,23 +105,16 @@ impl Storage {
 		let futures: Vec<_> = fields
 			.iter()
 			.map(|field| {
-				// We don't need to call self.hget() which repeats the check, we can access
-				// hash_db directly
-				let field_key = HashFieldKey::new(key.clone(), field.clone());
-				// We need to clone the db handle for the closure/future if needed, but
-				// self.hash_db is Arc Actually self.hash_db.get is async.
-				// We can just call self.hash_db.get
+				// We don't need to call self.hget() which repeats the metadata check.
+				let field_key = HashFieldKey::new(key.clone(), version, field.clone());
 				async move {
 					let k = field_key.encode();
-					self.hash_db
-						.get_key_value(k)
-						.await
-						.map_err(StorageError::from)
+					self.db.get_key_value(k).await.map_err(StorageError::from)
 				}
 			})
 			.collect();
 
-		// The error handling types need to match. hash_db.get returns SlateDB error.
+		// The error handling types need to match. SlateDB returns its own error.
 		// hget returns Box<dyn Error>.
 		// try_join_all expects futures to return Result<T, E> where E is same.
 		// slateDB errors satisfy Into<Box<dyn Error>>? Maybe.
@@ -145,7 +126,7 @@ impl Storage {
 		Ok(results
 			.into_iter()
 			.map(|kv| match kv {
-				Some(kv) if kv.seq >= version => Some(kv.value),
+				Some(kv) => Some(kv.value),
 				_ => None,
 			})
 			.collect())
@@ -159,11 +140,11 @@ impl Storage {
 			return Ok(Vec::new());
 		};
 
-		// Construct prefix: len(user_key) + user_key
-		let prefix = user_key_prefix(&key);
+		// Construct prefix: len(user_key) + user_key + version
+		let prefix = HashFieldKey::prefix(&key, meta_val.version);
 
 		let range = prefix.clone()..;
-		let mut stream = self.hash_db.scan(range).await?;
+		let mut stream = self.db.scan(range).await?;
 		let mut results = Vec::new();
 
 		while let Some(kv) = stream.next().await? {
@@ -173,11 +154,7 @@ impl Storage {
 				break;
 			}
 
-			if kv.seq < meta_val.version {
-				continue;
-			}
-
-			// Parse field: prefix (key_len+key) + field_len(u32) + field
+			// Parse field: prefix (key_len+key+version) + field_len(u32) + field
 			let suffix = &k[prefix.len()..];
 			if suffix.len() < 4 {
 				continue;
@@ -210,24 +187,24 @@ impl Storage {
 		};
 
 		let mut deleted_count = 0;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let mut batch = WriteBatch::new();
+		let mut seen_fields = std::collections::HashSet::new();
 
 		for field in fields {
-			let field_key = HashFieldKey::new(key.clone(), field.clone());
+			if !seen_fields.insert(field.clone()) {
+				continue;
+			}
+			let field_key = HashFieldKey::new(key.clone(), meta_val.version, field.clone());
 			let encoded_field_key = field_key.encode();
 
 			// check if field exists
 			let exists = self
-				.hash_db
+				.db
 				.get_key_value(encoded_field_key.clone())
 				.await?
-				.is_some_and(|kv| kv.seq >= meta_val.version);
+				.is_some();
 			if exists {
-				self.hash_db
-					.delete_with_options(encoded_field_key, &write_opts)
-					.await?;
+				batch.delete(encoded_field_key);
 				deleted_count += 1;
 			}
 		}
@@ -235,19 +212,16 @@ impl Storage {
 		if deleted_count > 0 {
 			if meta_val.len <= deleted_count as u64 {
 				// Hash is empty, delete meta
-				self.string_db
-					.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
+				batch.delete(meta_encoded_key);
 			} else {
 				// Update meta
 				meta_val.len -= deleted_count as u64;
 
 				let put_opts = Storage::meta_put_opts(&meta_val);
 
-				self.string_db
-					.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-					.await?;
+				batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
 			}
+			self.write_batch(batch).await?;
 		}
 
 		Ok(deleted_count)
@@ -427,6 +401,33 @@ mod tests {
 
 		let got = storage.hget(key.clone(), field.clone()).await.unwrap();
 		assert_eq!(got, Some(Bytes::from("v2")));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_hdel_counts_duplicate_fields_once() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("hash_hdel_duplicates");
+		let f1 = Bytes::from("f1");
+		let f2 = Bytes::from("f2");
+
+		storage
+			.hset(key.clone(), f1.clone(), Bytes::from("v1"))
+			.await
+			.unwrap();
+		storage
+			.hset(key.clone(), f2.clone(), Bytes::from("v2"))
+			.await
+			.unwrap();
+
+		let removed = storage.hdel(key.clone(), &[f1.clone(), f1]).await.unwrap();
+		assert_eq!(removed, 1);
+		assert_eq!(storage.hlen(key.clone()).await.unwrap(), 1);
+		assert_eq!(
+			storage.hget(key.clone(), f2.clone()).await.unwrap(),
+			Some(Bytes::from("v2"))
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

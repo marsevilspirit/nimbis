@@ -4,6 +4,7 @@ pub mod error;
 pub mod hash;
 pub mod list;
 pub mod lock;
+pub mod segment;
 pub mod set;
 pub mod storage;
 pub mod storage_hash;

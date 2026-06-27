@@ -4,6 +4,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 
 use crate::error::DecoderError;
+use crate::segment::META_PREFIX;
 
 #[derive(Debug, PartialEq)]
 pub struct StringKey {
@@ -18,17 +19,21 @@ impl StringKey {
 	}
 
 	pub fn encode(&self) -> Bytes {
-		let mut buf = BytesMut::with_capacity(2 + self.user_key.len());
+		let mut buf = BytesMut::with_capacity(1 + 2 + self.user_key.len());
+		buf.put_u8(META_PREFIX);
 		buf.put_u16(self.user_key.len() as u16);
 		buf.extend_from_slice(&self.user_key);
 		buf.freeze()
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
-		if bytes.len() < 2 {
+		if bytes.len() < 3 {
 			return Err(DecoderError::InvalidLength);
 		}
-		let mut buf = bytes;
+		if bytes[0] != META_PREFIX {
+			return Err(DecoderError::InvalidType);
+		}
+		let mut buf = &bytes[1..];
 		let len = buf.get_u16() as usize;
 		if buf.len() < len {
 			return Err(DecoderError::InvalidLength);
@@ -45,8 +50,8 @@ mod tests {
 	use super::*;
 
 	#[rstest]
-	#[case("mykey", b"\x00\x05mykey")]
-	#[case("something else", b"\x00\x0esomething else")]
+	#[case("mykey", b"m\x00\x05mykey")]
+	#[case("something else", b"m\x00\x0esomething else")]
 	fn test_encode(#[case] key: &str, #[case] expected: &[u8]) {
 		let key = StringKey::new(Bytes::copy_from_slice(key.as_bytes()));
 		let encoded = key.encode();
@@ -54,8 +59,8 @@ mod tests {
 	}
 
 	#[rstest]
-	#[case(b"\x00\x05mykey", "mykey")]
-	#[case(b"\x00\x0esomething else", "something else")]
+	#[case(b"m\x00\x05mykey", "mykey")]
+	#[case(b"m\x00\x0esomething else", "something else")]
 	fn test_decode(#[case] encoded: &[u8], #[case] expected: &str) {
 		let key = StringKey::decode(encoded).unwrap();
 		assert_eq!(key.user_key, Bytes::copy_from_slice(expected.as_bytes()));
