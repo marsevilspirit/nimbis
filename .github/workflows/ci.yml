@@ -319,12 +319,11 @@ jobs:
         chmod +x artifacts/main/target/release/nimbis
         chmod +x artifacts/pr/target/release/nimbis
 
-    - name: Resolve latest baseline releases
+    - name: Resolve latest baseline versions
       run: |
         PIKIWIDB_VERSION=$(curl -fsSL \
-          -H "Accept: application/vnd.github+json" \
-          -H "Authorization: Bearer ${{ github.token }}" \
-          https://api.github.com/repos/OpenAtomFoundation/pikiwidb/releases/latest | python3 -c "import json, sys; print(json.load(sys.stdin)['tag_name'])")
+          "https://hub.docker.com/v2/repositories/pikadb/pika/tags?page_size=10&ordering=last_updated" \
+          | python3 -c 'import json, sys; print(next(tag["name"] for tag in json.load(sys.stdin)["results"] if tag["name"] != "latest"))')
         KVROCKS_RELEASE=$(curl -fsSL \
           -H "Accept: application/vnd.github+json" \
           -H "Authorization: Bearer ${{ github.token }}" \
