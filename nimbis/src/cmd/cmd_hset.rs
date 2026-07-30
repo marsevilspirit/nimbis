@@ -39,10 +39,9 @@ impl Cmd for HSetCmd {
 		let key = &args[0];
 		let mut added_count = 0;
 
-		let chunks = args[1..].chunks_exact(2);
-		for chunk in chunks {
-			let field = &chunk[0];
-			let value = &chunk[1];
+		let (chunks, remainder) = args[1..].as_chunks::<2>();
+		debug_assert!(remainder.is_empty());
+		for [field, value] in chunks {
 			// TODO: Optimize by handling errors gracefully or transactional vs partial
 			// success? Redis HSET is atomic per key. Here we do sequential updates.
 			// If one fails, we return error.

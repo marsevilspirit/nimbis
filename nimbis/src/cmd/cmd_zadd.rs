@@ -38,8 +38,10 @@ impl Cmd for ZAddCmd {
 		}
 
 		let mut elements = Vec::with_capacity(remaining_args.len() / 2);
-		for chunk in remaining_args.chunks_exact(2) {
-			let score_str = String::from_utf8_lossy(&chunk[0]);
+		let (chunks, remainder) = remaining_args.as_chunks::<2>();
+		debug_assert!(remainder.is_empty());
+		for [score_bytes, member] in chunks {
+			let score_str = String::from_utf8_lossy(score_bytes);
 			let score = match score_str.parse::<f64>() {
 				Ok(s) => s,
 				Err(_) => return RespValue::error("ERR value is not a valid float"),
@@ -48,8 +50,7 @@ impl Cmd for ZAddCmd {
 				return RespValue::error("ERR resulting score is not a number (NaN)");
 			}
 
-			let member = chunk[1].clone();
-			elements.push((score, member));
+			elements.push((score, member.clone()));
 		}
 
 		match storage.zadd(key, elements).await {

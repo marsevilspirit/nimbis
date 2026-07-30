@@ -98,7 +98,7 @@ impl Storage {
 		}
 
 		let ttl = if expire_time > 0 {
-			Ttl::ExpireAfter(expire_time.saturating_sub(now))
+			Ttl::ExpireAfterMillis(expire_time.saturating_sub(now))
 		} else {
 			Ttl::NoExpiry
 		};

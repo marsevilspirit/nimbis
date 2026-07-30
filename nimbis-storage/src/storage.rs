@@ -233,7 +233,7 @@ impl Storage {
 	#[storage_lock(global_write)]
 	#[fastrace::trace]
 	pub async fn flush_all(&self) -> Result<(), StorageError> {
-		let mut stream = self.db.scan::<Bytes, _>(..).await?;
+		let mut stream = self.db.scan(..).await?;
 		let mut batch = WriteBatch::new();
 		let mut batch_len = 0;
 		while let Some(kv) = stream.next().await? {
@@ -305,7 +305,7 @@ impl Storage {
 		let ttl = meta
 			.remaining_ttl()
 			.map(|d| d.as_millis() as u64)
-			.map(slatedb::config::Ttl::ExpireAfter)
+			.map(slatedb::config::Ttl::ExpireAfterMillis)
 			.unwrap_or(slatedb::config::Ttl::NoExpiry);
 		PutOptions { ttl }
 	}
@@ -390,7 +390,7 @@ mod tests {
 			.await
 			.unwrap();
 
-		let mut stream = ctx.storage.db.scan::<Bytes, _>(..).await.unwrap();
+		let mut stream = ctx.storage.db.scan(..).await.unwrap();
 		let mut seen = Vec::new();
 		while let Some(kv) = stream.next().await.unwrap() {
 			seen.push(kv.key.first().copied());
@@ -416,7 +416,7 @@ mod tests {
 
 		ctx.storage.flush_all().await.unwrap();
 
-		let mut stream = ctx.storage.db.scan::<Bytes, _>(..).await.unwrap();
+		let mut stream = ctx.storage.db.scan(..).await.unwrap();
 		assert!(stream.next().await.unwrap().is_none());
 	}
 
@@ -582,17 +582,17 @@ mod tests {
 		val.expire_time =
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
 		let opts = Storage::meta_put_opts(&val);
-		assert_eq!(opts.ttl, Ttl::ExpireAfter(0));
+		assert_eq!(opts.ttl, Ttl::ExpireAfterMillis(0));
 
 		// Case 3: Future expiration
 		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
 		val.expire_time = future;
 		let opts = Storage::meta_put_opts(&val);
-		if let Ttl::ExpireAfter(millis) = opts.ttl {
+		if let Ttl::ExpireAfterMillis(millis) = opts.ttl {
 			assert!(millis > 0);
 			assert!(millis <= 10000);
 		} else {
-			panic!("Expected ExpireAfter, got {:?}", opts.ttl);
+			panic!("Expected ExpireAfterMillis, got {:?}", opts.ttl);
 		}
 	}
 }
