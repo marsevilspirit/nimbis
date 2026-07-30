@@ -51,16 +51,24 @@ Compares benchmark outputs and prints a Markdown report.
 
 ```bash
 cargo xtask compare-benchmarks \
-  --main <main_bench_file> \
-  --pr <pr_bench_file> \
-  --main-pipeline <main_pipeline_file> \
-  --pr-pipeline <pr_pipeline_file> \
+  --main <main_round_1> \
+  --pr <pr_round_1> \
+  --main <main_round_2> \
+  --pr <pr_round_2> \
+  --main-pipeline <main_pipeline_round_1> \
+  --pr-pipeline <pr_pipeline_round_1> \
+  --main-pipeline <main_pipeline_round_2> \
+  --pr-pipeline <pr_pipeline_round_2> \
   --baseline <NAME=PATH> \
   --baseline-pipeline <NAME=PATH>
 ```
 
-The benchmark workflow uses this command to generate the pull request benchmark
-report.
+`--main` and `--pr` can be repeated and must be supplied in paired order; the
+same applies to their pipeline variants. The report uses median RPS, the median
+of per-pair percentage changes, MAD, and the observed min/max range. The
+benchmark workflow uses this command to generate the pull request report.
+Repeated baseline inputs with the same name are grouped into an unpaired median
+and labeled as informational.
 
 ## Requirements
 

@@ -7,6 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
+use std::time::Duration;
 
 use clap::Args as ClapArgs;
 use clap::ValueEnum;
@@ -14,6 +15,19 @@ use clap::ValueEnum;
 use crate::write_stdout_line;
 
 const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd";
+const DESTRUCTIVE_CUSTOM_BENCHMARKS: &[&str] = &[
+	"append",
+	"decr",
+	"del_multi_key",
+	"expire",
+	"hdel",
+	"srem",
+	"zrem",
+];
+const MAX_RANDOM_SEED: u64 = i32::MAX as u64;
+const DEFAULT_RANDOM_SEED: u64 = 1;
+const DEFAULT_SETTLE_MS: u64 = 5_000;
+const DEFAULT_WARMUP_REQUESTS: u64 = 1_000;
 
 #[derive(ClapArgs, Debug, Default)]
 pub struct Args {
@@ -45,6 +59,10 @@ pub struct Args {
 	#[arg(long = "r")]
 	pub random_keyspace: Option<u64>,
 
+	/// Deterministic redis-benchmark random seed.
+	#[arg(long)]
+	pub seed: Option<u64>,
+
 	/// Optional redis-benchmark --threads value.
 	#[arg(long)]
 	pub threads: Option<u64>,
@@ -60,6 +78,16 @@ pub struct Args {
 	/// Setup request count for seeded random data.
 	#[arg(long = "seed-n")]
 	pub seed_requests: Option<u64>,
+
+	/// Warmup request count before each measured benchmark. Set to 0 to
+	/// disable.
+	#[arg(long = "warmup-n")]
+	pub warmup_requests: Option<u64>,
+
+	/// Quiet delay after write-heavy phases, in milliseconds. Set to 0 to
+	/// disable.
+	#[arg(long)]
+	pub settle_ms: Option<u64>,
 
 	/// Override redis-benchmark binary name/path.
 	#[arg(long)]
@@ -96,10 +124,13 @@ struct Config {
 	data_size: u64,
 	pipeline: u64,
 	random_keyspace: u64,
+	random_seed: u64,
 	threads: Option<u64>,
 	csv: bool,
 	output_dir: PathBuf,
 	seed_requests: u64,
+	warmup_requests: u64,
+	settle_duration: Duration,
 	redis_benchmark: String,
 	redis_cli: String,
 	extra_args: Vec<String>,
@@ -115,6 +146,12 @@ impl Config {
 			"target/redis-benchmark",
 		);
 		let output_dir = resolve_output_dir(workspace_root, &output_dir);
+		let random_seed = option_or_env_u64(args.seed, "SEED", DEFAULT_RANDOM_SEED)?;
+		if random_seed > MAX_RANDOM_SEED {
+			return Err(format!(
+				"random seed must be at most {MAX_RANDOM_SEED} because redis-benchmark 7.2 parses --seed as a 32-bit integer (got {random_seed})"
+			));
+		}
 
 		Ok(Self {
 			host: option_or_env_string(args.host.as_deref(), "HOST", "127.0.0.1"),
@@ -124,10 +161,21 @@ impl Config {
 			data_size: option_or_env_u64(args.data_size, "D", 128)?,
 			pipeline: option_or_env_u64(args.pipeline, "P", 1)?,
 			random_keyspace: option_or_env_u64(args.random_keyspace, "R", 100000)?,
+			random_seed,
 			threads: option_or_env_optional_u64(args.threads, "THREADS")?,
 			csv: args.csv || env_bool("CSV"),
 			output_dir,
 			seed_requests: option_or_env_u64(args.seed_requests, "SEED_N", requests)?,
+			warmup_requests: option_or_env_u64(
+				args.warmup_requests,
+				"WARMUP_N",
+				DEFAULT_WARMUP_REQUESTS,
+			)?,
+			settle_duration: Duration::from_millis(option_or_env_u64(
+				args.settle_ms,
+				"SETTLE_MS",
+				DEFAULT_SETTLE_MS,
+			)?),
 			redis_benchmark: option_or_env_string(
 				args.redis_benchmark.as_deref(),
 				"REDIS_BENCHMARK",
@@ -139,14 +187,14 @@ impl Config {
 		})
 	}
 
-	fn benchmark_base_args(&self) -> Vec<String> {
+	fn common_benchmark_args(&self, requests: u64) -> Vec<String> {
 		let mut args = vec![
 			"-h".to_string(),
 			self.host.clone(),
 			"-p".to_string(),
 			self.port.to_string(),
 			"-n".to_string(),
-			self.requests.to_string(),
+			requests.to_string(),
 			"-c".to_string(),
 			self.clients.to_string(),
 			"-d".to_string(),
@@ -155,6 +203,8 @@ impl Config {
 			self.random_keyspace.to_string(),
 			"-P".to_string(),
 			self.pipeline.to_string(),
+			"--seed".to_string(),
+			self.random_seed.to_string(),
 		];
 
 		if let Some(threads) = self.threads {
@@ -162,6 +212,11 @@ impl Config {
 			args.push(threads.to_string());
 		}
 
+		args
+	}
+
+	fn benchmark_base_args(&self) -> Vec<String> {
+		let mut args = self.common_benchmark_args(self.requests);
 		if self.csv {
 			args.push("--csv".to_string());
 		} else {
@@ -190,6 +245,7 @@ trait Runner {
 		args: &[String],
 		file: &Path,
 	) -> Result<(), String>;
+	fn sleep(&self, duration: Duration);
 }
 
 fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
@@ -201,7 +257,7 @@ fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 
 	write_stdout_line("Running Nimbis redis-benchmark suite")?;
 	write_stdout_line(&format!(
-		"host={} port={} n={} clients={} data_size={} pipeline={} random_keyspace={} output={}",
+		"host={} port={} n={} clients={} data_size={} pipeline={} random_keyspace={} seed={} warmup_n={} settle_ms={} output={}",
 		config.host,
 		config.port,
 		config.requests,
@@ -209,13 +265,24 @@ fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 		config.data_size,
 		config.pipeline,
 		config.random_keyspace,
+		config.random_seed,
+		config.warmup_requests,
+		config.settle_duration.as_millis(),
 		config.output_dir.display()
 	))?;
 	write_stdout_line("")?;
 
 	redis_cli(config, runner, &["FLUSHDB"])?;
 	seed_fixed_data(config, runner)?;
-	seed_random_data(config, runner)?;
+	match config.profile {
+		Profile::Full => seed_random_data(config, runner)?,
+		Profile::Comparison => seed_comparison_data(config, runner)?,
+	}
+	quiet_settle(
+		config,
+		runner,
+		"after data setup so background storage work does not skew measurements",
+	)?;
 	match config.profile {
 		Profile::Full => {
 			run_builtin_suite(config, runner)?;
@@ -230,6 +297,19 @@ fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 		"redis-benchmark results written to {}",
 		config.output_dir.display()
 	))?;
+	Ok(())
+}
+
+fn quiet_settle<R: Runner>(config: &Config, runner: &R, reason: &str) -> Result<(), String> {
+	if config.settle_duration.is_zero() {
+		return Ok(());
+	}
+
+	write_stdout_line(&format!(
+		"Quiet settle for {} ms {reason}...",
+		config.settle_duration.as_millis(),
+	))?;
+	runner.sleep(config.settle_duration);
 	Ok(())
 }
 
@@ -346,6 +426,24 @@ fn seed_random_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 	Ok(())
 }
 
+fn seed_comparison_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
+	seed_benchmark(
+		config,
+		runner,
+		&["SADD", "bench:set:srem", "member:__rand_int__"],
+	)?;
+	seed_benchmark(
+		config,
+		runner,
+		&[
+			"ZADD",
+			"bench:zset:zrem",
+			"__rand_int__",
+			"member:__rand_int__",
+		],
+	)
+}
+
 fn run_builtin_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
 	run_benchmark(
 		config,
@@ -362,15 +460,30 @@ fn run_comparison_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), St
 		"builtin_comparison",
 		&["-t", "set,get,hset,lpush,lpop,sadd,zadd"],
 	)?;
+	quiet_settle(
+		config,
+		runner,
+		"after the write-heavy builtin suite so its background work does not skew custom commands",
+	)?;
 
-	let benchmarks: &[(&str, &[&str])] = &[
-		("hget", &["HGET", "bench:hash", "field1"]),
-		("srem", &["SREM", "bench:set:srem", "member:__rand_int__"]),
-		("zrem", &["ZREM", "bench:zset:zrem", "member:__rand_int__"]),
-	];
-	for (label, args) in benchmarks {
-		run_benchmark(config, runner, label, args)?;
-	}
+	run_benchmark(config, runner, "hget", &["HGET", "bench:hash", "field1"])?;
+	run_benchmark(
+		config,
+		runner,
+		"srem",
+		&["SREM", "bench:set:srem", "member:__rand_int__"],
+	)?;
+	quiet_settle(
+		config,
+		runner,
+		"after SREM so its write load does not skew ZREM",
+	)?;
+	run_benchmark(
+		config,
+		runner,
+		"zrem",
+		&["ZREM", "bench:zset:zrem", "member:__rand_int__"],
+	)?;
 	Ok(())
 }
 
@@ -441,22 +554,23 @@ fn seed_benchmark<R: Runner>(
 	runner: &R,
 	command_args: &[&str],
 ) -> Result<(), String> {
-	let mut args = vec![
-		"-h".to_string(),
-		config.host.clone(),
-		"-p".to_string(),
-		config.port.to_string(),
-		"-n".to_string(),
-		config.seed_requests.to_string(),
-		"-c".to_string(),
-		config.clients.to_string(),
-		"-d".to_string(),
-		config.data_size.to_string(),
-		"-r".to_string(),
-		config.random_keyspace.to_string(),
-		"-P".to_string(),
-		config.pipeline.to_string(),
-	];
+	let mut args = config.common_benchmark_args(config.seed_requests);
+	args.extend(config.extra_args.clone());
+	args.extend(command_args.iter().map(|arg| (*arg).to_string()));
+	runner.run_status(&config.redis_benchmark, &args)
+}
+
+fn warm_up_benchmark<R: Runner>(
+	config: &Config,
+	runner: &R,
+	command_args: &[&str],
+) -> Result<(), String> {
+	if config.warmup_requests == 0 {
+		return Ok(());
+	}
+
+	let mut args = config.common_benchmark_args(config.warmup_requests);
+	args.push("-q".to_string());
 	args.extend(config.extra_args.clone());
 	args.extend(command_args.iter().map(|arg| (*arg).to_string()));
 	runner.run_status(&config.redis_benchmark, &args)
@@ -468,6 +582,9 @@ fn run_benchmark<R: Runner>(
 	label: &str,
 	command_args: &[&str],
 ) -> Result<(), String> {
+	if !DESTRUCTIVE_CUSTOM_BENCHMARKS.contains(&label) {
+		warm_up_benchmark(config, runner, command_args)?;
+	}
 	write_stdout_line(&format!("==> {label}"))?;
 
 	let mut args = config.benchmark_base_args();
@@ -557,6 +674,10 @@ impl Runner for ProcessRunner {
 		} else {
 			Err(format!("{program} exited with status {status}"))
 		}
+	}
+
+	fn sleep(&self, duration: Duration) {
+		std::thread::sleep(duration);
 	}
 }
 
@@ -672,10 +793,18 @@ mod tests {
 		output_file: Option<PathBuf>,
 	}
 
+	#[derive(Debug, Clone, PartialEq, Eq)]
+	enum RecordedEvent {
+		Streaming(String),
+		Sleep(Duration),
+	}
+
 	#[derive(Debug, Default)]
 	struct FakeRunner {
 		status_calls: RefCell<Vec<RecordedCall>>,
 		streaming_calls: RefCell<Vec<RecordedCall>>,
+		sleep_calls: RefCell<Vec<Duration>>,
+		timeline: RefCell<Vec<RecordedEvent>>,
 	}
 
 	const BENCHMARKED_FULL_PROFILE_COMMANDS: &[&str] = &[
@@ -755,6 +884,22 @@ mod tests {
 				.map(|call| call.args.clone())
 				.collect()
 		}
+
+		fn benchmark_status_commands(&self) -> Vec<Vec<String>> {
+			self.status_calls
+				.borrow()
+				.iter()
+				.filter(|call| call.args.iter().any(|arg| arg == "--seed"))
+				.map(|call| call.args.clone())
+				.collect()
+		}
+	}
+
+	fn argument_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+		args.iter()
+			.position(|arg| arg == name)
+			.and_then(|index| args.get(index + 1))
+			.map(String::as_str)
 	}
 
 	fn benchmarked_commands(args: &[String]) -> Vec<String> {
@@ -798,13 +943,28 @@ mod tests {
 			args: &[String],
 			file: &Path,
 		) -> Result<(), String> {
+			let label = file
+				.file_stem()
+				.expect("streaming output file has a stem")
+				.to_string_lossy()
+				.into_owned();
 			self.streaming_calls.borrow_mut().push(RecordedCall {
 				program: program.to_string(),
 				args: args.to_vec(),
 				output_file: Some(file.to_path_buf()),
 			});
+			self.timeline
+				.borrow_mut()
+				.push(RecordedEvent::Streaming(label));
 			fs::write(file, b"PING_INLINE: 1.00 requests per second\n")
 				.map_err(|error| error.to_string())
+		}
+
+		fn sleep(&self, duration: Duration) {
+			self.sleep_calls.borrow_mut().push(duration);
+			self.timeline
+				.borrow_mut()
+				.push(RecordedEvent::Sleep(duration));
 		}
 	}
 
@@ -817,10 +977,13 @@ mod tests {
 			data_size: 16,
 			pipeline: 1,
 			random_keyspace: 32,
+			random_seed: 42,
 			threads: Some(2),
 			csv: false,
 			output_dir,
 			seed_requests: 7,
+			warmup_requests: 3,
+			settle_duration: Duration::from_millis(7),
 			redis_benchmark: "/bin/echo".into(),
 			redis_cli: "/bin/echo".into(),
 			extra_args: vec!["--cluster".into()],
@@ -840,8 +1003,57 @@ mod tests {
 		assert_eq!(config.data_size, 128);
 		assert_eq!(config.pipeline, 1);
 		assert_eq!(config.random_keyspace, 100000);
+		assert_eq!(config.random_seed, DEFAULT_RANDOM_SEED);
+		assert_eq!(config.warmup_requests, DEFAULT_WARMUP_REQUESTS);
+		assert_eq!(
+			config.settle_duration,
+			Duration::from_millis(DEFAULT_SETTLE_MS)
+		);
 		assert_eq!(config.output_dir, Path::new("/repo/target/redis-benchmark"));
 		assert_eq!(config.output_ext(), "txt");
+	}
+
+	#[test]
+	fn stability_settings_are_configurable() {
+		let args = Args {
+			seed: Some(99),
+			warmup_requests: Some(17),
+			settle_ms: Some(250),
+			..Args::default()
+		};
+		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
+
+		assert_eq!(config.random_seed, 99);
+		assert_eq!(config.warmup_requests, 17);
+		assert_eq!(config.settle_duration, Duration::from_millis(250));
+	}
+
+	#[test]
+	fn random_seed_accepts_redis_benchmark_maximum() {
+		let args = Args {
+			seed: Some(MAX_RANDOM_SEED),
+			..Args::default()
+		};
+		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
+
+		assert_eq!(config.random_seed, MAX_RANDOM_SEED);
+	}
+
+	#[test]
+	fn random_seed_rejects_values_above_redis_benchmark_maximum() {
+		let invalid_seed = MAX_RANDOM_SEED + 1;
+		let args = Args {
+			seed: Some(invalid_seed),
+			..Args::default()
+		};
+		let error = Config::from_args(&args, Path::new("/repo")).unwrap_err();
+
+		assert_eq!(
+			error,
+			format!(
+				"random seed must be at most {MAX_RANDOM_SEED} because redis-benchmark 7.2 parses --seed as a 32-bit integer (got {invalid_seed})"
+			)
+		);
 	}
 
 	#[test]
@@ -881,6 +1093,8 @@ mod tests {
 				"-r",
 				"100000",
 				"-P",
+				"1",
+				"--seed",
 				"1",
 				"--threads",
 				"4",
@@ -929,6 +1143,41 @@ mod tests {
 		assert_eq!(
 			runner.streamed_commands(),
 			benchmarked_command_set(BENCHMARKED_FULL_PROFILE_COMMANDS)
+		);
+		assert!(
+			runner
+				.streaming_calls
+				.borrow()
+				.iter()
+				.all(|call| argument_value(&call.args, "--seed") == Some("42"))
+		);
+		assert_eq!(
+			runner
+				.benchmark_status_commands()
+				.iter()
+				.filter(|args| argument_value(args, "-n") == Some("7"))
+				.count(),
+			9
+		);
+		let warmup_commands = runner
+			.benchmark_status_commands()
+			.into_iter()
+			.filter(|args| argument_value(args, "-n") == Some("3"))
+			.collect::<Vec<_>>();
+		assert_eq!(warmup_commands.len(), 18);
+		let warmed_command_set = warmup_commands
+			.iter()
+			.flat_map(|args| benchmarked_commands(args))
+			.collect::<BTreeSet<_>>();
+		for destructive_command in ["APPEND", "DECR", "DEL", "EXPIRE", "HDEL", "SREM", "ZREM"] {
+			assert!(!warmed_command_set.contains(destructive_command));
+		}
+		for read_only_command in ["EXISTS", "HGET", "LRANGE", "SMEMBERS", "TTL", "ZSCORE"] {
+			assert!(warmed_command_set.contains(read_only_command));
+		}
+		assert_eq!(
+			runner.sleep_calls.borrow().as_slice(),
+			&[Duration::from_millis(7)]
 		);
 
 		let redis_cli_calls = runner.status_commands("/bin/echo");
@@ -984,6 +1233,81 @@ mod tests {
 			runner.streamed_commands(),
 			benchmarked_command_set(BENCHMARKED_COMPARISON_PROFILE_COMMANDS)
 		);
+		let benchmark_status_commands = runner.benchmark_status_commands();
+		let seed_commands = benchmark_status_commands
+			.iter()
+			.filter(|args| argument_value(args, "-n") == Some("7"))
+			.collect::<Vec<_>>();
+		assert_eq!(seed_commands.len(), 2);
+		assert!(seed_commands.iter().any(|args| args.ends_with(&[
+			"SADD".into(),
+			"bench:set:srem".into(),
+			"member:__rand_int__".into(),
+		])));
+		assert!(seed_commands.iter().any(|args| args.ends_with(&[
+			"ZADD".into(),
+			"bench:zset:zrem".into(),
+			"__rand_int__".into(),
+			"member:__rand_int__".into(),
+		])));
+		let warmup_commands = benchmark_status_commands
+			.iter()
+			.filter(|args| argument_value(args, "-n") == Some("3"))
+			.collect::<Vec<_>>();
+		assert_eq!(warmup_commands.len(), 2);
+		let warmed_command_set = warmup_commands
+			.iter()
+			.flat_map(|args| benchmarked_commands(args))
+			.collect::<BTreeSet<_>>();
+		assert!(warmed_command_set.contains("HGET"));
+		assert!(!warmed_command_set.contains("SREM"));
+		assert!(!warmed_command_set.contains("ZREM"));
+		assert!(
+			benchmark_status_commands
+				.iter()
+				.all(|args| argument_value(args, "--seed") == Some("42"))
+		);
+		assert!(
+			runner
+				.streaming_calls
+				.borrow()
+				.iter()
+				.all(|call| argument_value(&call.args, "--seed") == Some("42"))
+		);
+		assert_eq!(
+			runner.sleep_calls.borrow().as_slice(),
+			&[
+				Duration::from_millis(7),
+				Duration::from_millis(7),
+				Duration::from_millis(7),
+			]
+		);
+		assert_eq!(
+			runner.timeline.borrow().as_slice(),
+			&[
+				RecordedEvent::Sleep(Duration::from_millis(7)),
+				RecordedEvent::Streaming("builtin_comparison".to_string()),
+				RecordedEvent::Sleep(Duration::from_millis(7)),
+				RecordedEvent::Streaming("hget".to_string()),
+				RecordedEvent::Streaming("srem".to_string()),
+				RecordedEvent::Sleep(Duration::from_millis(7)),
+				RecordedEvent::Streaming("zrem".to_string()),
+			]
+		);
 		assert!(!config.output_dir.join("hello_2.txt").exists());
+	}
+
+	#[test]
+	fn zero_warmup_and_settle_disable_stability_waits() {
+		let tempdir = tempdir().unwrap();
+		let mut config = test_config(tempdir.path().join("redis-benchmark"), Profile::Comparison);
+		config.warmup_requests = 0;
+		config.settle_duration = Duration::ZERO;
+		let runner = FakeRunner::default();
+
+		run_with_runner(&config, &runner).unwrap();
+
+		assert_eq!(runner.benchmark_status_commands().len(), 2);
+		assert!(runner.sleep_calls.borrow().is_empty());
 	}
 }

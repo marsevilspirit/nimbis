@@ -15,6 +15,10 @@ env:
   # Always enable colored output in Cargo (for better readability in CI logs)
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Check
@@ -262,6 +266,7 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     needs: [build_release, build_main_release]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -287,9 +292,23 @@ jobs:
 
     steps:
     - name: Install dependencies
+      shell: bash
       run: |
+        set -euo pipefail
         sudo apt-get update
         sudo apt-get install -y redis-tools redis-server
+
+        tools_dir="$RUNNER_TEMP/redis-tools"
+        mkdir -p "$tools_dir"
+        tools_container=$(docker create redis:7.2.0-bookworm)
+        trap 'docker rm -f "$tools_container" >/dev/null 2>&1 || true' EXIT
+        docker cp "$tools_container:/usr/local/bin/redis-benchmark" \
+          "$tools_dir/redis-benchmark"
+        chmod +x "$tools_dir/redis-benchmark"
+        echo "$tools_dir" >> "$GITHUB_PATH"
+
+        "$tools_dir/redis-benchmark" --help 2>&1 | grep -q -- '--seed'
+        "$tools_dir/redis-benchmark" --version
 
     - uses: actions/checkout@v7
 
@@ -319,7 +338,165 @@ jobs:
         chmod +x artifacts/main/target/release/nimbis
         chmod +x artifacts/pr/target/release/nimbis
 
+    - name: Record benchmark runner metadata
+      run: |
+        {
+          echo "runner.name=${RUNNER_NAME:-unknown}"
+          echo "runner.os=${RUNNER_OS:-unknown}"
+          echo "runner.arch=${RUNNER_ARCH:-unknown}"
+          echo "image.os=${ImageOS:-unknown}"
+          echo "image.version=${ImageVersion:-unknown}"
+          echo "github.run_id=${GITHUB_RUN_ID}"
+          echo "github.run_attempt=${GITHUB_RUN_ATTEMPT}"
+          echo "github.base_sha=${{ github.event.pull_request.base.sha }}"
+          echo "github.head_sha=${{ github.event.pull_request.head.sha }}"
+          echo "github.merge_sha=${GITHUB_SHA}"
+          echo "matrix.slot_id=${{ matrix.slot_id }}"
+          echo "matrix.data_size=${{ matrix.data_size }}"
+          echo
+          uname -a
+          echo
+          lscpu
+          echo
+          rustc --version --verbose
+          cargo --version --verbose
+          redis-benchmark --version
+          redis-server --version
+        } | tee benchmark_runner_info.txt
+
+    - name: Build benchmark harness
+      run: cargo build --package xtask
+
+    - name: Run paired Nimbis benchmarks
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        sudo systemctl stop redis-server || true
+        NIMBIS_PID=""
+
+        stop_nimbis() {
+          if [[ -z "${NIMBIS_PID:-}" ]]; then
+            return
+          fi
+
+          kill "$NIMBIS_PID" >/dev/null 2>&1 || true
+          for _ in $(seq 1 50); do
+            if ! kill -0 "$NIMBIS_PID" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.1
+          done
+          if kill -0 "$NIMBIS_PID" >/dev/null 2>&1; then
+            kill -KILL "$NIMBIS_PID" >/dev/null 2>&1 || true
+          fi
+          wait "$NIMBIS_PID" >/dev/null 2>&1 || true
+          NIMBIS_PID=""
+        }
+
+        wait_for_nimbis() {
+          local log_file=$1
+
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$NIMBIS_PID" >/dev/null 2>&1; then
+              echo "Nimbis exited before becoming ready"
+              cat "$log_file"
+              return 1
+            fi
+            if timeout 1s redis-cli -h 127.0.0.1 -p 6379 PING 2>/dev/null \
+              | grep -qx PONG; then
+              return
+            fi
+            sleep 1
+          done
+
+          echo "Timed out waiting for Nimbis readiness"
+          cat "$log_file"
+          return 1
+        }
+
+        run_measurement() {
+          local variant=$1
+          local round=$2
+          local pipeline=$3
+          local binary output_file output_dir store_dir log_file seed
+
+          binary="./artifacts/${variant}/target/release/nimbis"
+          seed=$((1000000 + ${{ matrix.data_size }} * 10 + ${{ matrix.slot_id }} * 100 + round))
+
+          if [[ "$pipeline" == "1" ]]; then
+            output_file="benchmark_${variant}_round_${round}.txt"
+            output_dir="benchmark_${variant}_round_${round}_suites"
+          else
+            output_file="benchmark_${variant}_pipeline_round_${round}.txt"
+            output_dir="benchmark_${variant}_pipeline_round_${round}_suites"
+          fi
+
+          store_dir="nimbis_benchmark_store/${{ matrix.data_size }}/slot-${{ matrix.slot_id }}/round-${round}/${variant}/pipeline-${pipeline}"
+          log_file="nimbis_${variant}_round_${round}_pipeline_${pipeline}.log"
+          if [[ -e "$store_dir" ]]; then
+            echo "Refusing to reuse benchmark store: $store_dir"
+            return 1
+          fi
+          mkdir -p "$(dirname "$store_dir")"
+
+          if timeout 2s redis-cli -h 127.0.0.1 -p 6379 PING >/dev/null 2>&1; then
+            echo "Port 6379 is already serving Redis traffic"
+            ss -ltnp | grep ':6379' || true
+            return 1
+          fi
+
+          echo "Running ${variant} round ${round} (pipeline=${pipeline}, seed=${seed})"
+          NIMBIS_OBJECT_STORE_URL="file:${store_dir}" \
+            "$binary" > "$log_file" 2>&1 &
+          NIMBIS_PID=$!
+          wait_for_nimbis "$log_file"
+
+          N=200000 C=100 R=100000 D=${{ matrix.data_size }} P="$pipeline" \
+            OUTPUT_DIR="$output_dir" \
+            timeout --signal=TERM --kill-after=30s 15m \
+            ./target/debug/xtask redis-benchmark \
+              --profile comparison \
+              --seed "$seed" \
+              --settle-ms 20000 \
+            > "$output_file"
+
+          stop_nimbis
+        }
+
+        run_pair() {
+          local round=$1
+          local pipeline=$2
+          local first=$3
+          local second=$4
+
+          run_measurement "$first" "$round" "$pipeline"
+          run_measurement "$second" "$round" "$pipeline"
+        }
+
+        trap stop_nimbis EXIT
+
+        if (( ${{ matrix.slot_id }} % 2 == 1 )); then
+          first_round_order=(main pr)
+          second_round_order=(pr main)
+        else
+          first_round_order=(pr main)
+          second_round_order=(main pr)
+        fi
+
+        {
+          echo "paired.round_1_order=${first_round_order[*]}"
+          echo "paired.round_2_order=${second_round_order[*]}"
+          echo "paired.settle_ms=20000"
+        } >> benchmark_runner_info.txt
+
+        for pipeline in 1 50; do
+          run_pair 1 "$pipeline" "${first_round_order[@]}"
+          run_pair 2 "$pipeline" "${second_round_order[@]}"
+        done
+
     - name: Resolve latest baseline versions
+      continue-on-error: true
       run: |
         PIKIWIDB_VERSION=$(curl -fsSL \
           "https://hub.docker.com/v2/repositories/pikadb/pika/tags?page_size=10&ordering=last_updated" \
@@ -333,8 +510,13 @@ jobs:
         echo "PIKIWIDB_VERSION=$PIKIWIDB_VERSION" >> "$GITHUB_ENV"
         echo "KVROCKS_RELEASE=$KVROCKS_RELEASE" >> "$GITHUB_ENV"
         echo "KVROCKS_VERSION=$KVROCKS_VERSION" >> "$GITHUB_ENV"
+        {
+          echo "baseline.pikiwidb_version=$PIKIWIDB_VERSION"
+          echo "baseline.kvrocks_release=$KVROCKS_RELEASE"
+        } >> benchmark_runner_info.txt
 
     - name: Run Redis Benchmark
+      continue-on-error: true
       run: |
         sudo systemctl start redis-server
         sleep 5
@@ -356,6 +538,7 @@ jobs:
         sudo systemctl stop redis-server
 
     - name: Run Redis Benchmark with Pipeline
+      continue-on-error: true
       run: |
         sudo systemctl start redis-server
         sleep 5
@@ -377,6 +560,7 @@ jobs:
         sudo systemctl stop redis-server
 
     - name: Run PikiwiDB Benchmark
+      continue-on-error: true
       run: |
         trap 'docker rm -f pikiwidb-benchmark >/dev/null 2>&1 || true' EXIT
         docker run -d --rm --name pikiwidb-benchmark -p 6379:9221 pikadb/pika:${PIKIWIDB_VERSION}
@@ -397,6 +581,7 @@ jobs:
         redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb.txt || true
 
     - name: Run PikiwiDB Benchmark with Pipeline
+      continue-on-error: true
       run: |
         trap 'docker rm -f pikiwidb-benchmark >/dev/null 2>&1 || true' EXIT
         docker run -d --rm --name pikiwidb-benchmark -p 6379:9221 pikadb/pika:${PIKIWIDB_VERSION}
@@ -417,6 +602,7 @@ jobs:
         redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_pikiwidb_pipeline.txt || true
 
     - name: Run Kvrocks Benchmark
+      continue-on-error: true
       run: |
         trap 'docker rm -f kvrocks-benchmark >/dev/null 2>&1 || true' EXIT
         docker run -d --rm --name kvrocks-benchmark -p 6379:6666 apache/kvrocks:${KVROCKS_VERSION} --bind 0.0.0.0
@@ -437,6 +623,7 @@ jobs:
         redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks.txt || true
 
     - name: Run Kvrocks Benchmark with Pipeline
+      continue-on-error: true
       run: |
         trap 'docker rm -f kvrocks-benchmark >/dev/null 2>&1 || true' EXIT
         docker run -d --rm --name kvrocks-benchmark -p 6379:6666 apache/kvrocks:${KVROCKS_VERSION} --bind 0.0.0.0
@@ -456,110 +643,133 @@ jobs:
         redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 SREM bench:set:srem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
         redis-benchmark -q -n 200000 -c 100 -r 100000 -d ${{ matrix.data_size }} -P 50 ZREM bench:zset:zrem member:__rand_int__ >> benchmark_kvrocks_pipeline.txt || true
 
-    - name: Run Main benchmark
+    - name: Upload raw benchmark evidence
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: benchmark-raw-${{ matrix.slot_id }}-${{ matrix.data_size }}
+        path: |
+          benchmark_*.txt
+          benchmark_*_suites/
+          benchmark_runner_info.txt
+          nimbis_*.log
+        if-no-files-found: warn
+        overwrite: true
+        retention-days: 14
+
+  benchmark_report:
+    name: Aggregate benchmark report
+    if: ${{ github.event_name == 'pull_request' && needs.benchmark.result == 'success' }}
+    needs: benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@nightly
+
+    - name: Download benchmark evidence
+      uses: actions/download-artifact@v8
+      with:
+        pattern: benchmark-raw-*
+        path: benchmark-artifacts
+        merge-multiple: false
+
+    - name: Build benchmark report harness
+      run: cargo build --package xtask
+
+    - name: Aggregate paired benchmark reports
+      shell: bash
       run: |
-        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/main \
-          ./artifacts/main/target/release/nimbis &
-        NIMBIS_PID=$!
-        trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
-        echo "Nimbis (Main) started with PID $NIMBIS_PID"
-        sleep 10
+        set -euo pipefail
+        mkdir -p benchmark-reports
 
-        echo "Running Benchmark on Main..."
-        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=1 OUTPUT_DIR=benchmark_main_suites \
-          cargo xtask redis-benchmark --profile comparison \
-          > benchmark_main.txt
+        add_baseline_if_present() {
+          local option=$1
+          local name=$2
+          local file=$3
 
-    - name: Run Main benchmark with pipeline
-      run: |
-        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/main-pipeline \
-          ./artifacts/main/target/release/nimbis &
-        NIMBIS_PID=$!
-        trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
-        echo "Nimbis (Main) started with PID $NIMBIS_PID"
-        sleep 10
+          if grep -q 'requests per second' "$file" 2>/dev/null; then
+            compare_args+=("$option" "${name}=${file}")
+          else
+            echo "Skipping unavailable informational baseline: $name ($file)"
+          fi
+        }
 
-        echo "Running Benchmark on Main (Pipeline)..."
-        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=50 OUTPUT_DIR=benchmark_main_pipeline_suites \
-          cargo xtask redis-benchmark --profile comparison \
-          > benchmark_main_pipeline.txt
+        for data_size in 512 1024; do
+          compare_args=()
 
-    - name: Run PR benchmark
-      run: |
-        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/pr \
-          ./artifacts/pr/target/release/nimbis &
-        NIMBIS_PID=$!
-        trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
-        echo "Nimbis (PR) started with PID $NIMBIS_PID"
-        sleep 10
+          for slot in 1 2 3; do
+            slot_dir="benchmark-artifacts/benchmark-raw-${slot}-${data_size}"
+            test -d "$slot_dir"
 
-        echo "Running Benchmark on PR..."
-        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=1 OUTPUT_DIR=benchmark_pr_suites \
-          cargo xtask redis-benchmark --profile comparison \
-          > benchmark_pr.txt
+            for round in 1 2; do
+              compare_args+=(
+                --main "$slot_dir/benchmark_main_round_${round}.txt"
+                --pr "$slot_dir/benchmark_pr_round_${round}.txt"
+                --main-pipeline "$slot_dir/benchmark_main_pipeline_round_${round}.txt"
+                --pr-pipeline "$slot_dir/benchmark_pr_pipeline_round_${round}.txt"
+              )
+            done
 
-    - name: Run PR benchmark with pipeline
-      run: |
-        NIMBIS_OBJECT_STORE_URL=file:nimbis_benchmark_store/pr-pipeline \
-          ./artifacts/pr/target/release/nimbis &
-        NIMBIS_PID=$!
-        trap 'kill $NIMBIS_PID >/dev/null 2>&1 || true' EXIT
-        echo "Nimbis (PR) started with PID $NIMBIS_PID"
-        sleep 10
+            add_baseline_if_present \
+              --baseline Redis "$slot_dir/benchmark_redis.txt"
+            add_baseline_if_present \
+              --baseline PikiwiDB "$slot_dir/benchmark_pikiwidb.txt"
+            add_baseline_if_present \
+              --baseline Kvrocks "$slot_dir/benchmark_kvrocks.txt"
+            add_baseline_if_present \
+              --baseline-pipeline Redis "$slot_dir/benchmark_redis_pipeline.txt"
+            add_baseline_if_present \
+              --baseline-pipeline PikiwiDB "$slot_dir/benchmark_pikiwidb_pipeline.txt"
+            add_baseline_if_present \
+              --baseline-pipeline Kvrocks "$slot_dir/benchmark_kvrocks_pipeline.txt"
+          done
 
-        echo "Running Benchmark on PR (Pipeline)..."
-        N=200000 C=100 R=100000 D=${{ matrix.data_size }} P=50 OUTPUT_DIR=benchmark_pr_pipeline_suites \
-          cargo xtask redis-benchmark --profile comparison \
-          > benchmark_pr_pipeline.txt
+          report_file="benchmark-reports/benchmark_report_${data_size}.md"
+          ./target/debug/xtask compare-benchmarks "${compare_args[@]}" > "$report_file"
 
-    - name: Compare Results
-      run: |
-        cargo xtask compare-benchmarks \
-          --main benchmark_main.txt \
-          --pr benchmark_pr.txt \
-          --baseline "Redis=benchmark_redis.txt" \
-          --baseline "PikiwiDB ${PIKIWIDB_VERSION}=benchmark_pikiwidb.txt" \
-          --baseline "Kvrocks ${KVROCKS_RELEASE}=benchmark_kvrocks.txt" \
-          --main-pipeline benchmark_main_pipeline.txt \
-          --pr-pipeline benchmark_pr_pipeline.txt \
-          --baseline-pipeline "Redis=benchmark_redis_pipeline.txt" \
-          --baseline-pipeline "PikiwiDB ${PIKIWIDB_VERSION}=benchmark_pikiwidb_pipeline.txt" \
-          --baseline-pipeline "Kvrocks ${KVROCKS_RELEASE}=benchmark_kvrocks_pipeline.txt" \
-          > benchmark_report.md
+          {
+            echo
+            echo "<details><summary>Benchmark runner metadata</summary>"
+            echo
+            for slot in 1 2 3; do
+              echo "#### Slot ${slot}"
+              echo
+              echo '```text'
+              cat "benchmark-artifacts/benchmark-raw-${slot}-${data_size}/benchmark_runner_info.txt"
+              echo '```'
+              echo
+            done
+            echo "</details>"
+          } >> "$report_file"
 
-        cat benchmark_report.md
+          cat "$report_file"
+        done
 
-    - name: Comment on PR
+    - name: Comment aggregated reports on PR
       uses: actions/github-script@v9
       with:
         script: |
           const fs = require('fs');
-          const report = fs.readFileSync('benchmark_report.md', 'utf8');
-          const prNumber = context.payload.pull_request.number;
-          const slotId = Number.parseInt('${{ matrix.slot_id }}', 10);
-          const dataSize = Number.parseInt('${{ matrix.data_size }}', 10);
-          const slots = [
-            { id: 1, title: 'First benchmark' },
-            { id: 2, title: 'Second benchmark' },
-            { id: 3, title: 'Third benchmark' },
-          ];
-
-          const slot = slots.find((entry) => entry.id === slotId);
-          if (!slot) {
-            throw new Error(`Unsupported benchmark slot: ${slotId}`);
-          }
-
           const owner = context.repo.owner;
           const repo = context.repo.repo;
-          const markerFor = (slotId, size) => `<!-- benchmark-report-slot:${slotId}:${size} -->`;
-          const formatBody = (slot, reportBody) => [
-            markerFor(slot.id, dataSize),
-            `## ${slot.title} (${dataSize} bytes)`,
-            '',
-            `Workflow run: ${context.runId}`,
-            '',
-            reportBody,
-          ].join('\n');
+          const prNumber = context.payload.pull_request.number;
+          const expectedHeadSha = '${{ github.event.pull_request.head.sha }}';
+          const { data: pullRequest } = await github.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+          });
+          if (pullRequest.head.sha !== expectedHeadSha) {
+            core.warning(
+              `Skipping stale benchmark report for ${expectedHeadSha}; ` +
+                `current PR head is ${pullRequest.head.sha}`,
+            );
+            return;
+          }
 
           const comments = await github.paginate(github.rest.issues.listComments, {
             owner,
@@ -568,22 +778,75 @@ jobs:
             per_page: 100,
           });
 
-          const marker = markerFor(slot.id, dataSize);
-          const existingComment = comments.find((item) => item.body && item.body.includes(marker));
-          const body = formatBody(slot, report);
+          for (const dataSize of [512, 1024]) {
+            const marker = `<!-- benchmark-report-aggregate:${dataSize} -->`;
+            const report = fs.readFileSync(
+              `benchmark-reports/benchmark_report_${dataSize}.md`,
+              'utf8',
+            );
+            const body = [
+              marker,
+              `## Aggregated benchmark (${dataSize} bytes)`,
+              '',
+              '6 paired samples across 3 hosted runners',
+              '',
+              `Workflow run: ${context.runId}`,
+              '',
+              report,
+            ].join('\n');
+            const existingComment = comments.find(
+              (item) => item.body && item.body.includes(marker),
+            );
+            let reportComment;
 
-          if (existingComment) {
-            await github.rest.issues.updateComment({
-              owner,
-              repo,
-              comment_id: existingComment.id,
-              body,
-            });
-          } else {
-            await github.rest.issues.createComment({
-              issue_number: prNumber,
-              owner,
-              repo,
-              body,
-            });
+            if (existingComment) {
+              const response = await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body,
+              });
+              reportComment = response.data;
+            } else {
+              const response = await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+              reportComment = response.data;
+            }
+
+            const legacyPattern = new RegExp(
+              `<!-- benchmark-report-slot:(\\d+):${dataSize} -->`,
+            );
+            const legacyComments = comments.filter(
+              (item) => item.body && legacyPattern.test(item.body),
+            );
+            for (const legacyComment of legacyComments) {
+              const slotId = legacyComment.body.match(legacyPattern)[1];
+              try {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: legacyComment.id,
+                  body: [
+                    `<!-- benchmark-report-slot-superseded:${slotId}:${dataSize} -->`,
+                    `[This per-slot report is superseded by the aggregated report.](${reportComment.html_url})`,
+                  ].join('\n'),
+                });
+              } catch (error) {
+                core.warning(
+                  `Could not mark legacy benchmark comment ${legacyComment.id} as superseded: ${error}`,
+                );
+              }
+            }
           }
+
+    - name: Upload aggregated benchmark reports
+      uses: actions/upload-artifact@v7
+      with:
+        name: benchmark-reports
+        path: benchmark-reports/
+        overwrite: true
+        retention-days: 14

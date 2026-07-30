@@ -51,6 +51,9 @@ C=50 \
 D=128 \
 P=1 \
 R=100000 \
+SEED=1 \
+WARMUP_N=1000 \
+SETTLE_MS=5000 \
 THREADS=4 \
 CSV=1 \
 OUTPUT_DIR=target/redis-benchmark \
@@ -66,6 +69,12 @@ Supported environment variables:
 - `D`: payload size for SET-like benchmark values, default `128`
 - `P`: pipeline depth, default `1`
 - `R`: random key space for `__rand_int__`, default `100000`
+- `SEED`: deterministic `redis-benchmark` random seed, default `1`, maximum
+  `2147483647`
+- `WARMUP_N`: request count before each measured benchmark, default `1000`;
+  set to `0` to disable
+- `SETTLE_MS`: quiet delay after setup and selected write-heavy phases, default
+  `5000`; set to `0` to disable
 - `THREADS`: optional `redis-benchmark --threads` value
 - `CSV`: set to `1` or `true` to use `--csv`; otherwise the xtask uses `-q`
 - `OUTPUT_DIR`: result directory, default `target/redis-benchmark`
@@ -76,7 +85,14 @@ Supported environment variables:
 The same values can be passed as CLI flags:
 
 ```bash
-cargo xtask redis-benchmark --n 10000 --c 100 --p 16 --threads 4
+cargo xtask redis-benchmark \
+  --n 10000 \
+  --c 100 \
+  --p 16 \
+  --seed 42 \
+  --warmup-n 1000 \
+  --settle-ms 5000 \
+  --threads 4
 ```
 
 Extra arguments for `redis-benchmark` can be passed after `--` and are forwarded
@@ -149,9 +165,45 @@ The `comparison` profile is intentionally smaller than `full`. It benchmarks:
 - Built-in tests: `set`, `get`, `hset`, `lpush`, `lpop`, `sadd`, `zadd`
 - Custom commands: `HGET`, `SREM`, `ZREM`
 
+It only pre-populates the random data needed by `SREM` and `ZREM`; fixed HGET
+data is created with `HSET`. The full profile keeps the broader setup required
+by its destructive command coverage.
+
+## CI Comparison Stability
+
+The pull request workflow compares Main and PR on the same hosted runner. Each
+matrix slot runs two paired rounds in opposite order (`Main → PR`, then
+`PR → Main`), with a fresh object-store directory for every process. Both sides
+of a pair use the same random seed. Three matrix slots are aggregated into six
+paired samples for each payload size. The workflow also:
+
+- waits for `PING` instead of relying on a fixed startup sleep
+- prebuilds the xtask so compilation cannot overlap a measurement
+- warms up built-in and read-only custom commands before recording them;
+  destructive custom commands skip warmup so their seeded state stays intact
+- leaves 20-second quiet periods after setup and write-heavy phases to reduce
+  overlap with background flush and compaction work
+- reports the median paired change, median absolute deviation (MAD), and the
+  observed min/max range
+- retains raw round outputs, server logs, and runner metadata as a 14-day
+  workflow artifact
+- cancels superseded PR runs and verifies the current head SHA before updating
+  benchmark comments
+
+The quiet period is a heuristic, not proof that SlateDB is fully quiescent.
+Raw RPS from separate hosted runners can still differ because their CPU
+allocation is not identical; the same-runner paired percentage and its spread
+are the primary regression signals. Redis, PikiwiDB, and Kvrocks RPS values are
+unpaired medians across the available runners and are shown only as
+informational references. An unavailable external baseline does not suppress
+the Main-vs-PR report.
+
 ## Notes
 
 - The xtask requires both `redis-benchmark` and `redis-cli` in `PATH`.
+- Deterministic seeds require `redis-benchmark` 7.2 or newer. CI extracts a
+  pinned 7.2.0 benchmark client while leaving the runner's Redis server package
+  unchanged.
 - The target Nimbis server must already be running.
 - Each suite uses stable key prefixes to reduce cross-test pollution.
 - Destructive commands such as `DEL`, `HDEL`, `SREM`, and `ZREM` are seeded
