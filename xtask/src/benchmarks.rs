@@ -405,18 +405,12 @@ fn parse_named_path(value: &str, benchmark_type: &str) -> Result<(String, String
 
 fn parse_benchmark(content: &str) -> HashMap<String, f64> {
 	let mut map = HashMap::new();
-	let re = Regex::new(r"(.+):\s+([\d\.]+)\s+requests per second").unwrap();
+	let re = Regex::new(r"^([A-Za-z][A-Za-z0-9_]*).*?:\s+([\d.]+)\s+requests per second(?:,|$)")
+		.unwrap();
 
-	for line in content.lines() {
+	for line in content.split(['\r', '\n']) {
 		if let Some(caps) = re.captures(line) {
-			let cmd = caps
-				.get(1)
-				.unwrap()
-				.as_str()
-				.split_whitespace()
-				.next()
-				.unwrap_or_default()
-				.trim_matches('\r');
+			let cmd = caps.get(1).unwrap().as_str();
 			let rps_str = caps.get(2).unwrap().as_str();
 			if let Ok(rps) = rps_str.parse::<f64>() {
 				map.insert(cmd.to_string(), rps);
@@ -496,6 +490,22 @@ mod tests {
 
 		assert_eq!(parsed.get("HGET"), Some(&123.45));
 		assert!(!parsed.contains_key("field1"));
+	}
+
+	#[test]
+	fn parse_benchmark_ignores_carriage_return_progress_lines() {
+		let content = concat!(
+			"\rSET: rps=55540.0 (overall: 55099.2) avg_msec=1.046",
+			"\rSET: 52342.32 requests per second, p50=1.063 msec\n",
+			"\rSADD: rps=1000.0 (overall: 1000.0) avg_msec=1.000",
+			"\rSADD: 900.25 requests per second, p50=1.100 msec\n",
+		);
+		let parsed = parse_benchmark(content);
+
+		assert_eq!(parsed.get("SET"), Some(&52342.32));
+		assert_eq!(parsed.get("SADD"), Some(&900.25));
+		assert!(!parsed.contains_key("SET:"));
+		assert!(!parsed.contains_key("SADD:"));
 	}
 
 	#[test]
