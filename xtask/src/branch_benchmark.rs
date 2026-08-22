@@ -9,6 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Child;
 use std::process::Command;
+use std::process::Output;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -787,16 +788,24 @@ impl ServerProcess {
 					Err(error) => last_error = error,
 				}
 				if !saw_listening_marker {
-					thread::sleep(Duration::from_millis(100));
+					thread::sleep(
+						deadline
+							.saturating_duration_since(Instant::now())
+							.min(Duration::from_millis(100)),
+					);
 					continue;
 				}
 			}
 
 			self.ensure_running("after binding the benchmark port")?;
-			match Command::new(redis_cli)
-				.args(["-h", host, "-p", &port.to_string(), "--raw", "PING"])
-				.output()
-			{
+			let mut probe = Command::new(redis_cli);
+			probe.args(["-h", host, "-p", &port.to_string(), "--raw", "PING"]);
+			match run_command_until(
+				&mut probe,
+				deadline,
+				cancellation,
+				"redis-cli readiness probe",
+			) {
 				Ok(output) if output.status.success() => {
 					cancellation.check()?;
 					let response = String::from_utf8_lossy(&output.stdout);
@@ -809,9 +818,16 @@ impl ServerProcess {
 				Ok(output) => {
 					last_error = String::from_utf8_lossy(&output.stderr).trim().to_string();
 				}
-				Err(error) => last_error = error.to_string(),
+				Err(error) => {
+					cancellation.check()?;
+					last_error = error;
+				}
 			}
-			thread::sleep(Duration::from_millis(100));
+			thread::sleep(
+				deadline
+					.saturating_duration_since(Instant::now())
+					.min(Duration::from_millis(100)),
+			);
 		}
 
 		Err(format!(
@@ -932,6 +948,55 @@ fn run_checked(
 			"Failed to {description}: process exited with {status}"
 		))
 	}
+}
+
+fn run_command_until(
+	command: &mut Command,
+	deadline: Instant,
+	cancellation: &Cancellation,
+	description: &str,
+) -> Result<Output, String> {
+	cancellation.check()?;
+	let mut child = command
+		.stdin(Stdio::null())
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
+		.spawn()
+		.map_err(|error| format!("Failed to start {description}: {error}"))?;
+
+	loop {
+		if let Err(error) = cancellation.check() {
+			stop_child(&mut child);
+			return Err(error);
+		}
+		let now = Instant::now();
+		if now >= deadline {
+			stop_child(&mut child);
+			return Err(format!("{description} exceeded the startup deadline"));
+		}
+		match child.try_wait() {
+			Ok(Some(_)) => {
+				return child
+					.wait_with_output()
+					.map_err(|error| format!("Failed to collect {description} output: {error}"));
+			}
+			Ok(None) => {}
+			Err(error) => {
+				stop_child(&mut child);
+				return Err(format!("Failed to inspect {description}: {error}"));
+			}
+		}
+		thread::sleep(
+			deadline
+				.saturating_duration_since(Instant::now())
+				.min(Duration::from_millis(20)),
+		);
+	}
+}
+
+fn stop_child(child: &mut Child) {
+	let _ = child.kill();
+	let _ = child.wait();
 }
 
 fn warn_if_worktree_is_dirty(workspace_root: &Path) -> Result<(), String> {
@@ -1159,5 +1224,33 @@ mod tests {
 		assert!(error.contains("redis-benchmark disconnected"));
 		assert!(error.contains("Server cleanup also failed"));
 		assert!(error.contains("Server log: bind failed"));
+	}
+
+	#[test]
+	fn readiness_probe_honors_the_startup_deadline() {
+		let mut command = Command::new(env::current_exe().unwrap());
+		command.args([
+			"--ignored",
+			"--exact",
+			"branch_benchmark::tests::hanging_probe_child",
+		]);
+		let started = Instant::now();
+
+		let error = run_command_until(
+			&mut command,
+			started + Duration::from_millis(100),
+			&Cancellation::new(),
+			"test readiness probe",
+		)
+		.unwrap_err();
+
+		assert_eq!(error, "test readiness probe exceeded the startup deadline");
+		assert!(started.elapsed() < Duration::from_secs(2));
+	}
+
+	#[test]
+	#[ignore = "helper process for readiness_probe_honors_the_startup_deadline"]
+	fn hanging_probe_child() {
+		thread::sleep(Duration::from_secs(10));
 	}
 }

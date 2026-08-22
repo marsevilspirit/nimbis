@@ -38,12 +38,18 @@ redis-bench *args:
 # Compare redis-benchmark results for two Git refs
 [positional-arguments]
 [group: 'test']
-redis-bench-compare base="main" head="HEAD" *args:
+redis-bench-compare *args:
     #!/usr/bin/env bash
-    base="$1"
-    head="$2"
-    shift 2
-    exec cargo xtask redis-benchmark-compare --base "$base" --head "$head" "$@"
+    ref_args=()
+    if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+        ref_args+=(--base "$1")
+        shift
+    fi
+    if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+        ref_args+=(--head "$1")
+        shift
+    fi
+    exec cargo xtask redis-benchmark-compare "${ref_args[@]}" "$@"
 
 # Check all crates
 [group: 'check']
