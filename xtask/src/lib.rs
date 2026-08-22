@@ -1,4 +1,5 @@
 pub mod benchmarks;
+pub mod branch_benchmark;
 pub mod checks;
 pub mod redis_benchmark;
 

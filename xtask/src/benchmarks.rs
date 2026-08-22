@@ -35,6 +35,18 @@ pub struct Args {
 	/// Baseline pipeline benchmark output file in the form <name=path>
 	#[arg(long = "baseline-pipeline", value_name = "NAME=PATH")]
 	pub baseline_pipelines: Vec<String>,
+
+	/// Label used for the main/base result columns.
+	#[arg(long, default_value = "Main")]
+	pub main_label: String,
+
+	/// Label used for the PR/head result columns.
+	#[arg(long, default_value = "PR")]
+	pub pr_label: String,
+
+	/// Pipeline depth represented by the pipeline result files.
+	#[arg(long, default_value_t = 50)]
+	pub pipeline_depth: u64,
 }
 
 pub fn compare_benchmarks(args: Args) -> Result<(), String> {
@@ -54,6 +66,8 @@ pub fn build_report(args: &Args) -> Result<String, String> {
 		&main_map,
 		&pr_map,
 		&baselines,
+		&args.main_label,
+		&args.pr_label,
 	);
 	report.push('\n');
 	report.push_str("---\n\n");
@@ -67,10 +81,15 @@ pub fn build_report(args: &Args) -> Result<String, String> {
 
 	push_comparison_table(
 		&mut report,
-		"### Pipeline Benchmark Comparison (-P 50) ⚡",
+		&format!(
+			"### Pipeline Benchmark Comparison (-P {}) ⚡",
+			args.pipeline_depth
+		),
 		&main_pipeline_map,
 		&pr_pipeline_map,
 		&baseline_pipelines,
+		&args.main_label,
+		&args.pr_label,
 	);
 	report.push('\n');
 	report.push_str("*Comparison triggered by automated benchmark.*\n");
@@ -91,6 +110,7 @@ fn read_and_parse_benchmarks(
 
 	let main_map = parse_benchmark(&main_content);
 	let pr_map = parse_benchmark(&pr_content);
+	validate_comparison_maps(&main_map, &pr_map, benchmark_type)?;
 	let baselines = baseline_files
 		.iter()
 		.map(|entry| {
@@ -110,19 +130,21 @@ fn push_comparison_table(
 	main_map: &BenchmarkMap,
 	pr_map: &BenchmarkMap,
 	baselines: &[NamedBenchmarkMap],
+	main_label: &str,
+	pr_label: &str,
 ) {
 	report.push_str(title);
 	report.push_str("\n\n");
 
 	let mut headers = vec![
 		"Command".to_string(),
-		"PR RPS".to_string(),
-		"Main RPS".to_string(),
+		format!("{} RPS", sanitize_markdown_table_text(pr_label)),
+		format!("{} RPS", sanitize_markdown_table_text(main_label)),
 	];
 	for (name, _) in baselines {
 		headers.push(format!("{} RPS", sanitize_markdown_table_text(name)));
 	}
-	headers.push("vs Main".to_string());
+	headers.push(format!("vs {}", sanitize_markdown_table_text(main_label)));
 	for (name, _) in baselines {
 		headers.push(format!("vs {}", sanitize_markdown_table_text(name)));
 	}
@@ -198,6 +220,47 @@ fn push_comparison_table(
 	}
 }
 
+fn validate_comparison_maps(
+	main_map: &BenchmarkMap,
+	pr_map: &BenchmarkMap,
+	benchmark_type: &str,
+) -> Result<(), String> {
+	let type_label = if benchmark_type.is_empty() {
+		"standard"
+	} else {
+		benchmark_type
+	};
+	if main_map.is_empty() {
+		return Err(format!(
+			"No parseable commands found in main {type_label} benchmark output"
+		));
+	}
+	if pr_map.is_empty() {
+		return Err(format!(
+			"No parseable commands found in pr {type_label} benchmark output"
+		));
+	}
+
+	let main_commands = main_map.keys().collect::<BTreeSet<_>>();
+	let pr_commands = pr_map.keys().collect::<BTreeSet<_>>();
+	if main_commands != pr_commands {
+		let missing_from_pr = main_commands
+			.difference(&pr_commands)
+			.map(|value| value.as_str())
+			.collect::<Vec<_>>();
+		let missing_from_main = pr_commands
+			.difference(&main_commands)
+			.map(|value| value.as_str())
+			.collect::<Vec<_>>();
+		return Err(format!(
+			"Mismatched {type_label} benchmark commands; missing from pr: [{}]; missing from main: [{}]",
+			missing_from_pr.join(", "),
+			missing_from_main.join(", ")
+		));
+	}
+	Ok(())
+}
+
 fn sanitize_markdown_table_text(value: &str) -> String {
 	value
 		.lines()
@@ -224,20 +287,14 @@ fn parse_named_path(value: &str, benchmark_type: &str) -> Result<(String, String
 	Ok((trimmed_name.to_string(), trimmed_path.to_string()))
 }
 
-fn parse_benchmark(content: &str) -> HashMap<String, f64> {
+pub(crate) fn parse_benchmark(content: &str) -> HashMap<String, f64> {
 	let mut map = HashMap::new();
-	let re = Regex::new(r"(.+):\s+([\d\.]+)\s+requests per second").unwrap();
+	let re = Regex::new(r"^([[:alnum:]_-]+)\b.*?:\s+(\d+(?:\.\d+)?)\s+requests per second(?:,|$)")
+		.unwrap();
 
-	for line in content.lines() {
+	for line in content.split(['\n', '\r']).map(str::trim) {
 		if let Some(caps) = re.captures(line) {
-			let cmd = caps
-				.get(1)
-				.unwrap()
-				.as_str()
-				.split_whitespace()
-				.next()
-				.unwrap_or_default()
-				.trim_matches('\r');
+			let cmd = caps.get(1).unwrap().as_str();
 			let rps_str = caps.get(2).unwrap().as_str();
 			if let Ok(rps) = rps_str.parse::<f64>() {
 				map.insert(cmd.to_string(), rps);
@@ -253,14 +310,13 @@ mod tests {
 
 	#[test]
 	fn report_contains_default_and_pipeline_tables() {
-		let dir = std::env::temp_dir().join(format!("nimbis-xtask-bench-{}", std::process::id()));
-		std::fs::create_dir_all(&dir).unwrap();
-		let main = dir.join("main.txt");
-		let pr = dir.join("pr.txt");
-		let baseline = dir.join("redis.txt");
-		let main_pipeline = dir.join("main_pipeline.txt");
-		let pr_pipeline = dir.join("pr_pipeline.txt");
-		let baseline_pipeline = dir.join("redis_pipeline.txt");
+		let dir = tempfile::tempdir().unwrap();
+		let main = dir.path().join("main.txt");
+		let pr = dir.path().join("pr.txt");
+		let baseline = dir.path().join("redis.txt");
+		let main_pipeline = dir.path().join("main_pipeline.txt");
+		let pr_pipeline = dir.path().join("pr_pipeline.txt");
+		let baseline_pipeline = dir.path().join("redis_pipeline.txt");
 
 		std::fs::write(&main, "SET: 100.00 requests per second\n").unwrap();
 		std::fs::write(&pr, "SET: 110.00 requests per second\n").unwrap();
@@ -276,6 +332,9 @@ mod tests {
 			main_pipeline: main_pipeline.display().to_string(),
 			pr_pipeline: pr_pipeline.display().to_string(),
 			baseline_pipelines: vec![format!("Redis={}", baseline_pipeline.display())],
+			main_label: "Main".into(),
+			pr_label: "PR".into(),
+			pipeline_depth: 50,
 		};
 
 		let report = build_report(&args).unwrap();
@@ -284,16 +343,81 @@ mod tests {
 		assert!(report.contains("### Pipeline Benchmark Comparison (-P 50) ⚡"));
 		assert!(report.contains("| SET | 110.00 | 100.00 | 90.00 | ✅ +10.00% | 🏆 +22.22% |"));
 		assert!(report.contains("| GET | 190.00 | 200.00 | 180.00 | -5.00% | 🏆 +5.56% |"));
+	}
 
-		std::fs::remove_dir_all(dir).unwrap();
+	#[test]
+	fn report_uses_custom_labels_and_pipeline_depth() {
+		let dir = tempfile::tempdir().unwrap();
+		let main = dir.path().join("main.txt");
+		let pr = dir.path().join("pr.txt");
+		let main_pipeline = dir.path().join("main_pipeline.txt");
+		let pr_pipeline = dir.path().join("pr_pipeline.txt");
+		std::fs::write(&main, "SET: 100.00 requests per second\n").unwrap();
+		std::fs::write(&pr, "SET: 110.00 requests per second\n").unwrap();
+		std::fs::write(&main_pipeline, "SET: 200.00 requests per second\n").unwrap();
+		std::fs::write(&pr_pipeline, "SET: 220.00 requests per second\n").unwrap();
+
+		let report = build_report(&Args {
+			main: main.display().to_string(),
+			pr: pr.display().to_string(),
+			baselines: Vec::new(),
+			main_pipeline: main_pipeline.display().to_string(),
+			pr_pipeline: pr_pipeline.display().to_string(),
+			baseline_pipelines: Vec::new(),
+			main_label: "main".into(),
+			pr_label: "feature|fast".into(),
+			pipeline_depth: 16,
+		})
+		.unwrap();
+
+		assert!(report.contains("feature\\|fast RPS"));
+		assert!(report.contains("main RPS"));
+		assert!(report.contains("Pipeline Benchmark Comparison (-P 16)"));
+	}
+
+	#[test]
+	fn report_rejects_mismatched_command_sets() {
+		let dir = tempfile::tempdir().unwrap();
+		let main = dir.path().join("main.txt");
+		let pr = dir.path().join("pr.txt");
+		std::fs::write(&main, "SET: 100.00 requests per second\n").unwrap();
+		std::fs::write(&pr, "GET: 110.00 requests per second\n").unwrap();
+
+		let error = read_and_parse_benchmarks(
+			&main.display().to_string(),
+			&pr.display().to_string(),
+			&[],
+			"",
+		)
+		.unwrap_err();
+
+		assert!(error.contains("Mismatched standard benchmark commands"));
+		assert!(error.contains("missing from pr: [SET]"));
+		assert!(error.contains("missing from main: [GET]"));
 	}
 
 	#[test]
 	fn parse_benchmark_uses_command_token_for_custom_commands() {
-		let content = "HGET bench:hash field1: 123.45 requests per second\n";
+		let content = "HGET bench:hash field1: 123.45 requests per second, p50=0.095 msec\n";
 		let parsed = parse_benchmark(content);
 
 		assert_eq!(parsed.get("HGET"), Some(&123.45));
 		assert!(!parsed.contains_key("field1"));
+	}
+
+	#[test]
+	fn parse_benchmark_ignores_carriage_return_progress_updates() {
+		let content = concat!(
+			"SET: rps=0.0 (overall: 0.0) avg_msec=0.000\r",
+			"SET: 10000.00 requests per second, p50=0.063 msec\n",
+			"GET: rps=0.0 (overall: 0.0) avg_msec=0.000\r",
+			"GET: 9000.00 requests per second, p50=0.039 msec\n",
+		);
+
+		let parsed = parse_benchmark(content);
+
+		assert_eq!(parsed.get("SET"), Some(&10000.0));
+		assert_eq!(parsed.get("GET"), Some(&9000.0));
+		assert_eq!(parsed.len(), 2);
 	}
 }

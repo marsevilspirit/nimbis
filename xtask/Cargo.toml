@@ -8,12 +8,11 @@ repository.workspace = true
 
 [dependencies]
 clap = { workspace = true }
+ctrlc = { workspace = true }
 regex = { workspace = true }
+tempfile = { workspace = true }
 toml_edit = { workspace = true }
 walkdir = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
 
 [lib]
 doctest = false

@@ -35,6 +35,22 @@ bench package="" *args:
 redis-bench *args:
     cargo xtask redis-benchmark {{args}}
 
+# Compare redis-benchmark results for two Git refs
+[positional-arguments]
+[group: 'test']
+redis-bench-compare *args:
+    #!/usr/bin/env bash
+    ref_args=()
+    if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+        ref_args+=(--base "$1")
+        shift
+    fi
+    if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+        ref_args+=(--head "$1")
+        shift
+    fi
+    exec cargo xtask redis-benchmark-compare "${ref_args[@]}" "$@"
+
 # Check all crates
 [group: 'check']
 check: check-workspace check-code-fmt check-numbered-comments
