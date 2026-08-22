@@ -164,7 +164,7 @@ mod tests {
 		use crate::string::meta::HashMetaValue;
 
 		// Setup string_db using local temp dir
-		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::new()));
+		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::generate()));
 		tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 		let object_store = Arc::new(LocalFileSystem::new_with_prefix(&temp_dir).unwrap());
 
@@ -240,7 +240,7 @@ mod tests {
 		use crate::string::meta::SetMetaValue;
 
 		// Setup string_db
-		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::new()));
+		let temp_dir = std::env::temp_dir().join(format!("nimbis-test-{}", ulid::Ulid::generate()));
 		tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 		let object_store = Arc::new(LocalFileSystem::new_with_prefix(&temp_dir).unwrap());
 

@@ -44,6 +44,7 @@ impl CmdMeta {
 }
 
 /// Command trait - all commands must implement this
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Cmd: Send + Sync {
 	/// Get command metadata

@@ -290,7 +290,7 @@ mod tests {
 	use super::*;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
-		let timestamp = ulid::Ulid::new().to_string();
+		let timestamp = ulid::Ulid::generate().to_string();
 		let path = std::env::temp_dir().join(format!("nimbis_test_{}", timestamp));
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
