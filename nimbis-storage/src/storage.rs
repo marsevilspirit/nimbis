@@ -367,7 +367,7 @@ mod tests {
 
 	#[fixture]
 	async fn ctx() -> TestContext {
-		let timestamp = ulid::Ulid::new().to_string();
+		let timestamp = ulid::Ulid::generate().to_string();
 		let path = std::env::temp_dir().join(format!("nimbis_test_storage_{}", timestamp));
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
@@ -377,7 +377,7 @@ mod tests {
 	#[rstest]
 	#[tokio::test]
 	async fn test_open_object_store_uses_url_path_and_shard_prefix() {
-		let timestamp = ulid::Ulid::new().to_string();
+		let timestamp = ulid::Ulid::generate().to_string();
 		let path = std::env::temp_dir().join(format!("nimbis_test_object_store_{}", timestamp));
 		let url = local_path_url(path.as_path()).unwrap();
 

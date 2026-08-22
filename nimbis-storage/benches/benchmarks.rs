@@ -21,7 +21,7 @@ fn bench_path(name: &str) -> PathBuf {
 	std::env::temp_dir().join(format!(
 		"nimbis_storage_bench_{}_{}",
 		name,
-		ulid::Ulid::new()
+		ulid::Ulid::generate()
 	))
 }
 
