@@ -35,6 +35,11 @@ bench package="" *args:
 redis-bench *args:
     cargo xtask redis-benchmark {{args}}
 
+# Compare redis-benchmark results for two Git refs
+[group: 'test']
+redis-bench-compare base="main" head="HEAD" *args:
+    cargo xtask redis-benchmark-compare --base {{quote(base)}} --head {{quote(head)}} {{args}}
+
 # Check all crates
 [group: 'check']
 check: check-workspace check-code-fmt check-numbered-comments

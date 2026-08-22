@@ -62,6 +62,24 @@ cargo xtask compare-benchmarks \
 The benchmark workflow uses this command to generate the pull request benchmark
 report.
 
+Optional `--main-label`, `--pr-label`, and `--pipeline-depth` arguments customize
+the report columns and pipeline heading. Their defaults preserve the CI report's
+`Main`, `PR`, and `P=50` labels.
+
+### `redis-benchmark-compare`
+
+Builds two committed Git refs in an isolated temporary clone, runs the Redis
+comparison profile against both release binaries, and prints a Markdown report.
+Each binary is benchmarked sequentially with fresh local storage at `P=1` and
+`P=50`, so the two servers do not compete for local CPU or I/O resources.
+
+```bash
+cargo xtask redis-benchmark-compare --base main --head HEAD
+```
+
+The command does not switch the current worktree. `HEAD` refers to its committed
+state, so uncommitted changes are not included.
+
 ## Requirements
 
 - Rust toolchain as specified in `rust-toolchain.toml`

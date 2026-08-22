@@ -39,6 +39,43 @@ N=1000 C=10 P=16 just redis-bench
 
 Results are written to `target/redis-benchmark/` and are also printed to stdout.
 
+## Compare Git Branches Locally
+
+Use the branch comparison recipe to build two committed Git refs, benchmark both
+release binaries, and print a relative Markdown report in the terminal:
+
+```bash
+just redis-bench-compare main HEAD
+```
+
+The default refs are `main` and `HEAD`, so the shorter form is equivalent:
+
+```bash
+just redis-bench-compare
+```
+
+The command runs the same comparison workload against each ref at `P=1` and
+`P=50`. Runs are sequential to prevent the servers from competing for local CPU
+and I/O resources. Every run uses an isolated local file store, a dynamically
+selected loopback port, and a real `PING` readiness check. The current worktree
+is not switched or modified; uncommitted changes are not part of `HEAD`.
+
+Defaults match one 512-byte pull request benchmark slot (`N=200000`, `C=100`,
+`D=512`, and `R=100000`). Existing environment variables and command options can
+be used for a smaller local run:
+
+```bash
+N=1000 C=10 D=128 R=1000 SEED_N=1000 \
+  just redis-bench-compare main feature/my-change --pipeline-depth 16
+```
+
+Raw suite output, server logs, and `report.md` are retained below
+`target/redis-benchmark-compare/`. Set `COMPARE_OUTPUT_DIR` or pass
+`--output-dir` to choose another parent directory. The release build cache is
+retained in that parent's `build-cache/` directory to speed up later comparisons.
+The temporary source clone and object stores are removed after the command
+finishes.
+
 ## Configuration
 
 The xtask is configured with environment variables or equivalent CLI flags.
@@ -152,7 +189,8 @@ The `comparison` profile is intentionally smaller than `full`. It benchmarks:
 ## Notes
 
 - The xtask requires both `redis-benchmark` and `redis-cli` in `PATH`.
-- The target Nimbis server must already be running.
+- For `just redis-bench`, the target Nimbis server must already be running. The
+  branch comparison command builds and starts both servers automatically.
 - Each suite uses stable key prefixes to reduce cross-test pollution.
 - Destructive commands such as `DEL`, `HDEL`, `SREM`, and `ZREM` are seeded
   before benchmarking so they do not benchmark an entirely cold miss path.

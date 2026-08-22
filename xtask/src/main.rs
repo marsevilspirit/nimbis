@@ -3,6 +3,7 @@ use std::path::Path;
 use clap::Parser;
 use clap::Subcommand;
 use xtask::benchmarks;
+use xtask::branch_benchmark;
 use xtask::checks;
 use xtask::redis_benchmark;
 use xtask::write_stderr_line;
@@ -24,6 +25,8 @@ enum Command {
 	CheckNumberedComments,
 	/// Compare benchmark outputs and print a Markdown report.
 	CompareBenchmarks(benchmarks::Args),
+	/// Compare Redis benchmark results for two Git refs.
+	RedisBenchmarkCompare(branch_benchmark::Args),
 	/// Run redis-benchmark against a running Nimbis server.
 	RedisBenchmark(redis_benchmark::Args),
 }
@@ -48,6 +51,7 @@ fn execute(command: Command, workspace_root: &Path) -> Result<(), String> {
 		Command::CheckCodeFmt => checks::check_code_fmt(workspace_root),
 		Command::CheckNumberedComments => checks::check_numbered_comments(workspace_root),
 		Command::CompareBenchmarks(args) => benchmarks::compare_benchmarks(args),
+		Command::RedisBenchmarkCompare(args) => branch_benchmark::run(args, workspace_root),
 		Command::RedisBenchmark(args) => redis_benchmark::run(args, workspace_root),
 	}
 }

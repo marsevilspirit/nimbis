@@ -14,6 +14,9 @@ use clap::ValueEnum;
 use crate::write_stdout_line;
 
 const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd";
+pub(crate) const COMPARISON_PROFILE_COMMANDS: &[&str] = &[
+	"GET", "HGET", "HSET", "LPOP", "LPUSH", "SADD", "SET", "SREM", "ZADD", "ZREM",
+];
 
 #[derive(ClapArgs, Debug, Default)]
 pub struct Args {
@@ -52,6 +55,11 @@ pub struct Args {
 	/// Use redis-benchmark --csv output instead of -q.
 	#[arg(long)]
 	pub csv: bool,
+
+	/// Ignore CSV=1 and force parseable quiet output for internal callers.
+	#[arg(skip)]
+	#[doc(hidden)]
+	pub force_quiet: bool,
 
 	/// Result directory.
 	#[arg(long)]
@@ -125,7 +133,7 @@ impl Config {
 			pipeline: option_or_env_u64(args.pipeline, "P", 1)?,
 			random_keyspace: option_or_env_u64(args.random_keyspace, "R", 100000)?,
 			threads: option_or_env_optional_u64(args.threads, "THREADS")?,
-			csv: args.csv || env_bool("CSV"),
+			csv: !args.force_quiet && (args.csv || env_bool("CSV")),
 			output_dir,
 			seed_requests: option_or_env_u64(args.seed_requests, "SEED_N", requests)?,
 			redis_benchmark: option_or_env_string(
@@ -560,23 +568,20 @@ impl Runner for ProcessRunner {
 	}
 }
 
-fn require_cmd(program: &str) -> Result<(), String> {
-	if program.contains(std::path::MAIN_SEPARATOR) {
-		if Path::new(program).exists() {
-			return Ok(());
-		}
-		return Err(format!("required command '{program}' was not found"));
-	}
-
-	for path in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
-		let candidate = path.join(program);
-		if candidate.exists() {
-			return Ok(());
-		}
-	}
-	Err(format!(
-		"required command '{program}' was not found in PATH"
-	))
+pub(crate) fn require_cmd(program: &str) -> Result<(), String> {
+	Command::new(program)
+		.arg("--version")
+		.stdout(Stdio::null())
+		.stderr(Stdio::null())
+		.status()
+		.map(|_| ())
+		.map_err(|error| {
+			if error.kind() == std::io::ErrorKind::NotFound {
+				format!("required command '{program}' was not found")
+			} else {
+				format!("required command '{program}' could not be executed: {error}")
+			}
+		})
 }
 
 fn resolve_output_dir(workspace_root: &Path, output_dir: &str) -> PathBuf {
@@ -601,7 +606,7 @@ fn slugify(value: &str) -> String {
 		.collect()
 }
 
-fn option_or_env_string(value: Option<&str>, env_name: &str, default: &str) -> String {
+pub(crate) fn option_or_env_string(value: Option<&str>, env_name: &str, default: &str) -> String {
 	value
 		.map(ToOwned::to_owned)
 		.or_else(|| env::var(env_name).ok())
@@ -621,7 +626,11 @@ fn option_or_env_u16(value: Option<u16>, env_name: &str, default: u16) -> Result
 		.unwrap_or(Ok(default))
 }
 
-fn option_or_env_u64(value: Option<u64>, env_name: &str, default: u64) -> Result<u64, String> {
+pub(crate) fn option_or_env_u64(
+	value: Option<u64>,
+	env_name: &str,
+	default: u64,
+) -> Result<u64, String> {
 	if let Some(value) = value {
 		return Ok(value);
 	}
@@ -634,7 +643,10 @@ fn option_or_env_u64(value: Option<u64>, env_name: &str, default: u64) -> Result
 		.unwrap_or(Ok(default))
 }
 
-fn option_or_env_optional_u64(value: Option<u64>, env_name: &str) -> Result<Option<u64>, String> {
+pub(crate) fn option_or_env_optional_u64(
+	value: Option<u64>,
+	env_name: &str,
+) -> Result<Option<u64>, String> {
 	if value.is_some() {
 		return Ok(value);
 	}
@@ -714,10 +726,6 @@ mod tests {
 		"ZRANGE",
 		"ZREM",
 		"ZSCORE",
-	];
-
-	const BENCHMARKED_COMPARISON_PROFILE_COMMANDS: &[&str] = &[
-		"GET", "HGET", "HSET", "LPOP", "LPUSH", "SADD", "SET", "SREM", "ZADD", "ZREM",
 	];
 
 	impl FakeRunner {
@@ -858,6 +866,20 @@ mod tests {
 	}
 
 	#[test]
+	fn force_quiet_overrides_csv_for_report_callers() {
+		let args = Args {
+			csv: true,
+			force_quiet: true,
+			..Args::default()
+		};
+		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
+
+		assert_eq!(config.output_ext(), "txt");
+		assert!(config.benchmark_base_args().contains(&"-q".to_string()));
+		assert!(!config.benchmark_base_args().contains(&"--csv".to_string()));
+	}
+
+	#[test]
 	fn benchmark_base_args_include_threads_when_requested() {
 		let args = Args {
 			threads: Some(4),
@@ -982,7 +1004,7 @@ mod tests {
 		);
 		assert_eq!(
 			runner.streamed_commands(),
-			benchmarked_command_set(BENCHMARKED_COMPARISON_PROFILE_COMMANDS)
+			benchmarked_command_set(COMPARISON_PROFILE_COMMANDS)
 		);
 		assert!(!config.output_dir.join("hello_2.txt").exists());
 	}
