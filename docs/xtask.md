@@ -70,8 +70,9 @@ the report columns and pipeline heading. Their defaults preserve the CI report's
 
 Builds two committed Git refs in an isolated temporary clone, runs the Redis
 comparison profile against both release binaries, and prints a Markdown report.
-Each binary is benchmarked sequentially with fresh local storage at `P=1` and
-`P=50`, so the two servers do not compete for local CPU or I/O resources.
+Each binary is benchmarked sequentially with fresh local storage at `P=1` and a
+configurable pipeline depth (default `P=50`), so the two servers do not compete
+for local CPU or I/O resources.
 
 ```bash
 cargo xtask redis-benchmark-compare --base main --head HEAD

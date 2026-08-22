@@ -54,11 +54,13 @@ The default refs are `main` and `HEAD`, so the shorter form is equivalent:
 just redis-bench-compare
 ```
 
-The command runs the same comparison workload against each ref at `P=1` and
-`P=50`. Runs are sequential to prevent the servers from competing for local CPU
-and I/O resources. Every run uses an isolated local file store, a dynamically
-selected loopback port, and a real `PING` readiness check. The current worktree
-is not switched or modified; uncommitted changes are not part of `HEAD`.
+The command runs the same comparison workload against each ref at `P=1` and a
+configurable pipeline depth (default `P=50`). Runs are sequential to prevent the
+servers from competing for local CPU and I/O resources. Every run uses an
+isolated local file store and a dynamically selected loopback port. Readiness is
+accepted only after the child reports that it owns the port and answers a real
+`PING`. The current worktree is not switched or modified; uncommitted changes
+are not part of `HEAD`.
 
 Defaults match one 512-byte pull request benchmark slot (`N=200000`, `C=100`,
 `D=512`, and `R=100000`). Existing environment variables and command options can
@@ -74,7 +76,8 @@ Raw suite output, server logs, and `report.md` are retained below
 `--output-dir` to choose another parent directory. The release build cache is
 retained in that parent's `build-cache/` directory to speed up later comparisons.
 The temporary source clone and object stores are removed after the command
-finishes.
+finishes. Pressing Ctrl-C requests a graceful stop so those temporary resources
+and any running child server are cleaned up before exit.
 
 ## Configuration
 

@@ -3,12 +3,16 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::fs::TryLockError;
 use std::net::TcpListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Child;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -218,7 +222,50 @@ struct BenchmarkTarget {
 	binary: PathBuf,
 }
 
+#[derive(Clone, Debug)]
+struct Cancellation {
+	requested: Arc<AtomicBool>,
+}
+
+impl Cancellation {
+	fn install() -> Result<Self, String> {
+		let cancellation = Self::new();
+		let signal_cancellation = cancellation.clone();
+		ctrlc::set_handler(move || signal_cancellation.request())
+			.map_err(|error| format!("Failed to install Ctrl-C handler: {error}"))?;
+		Ok(cancellation)
+	}
+
+	fn new() -> Self {
+		Self {
+			requested: Arc::new(AtomicBool::new(false)),
+		}
+	}
+
+	fn request(&self) {
+		self.requested.store(true, Ordering::SeqCst);
+	}
+
+	fn check(&self) -> Result<(), String> {
+		if self.requested.load(Ordering::SeqCst) {
+			Err("Benchmark comparison interrupted".into())
+		} else {
+			Ok(())
+		}
+	}
+}
+
 pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
+	let cancellation = Cancellation::install()?;
+	run_with_cancellation(args, workspace_root, &cancellation)
+}
+
+fn run_with_cancellation(
+	args: Args,
+	workspace_root: &Path,
+	cancellation: &Cancellation,
+) -> Result<(), String> {
+	cancellation.check()?;
 	let config = Config::from_args(args, workspace_root)?;
 	let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
 
@@ -226,10 +273,13 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 	redis_benchmark::require_cmd(&cargo)?;
 	redis_benchmark::require_cmd(&config.redis_benchmark)?;
 	redis_benchmark::require_cmd(&config.redis_cli)?;
+	cancellation.check()?;
 
 	let base_commit = resolve_commit(workspace_root, &config.base_ref)?;
+	cancellation.check()?;
 	let head_commit = resolve_commit(workspace_root, &config.head_ref)?;
 	warn_if_worktree_is_dirty(workspace_root)?;
+	cancellation.check()?;
 	if base_commit == head_commit {
 		return Err(format!(
 			"base '{}' and head '{}' resolve to the same commit {}",
@@ -269,7 +319,7 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 	write_stdout_line(&format!("Artifacts: {}", run_dir.display()))?;
 	write_stdout_line("")?;
 
-	clone_repository(workspace_root, &clone_dir)?;
+	clone_repository(workspace_root, &clone_dir, cancellation)?;
 	let base_binary = build_binary(
 		&cargo,
 		&clone_dir,
@@ -277,6 +327,7 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 		&base_commit,
 		"base",
 		temporary.path(),
+		cancellation,
 	)?;
 	let head_binary = build_binary(
 		&cargo,
@@ -285,6 +336,7 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 		&head_commit,
 		"head",
 		temporary.path(),
+		cancellation,
 	)?;
 
 	let base = BenchmarkTarget {
@@ -298,8 +350,24 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 		binary: head_binary,
 	};
 
-	let base_output = run_benchmark_pass(&config, &base, "base-p1", 1, &run_dir, temporary.path())?;
-	let head_output = run_benchmark_pass(&config, &head, "head-p1", 1, &run_dir, temporary.path())?;
+	let base_output = run_benchmark_pass(
+		&config,
+		&base,
+		"base-p1",
+		1,
+		&run_dir,
+		temporary.path(),
+		cancellation,
+	)?;
+	let head_output = run_benchmark_pass(
+		&config,
+		&head,
+		"head-p1",
+		1,
+		&run_dir,
+		temporary.path(),
+		cancellation,
+	)?;
 	let base_pipeline_output = run_benchmark_pass(
 		&config,
 		&base,
@@ -307,6 +375,7 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 		config.pipeline_depth,
 		&run_dir,
 		temporary.path(),
+		cancellation,
 	)?;
 	let head_pipeline_output = run_benchmark_pass(
 		&config,
@@ -315,8 +384,10 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 		config.pipeline_depth,
 		&run_dir,
 		temporary.path(),
+		cancellation,
 	)?;
 
+	cancellation.check()?;
 	let comparison = benchmarks::build_report(&benchmarks::Args {
 		main: base_output.display().to_string(),
 		pr: head_output.display().to_string(),
@@ -336,6 +407,7 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 	write_stdout("\n")?;
 	write_stdout(&report)?;
 	write_stdout_line(&format!("\nArtifacts: {}", run_dir.display()))?;
+	cancellation.check()?;
 	Ok(())
 }
 
@@ -355,7 +427,11 @@ fn resolve_commit(workspace_root: &Path, git_ref: &str) -> Result<String, String
 		.map_err(|error| format!("Git returned an invalid commit for '{git_ref}': {error}"))
 }
 
-fn clone_repository(workspace_root: &Path, clone_dir: &Path) -> Result<(), String> {
+fn clone_repository(
+	workspace_root: &Path,
+	clone_dir: &Path,
+	cancellation: &Cancellation,
+) -> Result<(), String> {
 	write_stdout_line("Cloning the local repository into an isolated temporary workspace...")?;
 	run_checked(
 		Command::new("git")
@@ -369,6 +445,7 @@ fn clone_repository(workspace_root: &Path, clone_dir: &Path) -> Result<(), Strin
 			.arg(workspace_root)
 			.arg(clone_dir),
 		"clone the local repository",
+		cancellation,
 	)
 }
 
@@ -379,6 +456,7 @@ fn build_binary(
 	commit: &str,
 	label: &str,
 	temporary_root: &Path,
+	cancellation: &Cancellation,
 ) -> Result<PathBuf, String> {
 	write_stdout_line(&format!(
 		"Building {label} commit {} in release mode...",
@@ -389,14 +467,16 @@ fn build_binary(
 			.current_dir(clone_dir)
 			.args(["checkout", "--quiet", "--detach", commit]),
 		&format!("check out {label} commit"),
+		cancellation,
 	)?;
-	let build_lock = lock_build_cache(target_dir)?;
+	let build_lock = lock_build_cache(target_dir, cancellation)?;
 	run_checked(
 		Command::new(cargo)
 			.current_dir(clone_dir)
 			.args(["build", "--release", "--package", "nimbis", "--target-dir"])
 			.arg(target_dir),
 		&format!("build {label} commit"),
+		cancellation,
 	)?;
 
 	let executable = format!("nimbis{}", env::consts::EXE_SUFFIX);
@@ -418,11 +498,12 @@ fn build_binary(
 			binary.display()
 		)
 	})?;
+	cancellation.check()?;
 	drop(build_lock);
 	Ok(binary)
 }
 
-fn lock_build_cache(target_dir: &Path) -> Result<File, String> {
+fn lock_build_cache(target_dir: &Path, cancellation: &Cancellation) -> Result<File, String> {
 	fs::create_dir_all(target_dir)
 		.map_err(|error| format!("Failed to create {}: {error}", target_dir.display()))?;
 	let lock_path = target_dir.join("branch-compare.lock");
@@ -433,9 +514,21 @@ fn lock_build_cache(target_dir: &Path) -> Result<File, String> {
 		.truncate(false)
 		.open(&lock_path)
 		.map_err(|error| format!("Failed to open {}: {error}", lock_path.display()))?;
-	lock.lock()
-		.map_err(|error| format!("Failed to lock {}: {error}", lock_path.display()))?;
-	Ok(lock)
+	loop {
+		cancellation.check()?;
+		match lock.try_lock() {
+			Ok(()) => {
+				cancellation.check()?;
+				return Ok(lock);
+			}
+			Err(TryLockError::WouldBlock) => {
+				thread::sleep(Duration::from_millis(100));
+			}
+			Err(TryLockError::Error(error)) => {
+				return Err(format!("Failed to lock {}: {error}", lock_path.display()));
+			}
+		}
+	}
 }
 
 fn run_benchmark_pass(
@@ -445,7 +538,9 @@ fn run_benchmark_pass(
 	pipeline: u64,
 	run_dir: &Path,
 	temporary_root: &Path,
+	cancellation: &Cancellation,
 ) -> Result<PathBuf, String> {
+	cancellation.check()?;
 	write_stdout_line(&format!(
 		"\n==> {} ({}) with pipeline depth {}",
 		target.ref_name,
@@ -474,7 +569,14 @@ fn run_benchmark_pass(
 		port,
 		config.runtime_threads,
 	)?;
-	server.wait_until_ready(&config.redis_cli, "127.0.0.1", port, config.startup_timeout)?;
+	server.wait_until_ready(
+		&config.redis_cli,
+		"127.0.0.1",
+		port,
+		config.startup_timeout,
+		cancellation,
+	)?;
+	cancellation.check()?;
 
 	let benchmark_result = redis_benchmark::run(
 		redis_benchmark::Args {
@@ -498,17 +600,38 @@ fn run_benchmark_pass(
 		run_dir,
 	);
 	let stop_result = server.stop();
-	benchmark_result.map_err(|error| {
-		format!(
-			"Benchmark failed for {} at pipeline depth {pipeline}: {error}",
-			target.ref_name
-		)
-	})?;
-	stop_result?;
+	finish_benchmark_pass(
+		cancellation,
+		&target.ref_name,
+		pipeline,
+		benchmark_result,
+		stop_result,
+	)?;
 
 	let combined_output = run_dir.join(format!("{slot}.txt"));
 	combine_suite_outputs(&suites_dir, &combined_output)?;
 	Ok(combined_output)
+}
+
+fn finish_benchmark_pass(
+	cancellation: &Cancellation,
+	target_ref: &str,
+	pipeline: u64,
+	benchmark_result: Result<(), String>,
+	stop_result: Result<(), String>,
+) -> Result<(), String> {
+	cancellation.check()?;
+	let format_benchmark_error =
+		|error| format!("Benchmark failed for {target_ref} at pipeline depth {pipeline}: {error}");
+	match (benchmark_result, stop_result) {
+		(Ok(()), Ok(())) => Ok(()),
+		(Err(error), Ok(())) => Err(format_benchmark_error(error)),
+		(Ok(()), Err(error)) => Err(error),
+		(Err(benchmark_error), Err(stop_error)) => Err(format!(
+			"{}\nServer cleanup also failed: {stop_error}",
+			format_benchmark_error(benchmark_error)
+		)),
+	}
 }
 
 fn build_full_report(
@@ -620,7 +743,7 @@ impl ServerProcess {
 		command
 			.current_dir(runtime_dir)
 			.args(["--host", "127.0.0.1", "--port", &port.to_string()])
-			.args(["--log-level", "error"])
+			.args(["--log-level", "error,nimbis::server=info"])
 			.env("NIMBIS_OBJECT_STORE_URL", "file:nimbis_store")
 			.env("NIMBIS_TRACE_ENABLED", "false")
 			.stdout(Stdio::from(log))
@@ -646,28 +769,39 @@ impl ServerProcess {
 		host: &str,
 		port: u16,
 		timeout: Duration,
+		cancellation: &Cancellation,
 	) -> Result<(), String> {
 		let deadline = Instant::now() + timeout;
 		let mut last_error = "server was not probed".to_string();
+		let mut saw_listening_marker = false;
 		while Instant::now() < deadline {
-			let child = self.child.as_mut().expect("server child should exist");
-			if let Some(status) = child
-				.try_wait()
-				.map_err(|error| format!("Failed to inspect Nimbis process: {error}"))?
-			{
-				return Err(format!(
-					"Nimbis exited before becoming ready with status {status}.{}",
-					self.log_context()
-				));
+			cancellation.check()?;
+			self.ensure_running("before becoming ready")?;
+
+			if !saw_listening_marker {
+				match log_contains_listening_marker(&self.log_path, host, port) {
+					Ok(true) => saw_listening_marker = true,
+					Ok(false) => {
+						last_error = "waiting for the Nimbis listening marker".into();
+					}
+					Err(error) => last_error = error,
+				}
+				if !saw_listening_marker {
+					thread::sleep(Duration::from_millis(100));
+					continue;
+				}
 			}
 
+			self.ensure_running("after binding the benchmark port")?;
 			match Command::new(redis_cli)
 				.args(["-h", host, "-p", &port.to_string(), "--raw", "PING"])
 				.output()
 			{
 				Ok(output) if output.status.success() => {
+					cancellation.check()?;
 					let response = String::from_utf8_lossy(&output.stdout);
 					if response.trim() == "PONG" {
+						self.ensure_running("after answering the readiness probe")?;
 						return Ok(());
 					}
 					last_error = format!("unexpected PING response: {}", response.trim());
@@ -686,19 +820,39 @@ impl ServerProcess {
 		))
 	}
 
+	fn ensure_running(&mut self, phase: &str) -> Result<(), String> {
+		let status = self
+			.child
+			.as_mut()
+			.expect("server child should exist")
+			.try_wait()
+			.map_err(|error| format!("Failed to inspect Nimbis process: {error}"))?;
+		if let Some(status) = status {
+			return Err(format!(
+				"Nimbis exited {phase} with status {status}.{}",
+				self.log_context()
+			));
+		}
+		Ok(())
+	}
+
 	fn stop(&mut self) -> Result<(), String> {
 		let Some(child) = self.child.as_mut() else {
 			return Ok(());
 		};
-		if child
+		if let Some(status) = child
 			.try_wait()
 			.map_err(|error| format!("Failed to inspect Nimbis process: {error}"))?
-			.is_none()
 		{
-			child
-				.kill()
-				.map_err(|error| format!("Failed to stop Nimbis process: {error}"))?;
+			self.child = None;
+			return Err(format!(
+				"Nimbis exited unexpectedly before benchmark cleanup with status {status}.{}",
+				self.log_context()
+			));
 		}
+		child
+			.kill()
+			.map_err(|error| format!("Failed to stop Nimbis process: {error}"))?;
 		child
 			.wait()
 			.map_err(|error| format!("Failed to reap Nimbis process: {error}"))?;
@@ -714,6 +868,12 @@ impl ServerProcess {
 			_ => format!(" Server log: {}", self.log_path.display()),
 		}
 	}
+}
+
+fn log_contains_listening_marker(log_path: &Path, host: &str, port: u16) -> Result<bool, String> {
+	let log = fs::read_to_string(log_path)
+		.map_err(|error| format!("Failed to read {}: {error}", log_path.display()))?;
+	Ok(log.contains(&format!("Nimbis server listening on {host}:{port}")))
 }
 
 impl Drop for ServerProcess {
@@ -755,10 +915,16 @@ fn ensure_port_available(port: u16) -> Result<(), String> {
 		.map_err(|error| format!("Port {port} is not available on 127.0.0.1: {error}"))
 }
 
-fn run_checked(command: &mut Command, description: &str) -> Result<(), String> {
+fn run_checked(
+	command: &mut Command,
+	description: &str,
+	cancellation: &Cancellation,
+) -> Result<(), String> {
+	cancellation.check()?;
 	let status = command
 		.status()
 		.map_err(|error| format!("Failed to {description}: {error}"))?;
+	cancellation.check()?;
 	if status.success() {
 		Ok(())
 	} else {
@@ -931,5 +1097,67 @@ mod tests {
 		assert!(report.contains("`N=100`, `C=2`, `D=16`, `R=10`, `SEED_N=20`"));
 		assert!(report.contains("Profiles: `P=1` and `P=50`"));
 		assert!(report.contains("redis-benchmark `3`, Nimbis runtime `4`"));
+	}
+
+	#[test]
+	fn listening_marker_matches_the_expected_address() {
+		let dir = tempdir().unwrap();
+		let log_path = dir.path().join("server.log");
+		fs::write(
+			&log_path,
+			"INFO nimbis::server: Nimbis server listening on 127.0.0.1:6380\n",
+		)
+		.unwrap();
+
+		assert!(log_contains_listening_marker(&log_path, "127.0.0.1", 6380).unwrap());
+		assert!(!log_contains_listening_marker(&log_path, "127.0.0.1", 6381).unwrap());
+	}
+
+	#[test]
+	fn cancellation_reports_an_interrupted_comparison() {
+		let cancellation = Cancellation::new();
+		assert!(cancellation.check().is_ok());
+
+		cancellation.request();
+
+		assert_eq!(
+			cancellation.check().unwrap_err(),
+			"Benchmark comparison interrupted"
+		);
+	}
+
+	#[test]
+	fn build_cache_lock_wait_can_be_cancelled() {
+		let dir = tempdir().unwrap();
+		let first = lock_build_cache(dir.path(), &Cancellation::new()).unwrap();
+		let cancellation = Cancellation::new();
+		let signal_cancellation = cancellation.clone();
+		let signal = thread::spawn(move || {
+			thread::sleep(Duration::from_millis(20));
+			signal_cancellation.request();
+		});
+
+		let error = lock_build_cache(dir.path(), &cancellation).unwrap_err();
+		signal.join().unwrap();
+		drop(first);
+
+		assert_eq!(error, "Benchmark comparison interrupted");
+	}
+
+	#[test]
+	fn benchmark_and_server_failures_are_both_reported() {
+		let error = finish_benchmark_pass(
+			&Cancellation::new(),
+			"feature/perf",
+			50,
+			Err("redis-benchmark disconnected".into()),
+			Err("Nimbis exited unexpectedly. Server log: bind failed".into()),
+		)
+		.unwrap_err();
+
+		assert!(error.contains("Benchmark failed for feature/perf at pipeline depth 50"));
+		assert!(error.contains("redis-benchmark disconnected"));
+		assert!(error.contains("Server cleanup also failed"));
+		assert!(error.contains("Server log: bind failed"));
 	}
 }

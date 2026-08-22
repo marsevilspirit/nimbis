@@ -36,9 +36,14 @@ redis-bench *args:
     cargo xtask redis-benchmark {{args}}
 
 # Compare redis-benchmark results for two Git refs
+[positional-arguments]
 [group: 'test']
 redis-bench-compare base="main" head="HEAD" *args:
-    cargo xtask redis-benchmark-compare --base {{quote(base)}} --head {{quote(head)}} {{args}}
+    #!/usr/bin/env bash
+    base="$1"
+    head="$2"
+    shift 2
+    exec cargo xtask redis-benchmark-compare --base "$base" --head "$head" "$@"
 
 # Check all crates
 [group: 'check']
