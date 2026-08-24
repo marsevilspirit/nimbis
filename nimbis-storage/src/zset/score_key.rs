@@ -1,6 +1,12 @@
+use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+
+use crate::error::DecoderError;
+use crate::error::StorageError;
+use crate::top_level_key::MAX_ENCODED_KEY_LEN;
+use crate::top_level_key::TopLevelKey;
 
 #[derive(Debug, PartialEq)]
 pub struct ScoreKey {
@@ -18,7 +24,7 @@ impl ScoreKey {
 		}
 	}
 
-	pub fn encode(&self) -> Bytes {
+	pub fn encode(&self) -> Result<Bytes, StorageError> {
 		// Key format: len(user_key) (u16 BE) + user_key + b'S' +
 		// score (u64 big endian, bit flipped) + member We use a custom encoding for
 		// f64 to ensure correct sorting order. IEEE 754 floats don't sort correctly
@@ -34,16 +40,30 @@ impl ScoreKey {
 
 		let encoded_score = Self::encode_score(self.score);
 
-		let user_key_len = self.user_key.len() as u16;
+		let top_level_key = TopLevelKey::new(self.user_key.clone())?;
+		let suffix_len =
+			9usize
+				.checked_add(self.member.len())
+				.ok_or(StorageError::InvalidKeyLength {
+					length: usize::MAX,
+					max: MAX_ENCODED_KEY_LEN,
+				})?;
+		top_level_key.ensure_suffix_len(suffix_len)?;
 
-		let mut bytes =
-			BytesMut::with_capacity(2 + self.user_key.len() + 1 + 8 + self.member.len());
-		bytes.put_u16(user_key_len);
-		bytes.extend_from_slice(&self.user_key);
-		bytes.put_u8(b'S');
-		bytes.put_u64(encoded_score);
-		bytes.extend_from_slice(&self.member);
-		bytes.freeze()
+		let mut suffix = BytesMut::with_capacity(suffix_len);
+		suffix.put_u8(b'S');
+		suffix.put_u64(encoded_score);
+		suffix.extend_from_slice(&self.member);
+		top_level_key.with_suffix(&suffix)
+	}
+
+	pub(crate) fn decode(encoded: &[u8]) -> Result<Self, DecoderError> {
+		let (user_key, mut suffix) = TopLevelKey::decode_prefix(encoded)?;
+		if suffix.len() < 9 || suffix.get_u8() != b'S' {
+			return Err(DecoderError::InvalidLength);
+		}
+		let score = Self::decode_score(suffix.get_u64());
+		Ok(Self::new(user_key, score, Bytes::copy_from_slice(suffix)))
 	}
 
 	/// Encode an f64 score into a u64 for byte-sortable storage.
@@ -71,9 +91,12 @@ impl ScoreKey {
 		f64::from_bits(bits)
 	}
 
-	/// Returns the user_key from this score key.
-	pub fn user_key(&self) -> &Bytes {
-		&self.user_key
+	pub(crate) fn score(&self) -> f64 {
+		self.score
+	}
+
+	pub(crate) fn member(&self) -> &Bytes {
+		&self.member
 	}
 }
 

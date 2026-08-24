@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
@@ -9,13 +7,26 @@ use crate::data_type::DataType;
 use crate::error::DecoderError;
 use crate::string::value::StringValue;
 
-/// Trait for top-level values and collection metadata that carry TTL and type
-/// information.
-pub trait MetaValue: Sized {
+/// Common state carried by a decoded top-level row.
+///
+/// Concrete typed values implement this through [`TopLevelValue`], while
+/// [`AnyValue`] implements it directly for lifecycle and migration code. This
+/// keeps on-disk row normalization independent from the caller's decode mode.
+pub(crate) trait TopLevelState: Sized {
+	fn decode_state(bytes: &[u8]) -> Result<Self, DecoderError>;
+	fn data_type(&self) -> DataType;
+	fn embedded_expire_time(&self) -> Option<u64>;
+	fn set_embedded_expire_time(&mut self, timestamp: u64);
+	fn resolve_pending_generation(&mut self, row_sequence: u64);
+}
+
+/// Value stored in a typed database's top-level row.
+pub(crate) trait TopLevelValue: Sized {
+	const DATA_TYPE: DataType;
+	const HAS_EMBEDDED_EXPIRATION: bool = true;
+
 	/// Decode the value from bytes.
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError>;
-	/// Check if the given type code matches this meta value type.
-	fn is_type_match(type_code: u8) -> bool;
 	/// Encode the value to bytes.
 	fn encode(&self) -> Bytes;
 	/// Get the expiration timestamp in milliseconds since Unix epoch.
@@ -23,48 +34,54 @@ pub trait MetaValue: Sized {
 	fn expire_time(&self) -> u64;
 	/// Set the expiration timestamp in milliseconds since Unix epoch.
 	fn set_expire_time(&mut self, timestamp: u64);
-	/// Return the collection generation used to hide stale sub-keys.
-	///
-	/// A zero generation is pending: when metadata and the first sub-keys share
-	/// a WriteBatch, readers resolve it to the metadata row's commit sequence.
-	fn version(&self) -> Option<u64> {
+	/// Return the collection generation, if this value has one.
+	fn generation(&self) -> Option<u64> {
 		None
 	}
-	/// Replace the collection generation after resolving a pending version.
-	fn set_version(&mut self, _version: u64) {}
-	/// Get the remaining time until expiration.
-	fn remaining_ttl(&self) -> Option<Duration> {
-		let expire_time = self.expire_time();
-		if expire_time == 0 {
-			return None;
+	/// Replace the collection generation.
+	fn set_generation(&mut self, _generation: u64) {}
+
+	fn resolve_pending_generation(&mut self, row_sequence: u64) {
+		if self.generation() == Some(0) {
+			self.set_generation(row_sequence);
 		}
-		let now = match u64::try_from(chrono::Utc::now().timestamp_millis()) {
-			Ok(now) => now,
-			Err(_) => return Some(Duration::from_millis(expire_time)),
-		};
-		if now >= expire_time {
-			return Some(Duration::ZERO);
-		}
-		Some(Duration::from_millis(expire_time - now))
-	}
-	/// Return the expected data type for this meta value, if specific.
-	/// Used for better error messages on type mismatch.
-	fn data_type() -> Option<DataType> {
-		None
 	}
 }
 
-impl MetaValue for StringValue {
+/// Metadata shared by collection types that use a generation to hide stale
+/// sub-keys.
+pub(crate) trait CollectionMeta: TopLevelValue {}
+
+impl<T: TopLevelValue> TopLevelState for T {
+	fn decode_state(bytes: &[u8]) -> Result<Self, DecoderError> {
+		T::decode(bytes)
+	}
+
+	fn data_type(&self) -> DataType {
+		T::DATA_TYPE
+	}
+
+	fn embedded_expire_time(&self) -> Option<u64> {
+		T::HAS_EMBEDDED_EXPIRATION.then(|| self.expire_time())
+	}
+
+	fn set_embedded_expire_time(&mut self, timestamp: u64) {
+		if T::HAS_EMBEDDED_EXPIRATION {
+			self.set_expire_time(timestamp);
+		}
+	}
+
+	fn resolve_pending_generation(&mut self, row_sequence: u64) {
+		TopLevelValue::resolve_pending_generation(self, row_sequence);
+	}
+}
+
+impl TopLevelValue for StringValue {
+	const DATA_TYPE: DataType = DataType::String;
+	const HAS_EMBEDDED_EXPIRATION: bool = false;
+
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
-	}
-
-	fn is_type_match(type_code: u8) -> bool {
-		type_code == DataType::String as u8
-	}
-
-	fn data_type() -> Option<DataType> {
-		Some(DataType::String)
 	}
 
 	fn encode(&self) -> Bytes {
@@ -76,26 +93,6 @@ impl MetaValue for StringValue {
 	}
 
 	fn set_expire_time(&mut self, _timestamp: u64) {}
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MetaKey {
-	user_key: Bytes,
-}
-
-impl MetaKey {
-	pub fn new(user_key: impl Into<Bytes>) -> Self {
-		Self {
-			user_key: user_key.into(),
-		}
-	}
-
-	pub fn encode(&self) -> Bytes {
-		let mut buf = BytesMut::with_capacity(2 + self.user_key.len());
-		buf.put_u16(self.user_key.len() as u16);
-		buf.extend_from_slice(&self.user_key);
-		buf.freeze()
-	}
 }
 
 #[derive(Debug, PartialEq)]
@@ -148,17 +145,11 @@ impl HashMetaValue {
 	}
 }
 
-impl MetaValue for HashMetaValue {
+impl TopLevelValue for HashMetaValue {
+	const DATA_TYPE: DataType = DataType::Hash;
+
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
-	}
-
-	fn is_type_match(type_code: u8) -> bool {
-		type_code == DataType::Hash as u8
-	}
-
-	fn data_type() -> Option<DataType> {
-		Some(DataType::Hash)
 	}
 
 	fn encode(&self) -> Bytes {
@@ -173,14 +164,16 @@ impl MetaValue for HashMetaValue {
 		self.expire_time = timestamp;
 	}
 
-	fn version(&self) -> Option<u64> {
+	fn generation(&self) -> Option<u64> {
 		Some(self.version)
 	}
 
-	fn set_version(&mut self, version: u64) {
-		self.version = version;
+	fn set_generation(&mut self, generation: u64) {
+		self.version = generation;
 	}
 }
+
+impl CollectionMeta for HashMetaValue {}
 
 #[derive(Debug, PartialEq)]
 pub struct ListMetaValue {
@@ -241,17 +234,11 @@ impl ListMetaValue {
 	}
 }
 
-impl MetaValue for ListMetaValue {
+impl TopLevelValue for ListMetaValue {
+	const DATA_TYPE: DataType = DataType::List;
+
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
-	}
-
-	fn is_type_match(type_code: u8) -> bool {
-		type_code == DataType::List as u8
-	}
-
-	fn data_type() -> Option<DataType> {
-		Some(DataType::List)
 	}
 
 	fn encode(&self) -> Bytes {
@@ -266,14 +253,16 @@ impl MetaValue for ListMetaValue {
 		self.expire_time = timestamp;
 	}
 
-	fn version(&self) -> Option<u64> {
+	fn generation(&self) -> Option<u64> {
 		Some(self.version)
 	}
 
-	fn set_version(&mut self, version: u64) {
-		self.version = version;
+	fn set_generation(&mut self, generation: u64) {
+		self.version = generation;
 	}
 }
+
+impl CollectionMeta for ListMetaValue {}
 
 #[derive(Debug, PartialEq)]
 pub struct SetMetaValue {
@@ -325,17 +314,11 @@ impl SetMetaValue {
 	}
 }
 
-impl MetaValue for SetMetaValue {
+impl TopLevelValue for SetMetaValue {
+	const DATA_TYPE: DataType = DataType::Set;
+
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
-	}
-
-	fn is_type_match(type_code: u8) -> bool {
-		type_code == DataType::Set as u8
-	}
-
-	fn data_type() -> Option<DataType> {
-		Some(DataType::Set)
 	}
 
 	fn encode(&self) -> Bytes {
@@ -350,14 +333,16 @@ impl MetaValue for SetMetaValue {
 		self.expire_time = timestamp;
 	}
 
-	fn version(&self) -> Option<u64> {
+	fn generation(&self) -> Option<u64> {
 		Some(self.version)
 	}
 
-	fn set_version(&mut self, version: u64) {
-		self.version = version;
+	fn set_generation(&mut self, generation: u64) {
+		self.version = generation;
 	}
 }
+
+impl CollectionMeta for SetMetaValue {}
 
 #[derive(Debug, PartialEq)]
 pub struct ZSetMetaValue {
@@ -409,17 +394,11 @@ impl ZSetMetaValue {
 	}
 }
 
-impl MetaValue for ZSetMetaValue {
+impl TopLevelValue for ZSetMetaValue {
+	const DATA_TYPE: DataType = DataType::ZSet;
+
 	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
-	}
-
-	fn is_type_match(type_code: u8) -> bool {
-		type_code == DataType::ZSet as u8
-	}
-
-	fn data_type() -> Option<DataType> {
-		Some(DataType::ZSet)
 	}
 
 	fn encode(&self) -> Bytes {
@@ -434,17 +413,19 @@ impl MetaValue for ZSetMetaValue {
 		self.expire_time = timestamp;
 	}
 
-	fn version(&self) -> Option<u64> {
+	fn generation(&self) -> Option<u64> {
 		Some(self.version)
 	}
 
-	fn set_version(&mut self, version: u64) {
-		self.version = version;
+	fn set_generation(&mut self, generation: u64) {
+		self.version = generation;
 	}
 }
 
-/// Enum representing any value or metadata stored in the string database.
-pub enum AnyValue {
+impl CollectionMeta for ZSetMetaValue {}
+
+/// A decoded top-level row used by typed keyspace lifecycle operations.
+pub(crate) enum AnyValue {
 	String(StringValue),
 	Hash(HashMetaValue),
 	List(ListMetaValue),
@@ -453,7 +434,7 @@ pub enum AnyValue {
 }
 
 impl AnyValue {
-	pub fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+	pub(crate) fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
 		if bytes.is_empty() {
 			return Err(DecoderError::Empty);
 		}
@@ -467,7 +448,7 @@ impl AnyValue {
 		}
 	}
 
-	pub fn data_type(&self) -> DataType {
+	pub(crate) fn data_type(&self) -> DataType {
 		match self {
 			Self::String(_) => DataType::String,
 			Self::Hash(_) => DataType::Hash,
@@ -477,7 +458,7 @@ impl AnyValue {
 		}
 	}
 
-	pub fn encode(&self) -> Bytes {
+	pub(crate) fn encode(&self) -> Bytes {
 		match self {
 			Self::String(v) => v.encode(),
 			Self::Hash(v) => v.encode(),
@@ -487,7 +468,7 @@ impl AnyValue {
 		}
 	}
 
-	pub fn version(&self) -> Option<u64> {
+	pub(crate) fn version(&self) -> Option<u64> {
 		match self {
 			Self::String(_) => None,
 			Self::Hash(v) => Some(v.version),
@@ -528,44 +509,53 @@ impl From<ZSetMetaValue> for AnyValue {
 	}
 }
 
-impl MetaValue for AnyValue {
-	fn decode(bytes: &[u8]) -> Result<Self, DecoderError> {
+impl TopLevelState for AnyValue {
+	fn decode_state(bytes: &[u8]) -> Result<Self, DecoderError> {
 		Self::decode(bytes)
 	}
 
-	fn is_type_match(_type_code: u8) -> bool {
-		true
+	fn data_type(&self) -> DataType {
+		self.data_type()
 	}
 
-	fn encode(&self) -> Bytes {
-		self.encode()
-	}
-
-	fn expire_time(&self) -> u64 {
+	fn embedded_expire_time(&self) -> Option<u64> {
 		match self {
-			Self::String(v) => v.expire_time(),
-			Self::Hash(v) => v.expire_time(),
-			Self::List(v) => v.expire_time(),
-			Self::Set(v) => v.expire_time(),
-			Self::ZSet(v) => v.expire_time(),
+			Self::String(_) => None,
+			Self::Hash(value) => Some(value.expire_time),
+			Self::List(value) => Some(value.expire_time),
+			Self::Set(value) => Some(value.expire_time),
+			Self::ZSet(value) => Some(value.expire_time),
 		}
 	}
 
-	fn set_expire_time(&mut self, timestamp: u64) {
+	fn set_embedded_expire_time(&mut self, timestamp: u64) {
+		self.set_expire_time(timestamp);
+	}
+
+	fn resolve_pending_generation(&mut self, row_sequence: u64) {
+		if self.version() == Some(0) {
+			self.set_version(row_sequence);
+		}
+	}
+}
+
+impl AnyValue {
+	#[cfg(test)]
+	pub(crate) fn expire_time(&self) -> u64 {
+		self.embedded_expire_time().unwrap_or(0)
+	}
+
+	pub(crate) fn set_expire_time(&mut self, timestamp: u64) {
 		match self {
-			Self::String(v) => v.set_expire_time(timestamp),
-			Self::Hash(v) => v.set_expire_time(timestamp),
-			Self::List(v) => v.set_expire_time(timestamp),
-			Self::Set(v) => v.set_expire_time(timestamp),
-			Self::ZSet(v) => v.set_expire_time(timestamp),
+			Self::String(_) => {}
+			Self::Hash(v) => v.expire_time = timestamp,
+			Self::List(v) => v.expire_time = timestamp,
+			Self::Set(v) => v.expire_time = timestamp,
+			Self::ZSet(v) => v.expire_time = timestamp,
 		}
 	}
 
-	fn version(&self) -> Option<u64> {
-		self.version()
-	}
-
-	fn set_version(&mut self, version: u64) {
+	pub(crate) fn set_version(&mut self, version: u64) {
 		match self {
 			Self::String(_) => {}
 			Self::Hash(v) => v.version = version,
@@ -578,17 +568,7 @@ impl MetaValue for AnyValue {
 
 #[cfg(test)]
 mod tests {
-	use rstest::rstest;
-
 	use super::*;
-
-	#[rstest]
-	#[case("mykey", b"\x00\x05mykey")]
-	#[case("", b"\x00\x00")]
-	fn test_meta_key_encode(#[case] key: &str, #[case] expected: &[u8]) {
-		let meta_key = MetaKey::new(Bytes::copy_from_slice(key.as_bytes()));
-		assert_eq!(&meta_key.encode()[..], expected);
-	}
 
 	#[test]
 	fn test_hash_meta_value_encode() {
@@ -693,26 +673,5 @@ mod tests {
 		let encoded = val.encode();
 		let decoded = ZSetMetaValue::decode(&encoded).unwrap();
 		assert_eq!(decoded, val);
-	}
-
-	#[test]
-	fn test_remaining_ttl() {
-		let mut val = HashMetaValue::new(1, 10);
-
-		// Case 1: No expiration
-		val.expire_time = 0;
-		assert_eq!(val.remaining_ttl(), None);
-
-		// Case 2: Expired
-		val.expire_time =
-			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
-		assert_eq!(val.remaining_ttl(), Some(Duration::ZERO));
-
-		// Case 3: Future expiration
-		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
-		val.expire_time = future;
-		let ttl = val.remaining_ttl().unwrap();
-		assert!(ttl > Duration::ZERO);
-		assert!(ttl <= Duration::from_millis(10000));
 	}
 }

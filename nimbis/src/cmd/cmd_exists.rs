@@ -6,7 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::utils::parse_data_type;
+use super::typed_key_args::TypedKeysArgs;
 
 pub struct ExistsCmd {
 	meta: CmdMeta,
@@ -30,15 +30,12 @@ impl Cmd for ExistsCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let data_type = match parse_data_type(&args[0]) {
-			Ok(data_type) => data_type,
+		let args = match TypedKeysArgs::parse(args) {
+			Ok(args) => args,
 			Err(error) => return RespValue::error(error),
 		};
 
-		match storage
-			.exists_many(data_type, args[1..].iter().cloned())
-			.await
-		{
+		match storage.exists_many(args.data_type(), args.keys()).await {
 			Ok(count) => RespValue::Integer(count),
 			Err(e) => RespValue::Error(Bytes::from(e.to_string())),
 		}

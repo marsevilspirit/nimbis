@@ -20,7 +20,9 @@ var _ = Describe("Same-Name Typed Keyspaces", func() {
 		"same_name_del",
 		"same_name_del_a",
 		"same_name_del_b",
+		"same_name_missing",
 		"same_name_expire",
+		"same_name_empty_values",
 		"key:shared:🔑",
 	}
 
@@ -225,5 +227,43 @@ var _ = Describe("Same-Name Typed Keyspaces", func() {
 		Expect(rdb.LRange(ctx, key, 0, -1).Val()).To(Equal([]string{"list:星"}))
 		Expect(rdb.SMembers(ctx, key).Val()).To(ConsistOf("set:云"))
 		Expect(rdb.ZRange(ctx, key, 0, -1).Val()).To(Equal([]string{"zset:雨"}))
+	})
+
+	It("keeps empty payloads isolated across typed namespaces", func() {
+		key := "same_name_empty_values"
+		Expect(rdb.Set(ctx, key, "", 0).Err()).To(Succeed())
+		Expect(rdb.HSet(ctx, key, "", "").Err()).To(Succeed())
+		Expect(rdb.RPush(ctx, key, "").Err()).To(Succeed())
+		Expect(rdb.SAdd(ctx, key, "").Err()).To(Succeed())
+		Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: ""}).Err()).To(Succeed())
+
+		value, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(value).To(BeEmpty())
+		hashValue, err := rdb.HGet(ctx, key, "").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hashValue).To(BeEmpty())
+		Expect(rdb.LRange(ctx, key, 0, -1).Val()).To(Equal([]string{""}))
+		Expect(rdb.SMembers(ctx, key).Val()).To(ConsistOf(""))
+		Expect(rdb.ZRange(ctx, key, 0, -1).Val()).To(Equal([]string{""}))
+
+		for _, keyType := range []util.KeyType{
+			util.StringType,
+			util.HashType,
+			util.ListType,
+			util.SetType,
+			util.ZSetType,
+		} {
+			expectTypedExists(keyType, key, 1)
+		}
+
+		deleted, err := util.Del(ctx, rdb, util.HashType, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleted).To(Equal(int64(1)))
+		Expect(rdb.HGet(ctx, key, "").Err()).To(Equal(redis.Nil))
+		expectTypedExists(util.StringType, key, 1)
+		expectTypedExists(util.ListType, key, 1)
+		expectTypedExists(util.SetType, key, 1)
+		expectTypedExists(util.ZSetType, key, 1)
 	})
 })

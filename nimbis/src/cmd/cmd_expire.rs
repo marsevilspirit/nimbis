@@ -2,11 +2,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
+use nimbis_storage::StorageError;
 
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
-use super::utils::parse_data_type;
+use super::typed_key_args::TypedKeyArgs;
 use super::utils::parse_int;
 
 #[derive(Debug, Clone)]
@@ -32,11 +33,11 @@ impl Cmd for ExpireCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let data_type = match parse_data_type(&args[0]) {
-			Ok(data_type) => data_type,
+		let typed_key = match TypedKeyArgs::parse(args) {
+			Ok(typed_key) => typed_key,
 			Err(error) => return RespValue::error(error),
 		};
-		let key = args[1].clone();
+		let (data_type, key) = typed_key.into_parts();
 		let seconds = match parse_int::<u64>(&args[2]) {
 			Ok(s) => s,
 			Err(error) => return RespValue::error(error),
@@ -59,6 +60,9 @@ impl Cmd for ExpireCmd {
 		match storage.expire(data_type, key, expire_time).await {
 			Ok(true) => RespValue::Integer(1),
 			Ok(false) => RespValue::Integer(0),
+			Err(StorageError::InvalidExpiration { .. }) => {
+				RespValue::error("ERR value is not an integer or out of range")
+			}
 			Err(e) => RespValue::Error(Bytes::from(e.to_string())),
 		}
 	}

@@ -1,21 +1,19 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use bytes::Buf;
 use bytes::Bytes;
 use futures::future;
 use nimbis_macros::storage_lock;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
+use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::hash::field_key::HashFieldKey;
 use crate::storage::Storage;
 use crate::string::meta::HashMetaValue;
-use crate::string::meta::MetaKey;
-use crate::utils::user_key_prefix;
-use crate::utils::user_key_sub_key_range;
+use crate::top_level_key::TopLevelKey;
+use crate::typed_db::MetadataChange;
 
 impl Storage {
 	#[fastrace::trace]
@@ -23,7 +21,7 @@ impl Storage {
 		self.hset_many(key, vec![(field, value)]).await
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::Hash)]
 	#[fastrace::trace]
 	pub async fn hset_many(
 		&self,
@@ -35,35 +33,31 @@ impl Storage {
 			return Ok(0);
 		}
 
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
-		let meta_val = Self::get_meta_from_db::<HashMetaValue>(&self.hash_db, &key).await?;
+		let meta_val = self.hash_db.load(&key).await?;
 		let mut batch = WriteBatch::new();
 
 		let Some(mut meta_val) = meta_val else {
 			for (field, value) in &fields {
 				let field_key = HashFieldKey::new(key.clone(), field.clone());
-				batch.put_with_options(field_key.encode(), value, &put_opts);
+				batch.put_with_options(field_key.encode()?, value, &put_opts);
 			}
 			// SlateDB assigns one commit sequence to every row in a WriteBatch. Zero
 			// therefore means "use this metadata row's sequence" on read.
 			let new_meta = HashMetaValue::new(0, fields.len() as u64);
-			batch.put_with_options(meta_encoded_key, new_meta.encode(), &put_opts);
-			self.hash_db.write_with_options(batch, &write_opts).await?;
+			self.hash_db
+				.commit(&key, batch, MetadataChange::Put(new_meta))
+				.await?;
 			return Ok(fields.len() as i64);
 		};
 
 		let mut added_count = 0u64;
 		for (field, value) in fields {
 			let field_key = HashFieldKey::new(key.clone(), field);
-			let encoded_field_key = field_key.encode();
+			let encoded_field_key = field_key.encode()?;
 			let exists = self
 				.hash_db
-				.get_key_value(encoded_field_key.clone())
+				.get_entry(encoded_field_key.clone())
 				.await?
 				.is_some_and(|kv| kv.seq >= meta_val.version);
 			if !exists {
@@ -73,25 +67,29 @@ impl Storage {
 		}
 
 		if added_count > 0 {
-			meta_val.len += added_count;
-			let meta_put_opts = Storage::meta_put_opts(&meta_val);
-			batch.put_with_options(meta_encoded_key, meta_val.encode(), &meta_put_opts);
+			meta_val.len = meta_val.len.checked_add(added_count).ok_or_else(|| {
+				StorageError::DataInconsistency {
+					message: "hash metadata length overflow".to_string(),
+				}
+			})?;
 		}
 
-		self.hash_db.write_with_options(batch, &write_opts).await?;
+		self.hash_db
+			.commit(&key, batch, MetadataChange::Put(meta_val))
+			.await?;
 		Ok(added_count as i64)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Hash)]
 	#[fastrace::trace]
 	pub async fn hget(&self, key: Bytes, field: Bytes) -> Result<Option<Bytes>, StorageError> {
 		// Check if the hash exists and is valid, get version
-		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
+		let Some(meta_val) = self.hash_db.load(&key).await? else {
 			return Ok(None);
 		};
 
 		let field_key = HashFieldKey::new(key, field);
-		let result = self.hash_db.get_key_value(field_key.encode()).await?;
+		let result = self.hash_db.get_entry(field_key.encode()?).await?;
 		if let Some(kv) = result
 			&& kv.seq >= meta_val.version
 		{
@@ -100,17 +98,17 @@ impl Storage {
 		Ok(None)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Hash)]
 	#[fastrace::trace]
 	pub async fn hlen(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? {
+		if let Some(meta_val) = self.hash_db.load(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
 		}
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Hash)]
 	#[fastrace::trace]
 	pub async fn hmget(
 		&self,
@@ -118,7 +116,7 @@ impl Storage {
 		fields: &[Bytes],
 	) -> Result<Vec<Option<Bytes>>, StorageError> {
 		// Check if the hash exists and is valid, get version
-		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
+		let Some(meta_val) = self.hash_db.load(&key).await? else {
 			return Ok(vec![None; fields.len()]);
 		};
 		let version = meta_val.version;
@@ -135,11 +133,8 @@ impl Storage {
 				// self.hash_db is Arc Actually self.hash_db.get is async.
 				// We can just call self.hash_db.get
 				async move {
-					let k = field_key.encode();
-					self.hash_db
-						.get_key_value(k)
-						.await
-						.map_err(StorageError::from)
+					let k = field_key.encode()?;
+					self.hash_db.get_entry(k).await
 				}
 			})
 			.collect();
@@ -162,16 +157,17 @@ impl Storage {
 			.collect())
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Hash)]
 	#[fastrace::trace]
 	pub async fn hgetall(&self, key: Bytes) -> Result<Vec<(Bytes, Bytes)>, StorageError> {
 		// Check if the hash exists and is valid, get version
-		let Some(meta_val) = self.get_meta::<HashMetaValue>(&key).await? else {
+		let Some(meta_val) = self.hash_db.load(&key).await? else {
 			return Ok(Vec::new());
 		};
 
 		// Construct prefix: len(user_key) + user_key
-		let prefix = user_key_prefix(&key);
+		let top_level_key = TopLevelKey::new(key.clone())?;
+		let prefix = top_level_key.encode();
 
 		// Keep the range bounded to this hash and exclude its exact metadata key.
 		// Once metadata and fields share the same DB, an unbounded scan prepares
@@ -179,7 +175,7 @@ impl Storage {
 		// also merges its potentially deep update history unnecessarily.
 		let mut stream = self
 			.hash_db
-			.scan::<Bytes, _>(user_key_sub_key_range(&key))
+			.scan_entries(top_level_key.sub_key_range()?)
 			.await?;
 		let mut results = Vec::new();
 
@@ -194,48 +190,31 @@ impl Storage {
 				continue;
 			}
 
-			// Parse field: prefix (key_len+key) + field_len(u32) + field
-			let suffix = &k[prefix.len()..];
-			if suffix.len() < 4 {
+			let Ok(field_key) = HashFieldKey::decode(&k) else {
 				continue;
-			}
-
-			let mut buf = suffix;
-			let field_len = buf.get_u32() as usize;
-
-			if buf.len() != field_len {
-				continue;
-			}
-
-			let field = Bytes::copy_from_slice(buf);
-			results.push((field, v));
+			};
+			results.push((field_key.field().clone(), v));
 		}
 
 		Ok(results)
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::Hash)]
 	#[fastrace::trace]
 	pub async fn hdel(&self, key: Bytes, fields: &[Bytes]) -> Result<i64, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let mut meta_val =
-			match Self::get_meta_from_db::<HashMetaValue>(&self.hash_db, &key).await? {
-				Some(meta) => meta,
-				None => return Ok(0),
-			};
-		let write_opts = WriteOptions {
-			await_durable: false,
+		let mut meta_val = match self.hash_db.load(&key).await? {
+			Some(meta) => meta,
+			None => return Ok(0),
 		};
 		let fields: BTreeSet<_> = fields.iter().cloned().collect();
 		let mut encoded_fields = Vec::new();
 
 		for field in fields {
 			let field_key = HashFieldKey::new(key.clone(), field);
-			let encoded_field_key = field_key.encode();
+			let encoded_field_key = field_key.encode()?;
 			let exists = self
 				.hash_db
-				.get_key_value(encoded_field_key.clone())
+				.get_entry(encoded_field_key.clone())
 				.await?
 				.is_some_and(|kv| kv.seq >= meta_val.version);
 			if exists {
@@ -259,13 +238,12 @@ impl Storage {
 			batch.delete(encoded_field);
 		}
 		meta_val.len -= deleted_count;
-		if meta_val.len == 0 {
-			batch.delete(meta_encoded_key);
+		let metadata = if meta_val.len == 0 {
+			MetadataChange::Delete
 		} else {
-			let put_opts = Storage::meta_put_opts(&meta_val);
-			batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
-		}
-		self.hash_db.write_with_options(batch, &write_opts).await?;
+			MetadataChange::Put(meta_val)
+		};
+		self.hash_db.commit(&key, batch, metadata).await?;
 
 		Ok(deleted_count as i64)
 	}
@@ -275,6 +253,8 @@ impl Storage {
 mod tests {
 	use super::*;
 	use crate::data_type::DataType;
+	use crate::top_level_key::MAX_ENCODED_KEY_LEN;
+	use crate::top_level_key::MAX_USER_KEY_LEN;
 
 	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
 		db.metrics()
@@ -289,6 +269,35 @@ mod tests {
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
 		(storage, path)
+	}
+
+	#[tokio::test]
+	async fn hset_rejects_a_composite_key_that_exceeds_the_codec_limit() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from(vec![b'k'; MAX_USER_KEY_LEN]);
+
+		let error = storage
+			.hset(key.clone(), Bytes::from_static(b"field"), Bytes::new())
+			.await
+			.unwrap_err();
+		assert!(matches!(
+			error,
+			StorageError::InvalidKeyLength {
+				length,
+				max: MAX_ENCODED_KEY_LEN
+			} if length > MAX_ENCODED_KEY_LEN
+		));
+		assert!(
+			storage
+				.hash_db
+				.raw()
+				.get(TopLevelKey::new(key).unwrap().encode())
+				.await
+				.unwrap()
+				.is_none()
+		);
+
+		let _ = std::fs::remove_dir_all(path);
 	}
 
 	#[tokio::test]
@@ -370,7 +379,7 @@ mod tests {
 	async fn test_hash_metadata_is_colocated_and_pending_version_is_resolved() {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("colocated_hash_meta");
-		let meta_key = MetaKey::new(key.clone()).encode();
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
 
 		let added = storage
 			.hset(key.clone(), Bytes::from("field"), Bytes::from("value"))
@@ -380,6 +389,7 @@ mod tests {
 
 		let raw_meta = storage
 			.hash_db
+			.raw()
 			.get_key_value(meta_key.clone())
 			.await
 			.unwrap()
@@ -389,20 +399,35 @@ mod tests {
 		assert!(raw_meta.seq > 0);
 		let raw_field = storage
 			.hash_db
-			.get_key_value(HashFieldKey::new(key.clone(), Bytes::from("field")).encode())
+			.raw()
+			.get_key_value(
+				HashFieldKey::new(key.clone(), Bytes::from("field"))
+					.encode()
+					.unwrap(),
+			)
 			.await
 			.unwrap()
 			.expect("hash field should be committed with its metadata");
 		assert_eq!(raw_field.seq, raw_meta.seq);
 
-		let resolved_meta = Storage::get_meta_from_db::<HashMetaValue>(&storage.hash_db, &key)
+		let resolved_meta = storage
+			.hash_db
+			.load(&key)
 			.await
 			.unwrap()
 			.expect("hash metadata should resolve from hash_db");
 		assert_eq!(resolved_meta.version, raw_meta.seq);
 		assert_ne!(resolved_meta.version, 0);
 
-		assert!(storage.string_db.get(meta_key).await.unwrap().is_none());
+		assert!(
+			storage
+				.string_db
+				.raw()
+				.get(meta_key)
+				.await
+				.unwrap()
+				.is_none()
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -411,7 +436,7 @@ mod tests {
 	async fn test_hash_ttl_rewrite_preserves_generation_after_reopen() {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("hash_ttl_generation");
-		let meta_key = MetaKey::new(key.clone()).encode();
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
 		storage
 			.hset(key.clone(), Bytes::from("f1"), Bytes::from("v1"))
 			.await
@@ -419,6 +444,7 @@ mod tests {
 
 		let initial_meta = storage
 			.hash_db
+			.raw()
 			.get_key_value(meta_key.clone())
 			.await
 			.unwrap()
@@ -439,6 +465,7 @@ mod tests {
 
 		let rewritten_meta = storage
 			.hash_db
+			.raw()
 			.get_key_value(meta_key)
 			.await
 			.unwrap()
@@ -523,14 +550,65 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_hset_many_rejects_metadata_length_overflow_without_writing_batch() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("hset_length_overflow");
+		let existing_field = Bytes::from("existing");
+		let new_field = Bytes::from("new");
+		storage
+			.hset(key.clone(), existing_field.clone(), Bytes::from("original"))
+			.await
+			.unwrap();
+
+		let mut meta = storage.hash_db.load(&key).await.unwrap().unwrap();
+		meta.len = u64::MAX;
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		storage
+			.hash_db
+			.raw()
+			.put(meta_key.clone(), meta.encode())
+			.await
+			.unwrap();
+
+		let error = storage
+			.hset(key.clone(), new_field.clone(), Bytes::from("value"))
+			.await
+			.unwrap_err();
+		assert!(matches!(
+			error,
+			StorageError::DataInconsistency { message }
+				if message == "hash metadata length overflow"
+		));
+
+		assert!(
+			storage
+				.hash_db
+				.raw()
+				.get(HashFieldKey::new(key.clone(), new_field).encode().unwrap(),)
+				.await
+				.unwrap()
+				.is_none()
+		);
+		assert_eq!(
+			storage.hget(key.clone(), existing_field).await.unwrap(),
+			Some(Bytes::from("original"))
+		);
+		let stored_meta = storage.hash_db.raw().get(meta_key).await.unwrap().unwrap();
+		assert_eq!(HashMetaValue::decode(&stored_meta).unwrap().len, u64::MAX);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
 	async fn test_hset_many_uses_one_hash_write_batch() {
 		let (storage, path) = get_storage().await;
-		let before_batches = metric(&storage.hash_db, "db/write_batch_count");
-		let before_ops = metric(&storage.hash_db, "db/write_ops");
+		let key = Bytes::from("single_hash_batch");
+		let before_batches = metric(storage.hash_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.hash_db.raw(), "db/write_ops");
 
 		let added = storage
 			.hset_many(
-				Bytes::from("single_hash_batch"),
+				key.clone(),
 				vec![
 					(Bytes::from("f1"), Bytes::from("v1")),
 					(Bytes::from("f2"), Bytes::from("v2")),
@@ -541,10 +619,47 @@ mod tests {
 		assert_eq!(added, 2);
 
 		assert_eq!(
-			metric(&storage.hash_db, "db/write_batch_count") - before_batches,
+			metric(storage.hash_db.raw(), "db/write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(&storage.hash_db, "db/write_ops") - before_ops, 3);
+		assert_eq!(
+			metric(storage.hash_db.raw(), "db/write_ops") - before_ops,
+			3
+		);
+
+		let before_batches = metric(storage.hash_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.hash_db.raw(), "db/write_ops");
+		assert_eq!(
+			storage
+				.hset(key.clone(), Bytes::from("f1"), Bytes::from("v3"))
+				.await
+				.unwrap(),
+			0
+		);
+		assert_eq!(
+			metric(storage.hash_db.raw(), "db/write_batch_count") - before_batches,
+			1
+		);
+		assert_eq!(
+			metric(storage.hash_db.raw(), "db/write_ops") - before_ops,
+			2
+		);
+
+		let meta = storage
+			.hash_db
+			.raw()
+			.get_key_value(TopLevelKey::new(key.clone()).unwrap().encode())
+			.await
+			.unwrap()
+			.unwrap();
+		let field = storage
+			.hash_db
+			.raw()
+			.get_key_value(HashFieldKey::new(key, Bytes::from("f1")).encode().unwrap())
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(meta.seq, field.seq);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

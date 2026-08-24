@@ -11,7 +11,7 @@ use criterion::Throughput;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use nimbis_storage::Storage;
-use nimbis_storage::error::StorageError;
+use nimbis_storage::StorageError;
 use tokio::runtime::Runtime;
 
 const COLLECTION_BATCH_SIZE: usize = 8;

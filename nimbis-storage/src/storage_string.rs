@@ -1,223 +1,41 @@
-use std::collections::HashSet;
-
 use bytes::Bytes;
-use chrono::Utc;
 use nimbis_macros::storage_lock;
-use slatedb::WriteBatch;
-use slatedb::config::PutOptions;
-use slatedb::config::Ttl;
-use slatedb::config::WriteOptions;
 
 use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::storage::Storage;
-use crate::string::key::StringKey;
-use crate::string::meta::AnyValue;
-use crate::string::meta::MetaValue;
 use crate::string::value::StringValue;
-use crate::utils::is_expired;
+use crate::top_level_key::TopLevelKey;
 
 impl Storage {
-	fn typed_logical_expire_ts(
-		data_type: DataType,
-		kv: &slatedb::KeyValue,
-	) -> Result<Option<i64>, StorageError> {
-		if data_type == DataType::String {
-			return Ok(kv.expire_ts);
-		}
-
-		let value = AnyValue::decode(&kv.value)?;
-		if value.data_type() != data_type {
-			return Err(StorageError::DataInconsistency {
-				message: format!(
-					"typed database {data_type:?} contains {:?} top-level metadata",
-					value.data_type()
-				),
-			});
-		}
-		let expire_time = value.expire_time();
-		if expire_time == 0 {
-			Ok(kv.expire_ts)
-		} else {
-			i64::try_from(expire_time)
-				.map(Some)
-				.map_err(|_| StorageError::DataInconsistency {
-					message: "metadata expiration exceeds SlateDB timestamp range".to_string(),
-				})
-		}
-	}
-
 	async fn string_for_update(&self, key: &Bytes) -> Result<Option<Bytes>, StorageError> {
-		Ok(Self::get_meta_from_db::<StringValue>(&self.string_db, key)
+		Ok(self
+			.string_db
+			.load_value(key)
 			.await?
 			.map(|value| value.value))
 	}
 
-	async fn key_exists(&self, data_type: DataType, key: &Bytes) -> Result<bool, StorageError> {
-		let encoded_key = StringKey::new(key.clone()).encode();
-		let db = self.db_for_type(data_type);
-		let Some(kv) = db.get_key_value(encoded_key.clone()).await? else {
-			return Ok(false);
-		};
-		if !is_expired(Self::typed_logical_expire_ts(data_type, &kv)?) {
-			return Ok(true);
-		}
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		db.delete_with_options(encoded_key, &write_opts).await?;
-		Ok(false)
-	}
-
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::String)]
 	#[fastrace::trace]
 	pub async fn get(&self, key: Bytes) -> Result<Option<Bytes>, StorageError> {
-		Ok(Self::get_meta_from_db::<StringValue>(&self.string_db, &key)
+		Ok(self
+			.string_db
+			.load_value(&key)
 			.await?
 			.map(|value| value.value))
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::String)]
 	#[fastrace::trace]
 	pub async fn set(&self, key: Bytes, value: Bytes) -> Result<(), StorageError> {
-		let encoded_key = StringKey::new(key).encode();
+		let key = TopLevelKey::new(key)?;
 		let value = StringValue::new(value);
-
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(encoded_key, value.encode(), &put_opts, &write_opts)
-			.await?;
+		self.string_db.store(key, value).await?;
 		Ok(())
 	}
 
-	#[storage_lock(write_many, keys)]
-	#[fastrace::trace]
-	pub async fn del<I>(&self, data_type: DataType, keys: I) -> Result<i64, StorageError>
-	where
-		I: IntoIterator<Item = Bytes>,
-	{
-		let db = self.db_for_type(data_type);
-		let mut batch = WriteBatch::new();
-		let mut deleted = 0;
-		let mut seen = HashSet::new();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-
-		for key in keys {
-			let encoded_key = StringKey::new(key).encode();
-			if !seen.insert(encoded_key.clone()) {
-				continue;
-			}
-			let Some(kv) = db.get_key_value(encoded_key.clone()).await? else {
-				continue;
-			};
-			if !is_expired(Self::typed_logical_expire_ts(data_type, &kv)?) {
-				deleted += 1;
-			}
-			batch.delete(encoded_key);
-		}
-
-		if !batch.is_empty() {
-			db.write_with_options(batch, &write_opts).await?;
-		}
-
-		Ok(deleted)
-	}
-
-	#[storage_lock(write, key)]
-	#[fastrace::trace]
-	pub async fn expire(
-		&self,
-		data_type: DataType,
-		key: Bytes,
-		expire_time: u64,
-	) -> Result<bool, StorageError> {
-		let encoded_key = StringKey::new(key).encode();
-		let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
-		let db = self.db_for_type(data_type);
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let Some(kv) = db.get_key_value(encoded_key.clone()).await? else {
-			return Ok(false);
-		};
-		if is_expired(Self::typed_logical_expire_ts(data_type, &kv)?) {
-			db.delete_with_options(encoded_key, &write_opts).await?;
-			return Ok(false);
-		}
-		if expire_time > 0 && expire_time <= now {
-			db.delete_with_options(encoded_key, &write_opts).await?;
-			return Ok(true);
-		}
-
-		let mut value = AnyValue::decode(&kv.value)?;
-		if value.version() == Some(0) {
-			value.set_version(kv.seq);
-		}
-		value.set_expire_time(expire_time);
-		let ttl = if expire_time > 0 {
-			let current = chrono::Utc::now().timestamp_millis().max(0) as u64;
-			Ttl::ExpireAfter(expire_time.saturating_sub(current))
-		} else {
-			Ttl::NoExpiry
-		};
-		let put_opts = PutOptions { ttl };
-		db.put_with_options(encoded_key, value.encode(), &put_opts, &write_opts)
-			.await?;
-		Ok(true)
-	}
-
-	#[storage_lock(read, key)]
-	#[fastrace::trace]
-	pub async fn ttl(&self, data_type: DataType, key: Bytes) -> Result<Option<i64>, StorageError> {
-		let encoded_key = StringKey::new(key).encode();
-		let db = self.db_for_type(data_type);
-		let Some(kv) = db.get_key_value(encoded_key.clone()).await? else {
-			return Ok(None);
-		};
-		let logical_expire_ts = Self::typed_logical_expire_ts(data_type, &kv)?;
-		if is_expired(logical_expire_ts) {
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			db.delete_with_options(encoded_key, &write_opts).await?;
-			return Ok(None);
-		}
-
-		Ok(Some(match logical_expire_ts {
-			Some(expire_ts) => (expire_ts - Utc::now().timestamp_millis()).max(0),
-			None => -1,
-		}))
-	}
-
-	#[storage_lock(read, key)]
-	#[fastrace::trace]
-	pub async fn exists(&self, data_type: DataType, key: Bytes) -> Result<bool, StorageError> {
-		self.key_exists(data_type, &key).await
-	}
-
-	#[storage_lock(read_many, keys)]
-	#[fastrace::trace]
-	pub async fn exists_many<I>(&self, data_type: DataType, keys: I) -> Result<i64, StorageError>
-	where
-		I: IntoIterator<Item = Bytes>,
-	{
-		let mut count = 0;
-
-		for key in keys {
-			if self.key_exists(data_type, &key).await? {
-				count += 1;
-			}
-		}
-
-		Ok(count)
-	}
-
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::String)]
 	#[fastrace::trace]
 	pub async fn incr(&self, key: Bytes) -> Result<i64, StorageError> {
 		let current_val = self.string_for_update(&key).await?;
@@ -240,21 +58,15 @@ impl Storage {
 				message: "ERR increment or decrement would overflow".to_string(),
 			})?;
 
-		let key = StringKey::new(key);
+		let key = TopLevelKey::new(key)?;
 		let value = StringValue::new(Bytes::from(int_val.to_string()));
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		self.string_db.store(key, value).await?;
 
 		Ok(int_val)
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::String)]
 	#[fastrace::trace]
 	pub async fn decr(&self, key: Bytes) -> Result<i64, StorageError> {
 		let current_val = self.string_for_update(&key).await?;
@@ -277,21 +89,15 @@ impl Storage {
 				message: "ERR increment or decrement would overflow".to_string(),
 			})?;
 
-		let key = StringKey::new(key);
+		let key = TopLevelKey::new(key)?;
 		let value = StringValue::new(Bytes::from(int_val.to_string()));
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		self.string_db.store(key, value).await?;
 
 		Ok(int_val)
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::String)]
 	#[fastrace::trace]
 	pub async fn append(&self, key: Bytes, append_val: Bytes) -> Result<usize, StorageError> {
 		let current_val = self.string_for_update(&key).await?;
@@ -307,16 +113,10 @@ impl Storage {
 		};
 
 		let len = new_val.len();
-		let key = StringKey::new(key);
+		let key = TopLevelKey::new(key)?;
 		let value = StringValue::new(Bytes::from(new_val));
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-		self.string_db
-			.put_with_options(key.encode(), value.encode(), &put_opts, &write_opts)
-			.await?;
+		self.string_db.store(key, value).await?;
 
 		Ok(len)
 	}
@@ -324,9 +124,11 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
+	use chrono::Utc;
 	use rstest::rstest;
 
 	use super::*;
+	use crate::string::meta::AnyValue;
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::generate().to_string();
@@ -461,6 +263,55 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_typed_expire_rejects_unrepresentable_deadline_without_mutation() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("invalid-expiration");
+		let max_expiration = crate::expiration::MAX_EXPIRATION_TIMESTAMP_MS;
+		seed_all_types(&storage, &key).await;
+		let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
+
+		for data_type in ALL_DATA_TYPES {
+			let db = storage.raw_db_for_type(data_type);
+			let before = db
+				.get_key_value(encoded_key.clone())
+				.await
+				.unwrap()
+				.unwrap();
+			let error = storage
+				.expire(data_type, key.clone(), u64::MAX)
+				.await
+				.unwrap_err();
+			assert!(matches!(
+				error,
+				StorageError::InvalidExpiration {
+					timestamp: u64::MAX,
+					max
+				} if max == max_expiration
+			));
+			let after = db
+				.get_key_value(encoded_key.clone())
+				.await
+				.unwrap()
+				.unwrap();
+			assert_eq!(after.seq, before.seq);
+			assert_eq!(after.value, before.value);
+			assert_eq!(after.expire_ts, before.expire_ts);
+			assert_eq!(storage.ttl(data_type, key.clone()).await.unwrap(), Some(-1));
+
+			assert!(
+				storage
+					.expire(data_type, key.clone(), max_expiration)
+					.await
+					.unwrap()
+			);
+			assert!(storage.ttl(data_type, key.clone()).await.unwrap().unwrap() > 0);
+			assert!(storage.expire(data_type, key.clone(), 0).await.unwrap());
+		}
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
 	async fn test_typed_expire_and_ttl_isolate_all_types_and_survive_reopen() {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("shared-ttl");
@@ -502,8 +353,8 @@ mod tests {
 				.await
 				.unwrap()
 		);
-		let encoded_key = StringKey::new(key.clone()).encode();
-		for (data_type, db) in storage.typed_dbs() {
+		let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		for (data_type, db) in storage.all_raw_dbs() {
 			let kv = db
 				.get_key_value(encoded_key.clone())
 				.await
@@ -594,7 +445,7 @@ mod tests {
 		}
 
 		let before_batches = ALL_DATA_TYPES
-			.map(|data_type| metric(storage.db_for_type(data_type), "db/write_batch_count"));
+			.map(|data_type| metric(storage.raw_db_for_type(data_type), "db/write_batch_count"));
 		assert_eq!(
 			storage
 				.del(
@@ -613,8 +464,9 @@ mod tests {
 		);
 
 		for (index, data_type) in ALL_DATA_TYPES.into_iter().enumerate() {
-			let written_batches = metric(storage.db_for_type(data_type), "db/write_batch_count")
-				- before_batches[index];
+			let written_batches =
+				metric(storage.raw_db_for_type(data_type), "db/write_batch_count")
+					- before_batches[index];
 			assert_eq!(
 				written_batches,
 				if data_type == DataType::Hash { 1 } else { 0 },
@@ -643,7 +495,7 @@ mod tests {
 			2
 		);
 
-		let before_missing_delete = metric(&storage.hash_db, "db/write_batch_count");
+		let before_missing_delete = metric(storage.hash_db.raw(), "db/write_batch_count");
 		assert_eq!(
 			storage
 				.del(DataType::Hash, [key_a, key_b, missing])
@@ -652,7 +504,7 @@ mod tests {
 			0
 		);
 		assert_eq!(
-			metric(&storage.hash_db, "db/write_batch_count"),
+			metric(storage.hash_db.raw(), "db/write_batch_count"),
 			before_missing_delete,
 			"an all-missing typed DEL must not submit an empty batch"
 		);

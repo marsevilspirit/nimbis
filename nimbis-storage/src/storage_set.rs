@@ -1,36 +1,28 @@
 use std::collections::HashSet;
 
-use bytes::Buf;
 use bytes::Bytes;
 use nimbis_macros::storage_lock;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
+use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::set::member_key::SetMemberKey;
 use crate::storage::Storage;
-use crate::string::meta::MetaKey;
 use crate::string::meta::SetMetaValue;
-use crate::utils::user_key_prefix;
-use crate::utils::user_key_sub_key_range;
+use crate::top_level_key::TopLevelKey;
+use crate::typed_db::MetadataChange;
 
 impl Storage {
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::Set)]
 	#[fastrace::trace]
 	pub async fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
 		let put_opts = PutOptions::default();
 
-		let (mut meta_val, meta_missing) =
-			match Self::get_meta_from_db::<SetMetaValue>(&self.set_db, &key).await? {
-				Some(meta) => (meta, false),
-				None => (SetMetaValue::new(0, 0), true),
-			};
+		let (mut meta_val, meta_missing) = match self.set_db.load(&key).await? {
+			Some(meta) => (meta, false),
+			None => (SetMetaValue::new(0, 0), true),
+		};
 
 		// Deduplicate members, keeping the first occurrence
 		let mut unique_members = HashSet::new();
@@ -46,12 +38,12 @@ impl Storage {
 
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), member);
-			let encoded_member_key = member_key.encode();
+			let encoded_member_key = member_key.encode()?;
 			let exists = if meta_missing {
 				false
 			} else {
 				self.set_db
-					.get_key_value(encoded_member_key.clone())
+					.get_entry(encoded_member_key.clone())
 					.await?
 					.is_some_and(|kv| kv.seq >= meta_val.version)
 			};
@@ -71,7 +63,6 @@ impl Storage {
 				message: "set metadata length overflow after SADD".to_string(),
 			}
 		})?;
-		let meta_put_opts = Storage::meta_put_opts(&meta_val);
 		let mut batch = WriteBatch::new();
 		for member_key in added_member_keys {
 			batch.put_with_options(
@@ -81,27 +72,28 @@ impl Storage {
 			);
 		}
 		// A fresh collection keeps version=0 on disk. All rows in this batch receive
-		// the same sequence, and get_meta_from_db resolves zero to that sequence.
-		batch.put_with_options(meta_encoded_key, meta_val.encode(), &meta_put_opts);
-		self.set_db.write_with_options(batch, &write_opts).await?;
+		// the same sequence, and TypedDb::load resolves zero to that sequence.
+		self.set_db
+			.commit(&key, batch, MetadataChange::Put(meta_val))
+			.await?;
 
 		Ok(added_count)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Set)]
 	#[fastrace::trace]
 	pub async fn smembers(&self, key: Bytes) -> Result<Vec<Bytes>, StorageError> {
-		let Some(meta_val) = Self::get_meta_from_db::<SetMetaValue>(&self.set_db, &key).await?
-		else {
+		let Some(meta_val) = self.set_db.load(&key).await? else {
 			return Ok(Vec::new());
 		};
 
 		// Construct prefix: len(user_key) + user_key
-		let prefix = user_key_prefix(&key);
+		let top_level_key = TopLevelKey::new(key.clone())?;
+		let prefix = top_level_key.encode();
 
 		let mut stream = self
 			.set_db
-			.scan::<Bytes, _>(user_key_sub_key_range(&key))
+			.scan_entries(top_level_key.sub_key_range()?)
 			.await?;
 		let mut members = Vec::new();
 
@@ -114,50 +106,35 @@ impl Storage {
 				continue;
 			}
 
-			// Parse member: prefix (key_len+key) + member_len(u32) + member
-			let suffix = &k[prefix.len()..];
-			if suffix.len() < 4 {
+			let Ok(member_key) = SetMemberKey::decode(&k) else {
 				continue;
-			}
-
-			let mut buf = suffix;
-			let member_len = buf.get_u32() as usize;
-
-			if buf.len() != member_len {
-				continue;
-			}
-
-			let member = Bytes::copy_from_slice(buf);
-			members.push(member);
+			};
+			members.push(member_key.member().clone());
 		}
 
 		Ok(members)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Set)]
 	#[fastrace::trace]
 	pub async fn sismember(&self, key: Bytes, member: Bytes) -> Result<bool, StorageError> {
-		let Some(meta_val) = Self::get_meta_from_db::<SetMetaValue>(&self.set_db, &key).await?
-		else {
+		let Some(meta_val) = self.set_db.load(&key).await? else {
 			return Ok(false);
 		};
 
 		let member_key = SetMemberKey::new(key, member);
 		let found = self
 			.set_db
-			.get_key_value(member_key.encode())
+			.get_entry(member_key.encode()?)
 			.await?
 			.is_some_and(|kv| kv.seq >= meta_val.version);
 		Ok(found)
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::Set)]
 	#[fastrace::trace]
 	pub async fn srem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-
-		let mut meta_val = match Self::get_meta_from_db::<SetMetaValue>(&self.set_db, &key).await? {
+		let mut meta_val = match self.set_db.load(&key).await? {
 			Some(val) => val,
 			None => return Ok(0),
 		};
@@ -172,16 +149,12 @@ impl Storage {
 		}
 
 		let mut removed_member_keys = Vec::new();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-
 		for member in members {
 			let member_key = SetMemberKey::new(key.clone(), member);
-			let encoded_key = member_key.encode();
+			let encoded_key = member_key.encode()?;
 			let exists = self
 				.set_db
-				.get_key_value(encoded_key.clone())
+				.get_entry(encoded_key.clone())
 				.await?
 				.is_some_and(|kv| kv.seq >= meta_val.version);
 
@@ -204,21 +177,20 @@ impl Storage {
 		for member_key in removed_member_keys {
 			batch.delete(member_key);
 		}
-		if meta_val.len == 0 {
-			batch.delete(meta_encoded_key);
+		let metadata = if meta_val.len == 0 {
+			MetadataChange::Delete
 		} else {
-			let put_opts = Storage::meta_put_opts(&meta_val);
-			batch.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts);
-		}
-		self.set_db.write_with_options(batch, &write_opts).await?;
+			MetadataChange::Put(meta_val)
+		};
+		self.set_db.commit(&key, batch, metadata).await?;
 
 		Ok(removed_count)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::Set)]
 	#[fastrace::trace]
 	pub async fn scard(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = Self::get_meta_from_db::<SetMetaValue>(&self.set_db, &key).await? {
+		if let Some(meta_val) = self.set_db.load(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
@@ -228,9 +200,12 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
+	use slatedb::config::WriteOptions;
+
 	use super::*;
 	use crate::data_type::DataType;
 	use crate::string::meta::SetMetaValue;
+	use crate::typed_db::metadata_put_options;
 
 	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
 		db.metrics()
@@ -277,7 +252,7 @@ mod tests {
 		let key = Bytes::from("colocated_set_meta");
 		let m1 = Bytes::from("m1");
 		let m2 = Bytes::from("m2");
-		let meta_key = MetaKey::new(key.clone()).encode();
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
 
 		let added = storage
 			.sadd(key.clone(), vec![m1.clone(), m2.clone()])
@@ -287,6 +262,7 @@ mod tests {
 
 		let raw_meta = storage
 			.set_db
+			.raw()
 			.get_key_value(meta_key.clone())
 			.await
 			.unwrap()
@@ -297,20 +273,31 @@ mod tests {
 		for member in [m1, m2] {
 			let raw_member = storage
 				.set_db
-				.get_key_value(SetMemberKey::new(key.clone(), member).encode())
+				.raw()
+				.get_key_value(SetMemberKey::new(key.clone(), member).encode().unwrap())
 				.await
 				.unwrap()
 				.expect("set member should be committed with its metadata");
 			assert_eq!(raw_member.seq, raw_meta.seq);
 		}
 
-		let resolved_meta = Storage::get_meta_from_db::<SetMetaValue>(&storage.set_db, &key)
+		let resolved_meta = storage
+			.set_db
+			.load(&key)
 			.await
 			.unwrap()
 			.expect("set metadata should resolve from set_db");
 		assert_eq!(resolved_meta.version, raw_meta.seq);
 		assert_ne!(resolved_meta.version, 0);
-		assert!(storage.string_db.get(meta_key).await.unwrap().is_none());
+		assert!(
+			storage
+				.string_db
+				.raw()
+				.get(meta_key)
+				.await
+				.unwrap()
+				.is_none()
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -321,8 +308,8 @@ mod tests {
 		let key = Bytes::from("single_set_batch");
 		let m1 = Bytes::from("m1");
 		let m2 = Bytes::from("m2");
-		let before_batches = metric(&storage.set_db, "db/write_batch_count");
-		let before_ops = metric(&storage.set_db, "db/write_ops");
+		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
 
 		let added = storage
 			.sadd(key.clone(), vec![m1.clone(), m1.clone(), m2.clone()])
@@ -330,23 +317,23 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 2);
 		assert_eq!(
-			metric(&storage.set_db, "db/write_batch_count") - before_batches,
+			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(&storage.set_db, "db/write_ops") - before_ops, 3);
+		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 3);
 
-		let before_batches = metric(&storage.set_db, "db/write_batch_count");
-		let before_ops = metric(&storage.set_db, "db/write_ops");
+		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
 		let added = storage
 			.sadd(key, vec![m1.clone(), m1, m2.clone(), m2])
 			.await
 			.unwrap();
 		assert_eq!(added, 0);
 		assert_eq!(
-			metric(&storage.set_db, "db/write_batch_count") - before_batches,
+			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
 			0
 		);
-		assert_eq!(metric(&storage.set_db, "db/write_ops") - before_ops, 0);
+		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 0);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -404,36 +391,37 @@ mod tests {
 			.await
 			.unwrap();
 
-		let before_batches = metric(&storage.set_db, "db/write_batch_count");
-		let before_ops = metric(&storage.set_db, "db/write_ops");
+		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
 		let removed = storage
 			.srem(key.clone(), vec![m1.clone(), m1, m2.clone(), m2])
 			.await
 			.unwrap();
 		assert_eq!(removed, 2);
 		assert_eq!(
-			metric(&storage.set_db, "db/write_batch_count") - before_batches,
+			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(&storage.set_db, "db/write_ops") - before_ops, 3);
+		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 3);
 		assert_eq!(storage.scard(key.clone()).await.unwrap(), 1);
 
-		let before_batches = metric(&storage.set_db, "db/write_batch_count");
-		let before_ops = metric(&storage.set_db, "db/write_ops");
+		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
 		let removed = storage
 			.srem(key.clone(), vec![m3.clone(), m3])
 			.await
 			.unwrap();
 		assert_eq!(removed, 1);
 		assert_eq!(
-			metric(&storage.set_db, "db/write_batch_count") - before_batches,
+			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(&storage.set_db, "db/write_ops") - before_ops, 2);
+		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 2);
 		assert!(
 			storage
 				.set_db
-				.get(MetaKey::new(key).encode())
+				.raw()
+				.get(TopLevelKey::new(key).unwrap().encode())
 				.await
 				.unwrap()
 				.is_none()
@@ -448,22 +436,20 @@ mod tests {
 		let key = Bytes::from("set_ttl_preserved");
 		let m1 = Bytes::from("m1");
 		let m2 = Bytes::from("m2");
-		let meta_key = MetaKey::new(key.clone()).encode();
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
 		storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 
-		let mut meta = Storage::get_meta_from_db::<SetMetaValue>(&storage.set_db, &key)
-			.await
-			.unwrap()
-			.unwrap();
+		let mut meta = storage.set_db.load(&key).await.unwrap().unwrap();
 		let expire_time =
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_add(60_000);
 		meta.expire_time = expire_time;
-		let put_opts = Storage::meta_put_opts(&meta);
+		let put_opts = metadata_put_options(&meta).unwrap();
 		let write_opts = WriteOptions {
 			await_durable: false,
 		};
 		storage
 			.set_db
+			.raw()
 			.put_with_options(meta_key.clone(), meta.encode(), &put_opts, &write_opts)
 			.await
 			.unwrap();
@@ -474,6 +460,7 @@ mod tests {
 		);
 		let raw_meta = storage
 			.set_db
+			.raw()
 			.get_key_value(meta_key.clone())
 			.await
 			.unwrap()
@@ -487,6 +474,7 @@ mod tests {
 		assert_eq!(storage.srem(key.clone(), vec![m1]).await.unwrap(), 1);
 		let raw_meta = storage
 			.set_db
+			.raw()
 			.get_key_value(meta_key)
 			.await
 			.unwrap()
@@ -526,30 +514,18 @@ mod tests {
 		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(added, 1);
 
-		let version_v1 = Storage::get_meta_from_db::<SetMetaValue>(&storage.set_db, &key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_v1 = storage.set_db.load(&key).await.unwrap().unwrap().version;
 
 		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(added, 0);
 
-		let version_after_dup = Storage::get_meta_from_db::<SetMetaValue>(&storage.set_db, &key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_after_dup = storage.set_db.load(&key).await.unwrap().unwrap().version;
 		assert_eq!(version_after_dup, version_v1);
 
 		let added = storage.sadd(key.clone(), vec![m2.clone()]).await.unwrap();
 		assert_eq!(added, 1);
 
-		let version_after_update = Storage::get_meta_from_db::<SetMetaValue>(&storage.set_db, &key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_after_update = storage.set_db.load(&key).await.unwrap().unwrap().version;
 		assert_eq!(version_after_update, version_v1);
 
 		let removed = storage.del(DataType::Set, [key.clone()]).await.unwrap();
@@ -558,11 +534,7 @@ mod tests {
 		let added = storage.sadd(key.clone(), vec![m1.clone()]).await.unwrap();
 		assert_eq!(added, 1);
 
-		let version_v2 = Storage::get_meta_from_db::<SetMetaValue>(&storage.set_db, &key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_v2 = storage.set_db.load(&key).await.unwrap().unwrap().version;
 		assert!(version_v2 > version_v1);
 
 		let members = storage.smembers(key.clone()).await.unwrap();

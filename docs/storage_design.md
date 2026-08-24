@@ -17,14 +17,18 @@ The `Storage` struct is defined in `nimbis-storage/src/storage.rs`:
 ```rust
 #[derive(Clone)]
 pub struct Storage {
-    pub(crate) string_db: Arc<Db>,
-    pub(crate) hash_db: Arc<Db>,
-    pub(crate) list_db: Arc<Db>,
-    pub(crate) set_db: Arc<Db>,
-    pub(crate) zset_db: Arc<Db>,
+    pub(crate) string_db: TypedDb<StringValue>,
+    pub(crate) hash_db: TypedDb<HashMetaValue>,
+    pub(crate) list_db: TypedDb<ListMetaValue>,
+    pub(crate) set_db: TypedDb<SetMetaValue>,
+    pub(crate) zset_db: TypedDb<ZSetMetaValue>,
     locks: Arc<StorageLocks>,
 }
 ```
+
+`TypedDb<V>` owns the physical `Arc<Db>` and is the only metadata read/commit
+authority for `V`. Collection mutations pass their sub-key batch and metadata
+transition to `TypedDb::commit`, which emits one SlateDB `WriteBatch`.
 
 Each data type has its own database instance for isolation and predictable performance.
 The same raw user key may exist independently in multiple type databases. Type-specific
@@ -42,10 +46,12 @@ The server opens one shared storage instance with `None`.
 The lock state has two layers:
 
 - a database-level `RwLock<()>`
-- a fixed striped table of key-level `RwLock<()>` values
+- one fixed striped key-lock table for each data type
 
-Regular key commands acquire a database read lock, hash raw keys into fixed
-lock stripes, then acquire those stripes in ascending index order. Read
+Regular key commands acquire a database read lock, map `(data_type, raw_key)`
+into a type-local stripe, then acquire the resulting `(type, stripe)` pairs in
+ascending order. Same-name keys in different typed namespaces do not block one
+another. Read
 commands use read locks, write commands use write locks, and any stripe that
 contains both read and write keys is treated as a write stripe. This bounds
 lock memory regardless of key cardinality while preserving deterministic
@@ -64,6 +70,11 @@ centralized.
 ## Key Encoding
 
 All user keys are length-prefixed (`u16 BE`) to avoid prefix collisions.
+SlateDB limits the complete encoded key to 65,535 bytes. `TopLevelKey` validates
+top-level keys, and each collection codec validates its complete key—including
+field/member/index suffixes—before allocating or writing. A top-level user key
+can therefore contain at most 65,533 bytes; collection keys have a smaller
+effective user-key limit according to their suffix.
 
 ### Top-level key
 
@@ -142,10 +153,15 @@ dedicated GC/fence format is implemented.
 Expiration for every top-level value is driven by the metadata/value row in its
 own typed database:
 
-- `Storage::meta_put_opts` converts `MetaValue::remaining_ttl()` into SlateDB TTL options.
+- `metadata_put_options` converts the value's absolute expiration through the
+  shared expiration helper into SlateDB TTL options; callers reach it through
+  the typed commit path.
 - Collection metadata embeds an absolute expiration timestamp, which is the
   logical source of truth. String expiration uses the SlateDB row TTL because
   String values do not have an embedded metadata timestamp.
+- Logical deadlines are capped at `253402214399999` milliseconds since Unix
+  epoch. This practical ceiling leaves one day of signed-timestamp headroom for
+  SlateDB's later `ExpireAfter` clock read and prevents overflow.
 - The current SlateDB API accepts a relative `ExpireAfter` duration rather than
   an absolute deadline. Collection reads therefore enforce the embedded
   deadline even if a row-TTL rewrite or restart introduces a few milliseconds
@@ -173,7 +189,7 @@ single-database cost and avoids cross-DB transaction semantics entirely.
 
 `TTL <TYPE> key` command semantics for the selected namespace:
 
-- `> 0`: seconds remaining
+- `>= 0`: non-negative seconds remaining (sub-second TTLs round down to `0`)
 - `-1`: key exists without expiration
 - `-2`: key does not exist (or already expired)
 
@@ -208,8 +224,9 @@ let storage = Storage::open_object_store(
 ```
 
 This flow parses the URL/options into an object store backend, then opens the
-five SlateDB instances under the configured root. Before serving traffic it also
-runs an idempotent, durable migration for the legacy layout: collection metadata
+five SlateDB instances under the configured root. Before serving traffic it calls
+the private `layout_migration::ensure_current_layout` boundary, which runs an
+idempotent, durable migration for the legacy layout: collection metadata
 is copied to its typed DB, verified, and only then removed from `string_db`.
 Migration scans use bounded 64-row cursor windows so startup memory is bounded.
 After every typed migration and source cleanup succeeds, Nimbis writes the root

@@ -1,11 +1,11 @@
-use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::Buf;
 use bytes::Bytes;
 use nimbis_macros::storage_lock;
 use slatedb::Db;
+#[cfg(test)]
 use slatedb::config::PutOptions;
+#[cfg(test)]
 use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
 use slatedb::object_store::ObjectStore;
@@ -17,61 +17,41 @@ use slatedb::object_store::path::Path as ObjectStorePath;
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
 use crate::error::StorageError;
+use crate::layout_migration::ensure_current_layout;
 use crate::lock::StorageLock;
 use crate::lock::StorageLockGuard;
 use crate::lock::StorageLocks;
-use crate::string::meta::AnyValue;
-use crate::string::meta::MetaKey;
-use crate::string::meta::MetaValue;
-use crate::utils::is_expired;
-
-const CURRENT_LAYOUT_VERSION: &[u8] = b"nimbis-layout:type-local-metadata:v1\n";
-const MIGRATION_SCAN_CHUNK_SIZE: usize = 64;
-const MAX_MIGRATION_TTL_DRIFT_MS: i64 = 5_000;
-
-struct NormalizedTopLevel {
-	value: AnyValue,
-	logical_expire_ts: Option<i64>,
-	row_expire_ts: Option<i64>,
-}
+use crate::string::meta::HashMetaValue;
+use crate::string::meta::ListMetaValue;
+use crate::string::meta::SetMetaValue;
+use crate::string::meta::ZSetMetaValue;
+use crate::string::value::StringValue;
+#[cfg(test)]
+use crate::top_level_key::TopLevelKey;
+use crate::typed_db::TypedDb;
 
 #[derive(Clone)]
 pub struct Storage {
-	pub(crate) string_db: Arc<Db>,
-	pub(crate) hash_db: Arc<Db>,
-	pub(crate) list_db: Arc<Db>,
-	pub(crate) set_db: Arc<Db>,
-	pub(crate) zset_db: Arc<Db>,
+	pub(crate) string_db: TypedDb<StringValue>,
+	pub(crate) hash_db: TypedDb<HashMetaValue>,
+	pub(crate) list_db: TypedDb<ListMetaValue>,
+	pub(crate) set_db: TypedDb<SetMetaValue>,
+	pub(crate) zset_db: TypedDb<ZSetMetaValue>,
 	locks: Arc<StorageLocks>,
+}
+
+struct StorageDbs {
+	string: Arc<Db>,
+	hash: Arc<Db>,
+	list: Arc<Db>,
+	set: Arc<Db>,
+	zset: Arc<Db>,
 }
 
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
 	match shard_id {
 		Some(id) => base_path.child(format!("shard-{}", id)),
 		None => base_path,
-	}
-}
-
-fn decode_exact_meta_key(encoded: &[u8]) -> Option<Bytes> {
-	if encoded.len() < 2 {
-		return None;
-	}
-	let mut remaining = encoded;
-	let key_len = remaining.get_u16() as usize;
-	if remaining.len() != key_len {
-		return None;
-	}
-	Some(Bytes::copy_from_slice(remaining))
-}
-
-async fn layout_marker_is_current(
-	object_store: &dyn ObjectStore,
-	marker: &ObjectStorePath,
-) -> Result<bool, StorageError> {
-	match object_store.get(marker).await {
-		Ok(result) => Ok(result.bytes().await?.as_ref() == CURRENT_LAYOUT_VERSION),
-		Err(slatedb::object_store::Error::NotFound { .. }) => Ok(false),
-		Err(error) => Err(error.into()),
 	}
 }
 
@@ -144,36 +124,32 @@ where
 }
 
 impl Storage {
-	pub fn new(
-		string_db: Arc<Db>,
-		hash_db: Arc<Db>,
-		list_db: Arc<Db>,
-		set_db: Arc<Db>,
-		zset_db: Arc<Db>,
-	) -> Self {
+	fn from_dbs(dbs: StorageDbs) -> Self {
 		Self {
-			string_db,
-			hash_db,
-			list_db,
-			set_db,
-			zset_db,
+			string_db: TypedDb::new(dbs.string),
+			hash_db: TypedDb::new(dbs.hash),
+			list_db: TypedDb::new(dbs.list),
+			set_db: TypedDb::new(dbs.set),
+			zset_db: TypedDb::new(dbs.zset),
 			locks: Arc::new(StorageLocks::new()),
 		}
 	}
 
 	pub(crate) async fn read_lock(
 		&self,
+		data_type: DataType,
 		keys: impl IntoIterator<Item = Bytes>,
 	) -> StorageLockGuard {
-		let lock = StorageLock::read_keys(keys);
+		let lock = StorageLock::read_keys(data_type, keys);
 		self.locks.acquire(&lock).await
 	}
 
 	pub(crate) async fn write_lock(
 		&self,
+		data_type: DataType,
 		keys: impl IntoIterator<Item = Bytes>,
 	) -> StorageLockGuard {
-		let lock = StorageLock::write_keys(keys);
+		let lock = StorageLock::write_keys(data_type, keys);
 		self.locks.acquire(&lock).await
 	}
 
@@ -217,7 +193,6 @@ impl Storage {
 		let child_path = |name: &'static str| root_path.child(name);
 
 		let marker = child_path(".nimbis");
-		let layout_is_current = layout_marker_is_current(object_store.as_ref(), &marker).await?;
 
 		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
@@ -263,298 +238,57 @@ impl Storage {
 			open_db_with_collection_filter("zset", DataType::ZSet)
 		)?;
 
-		let storage = Self::new(string_db, hash_db, list_db, set_db, zset_db);
-		// This runs before the server can accept commands. It is intentionally
-		// durable and idempotent so databases created by the old split-metadata
-		// layout converge to a single local authority without a runtime dual-read
-		// fallback.
-		if !layout_is_current {
-			storage.migrate_legacy_layout().await?;
-			// Publishing the version is the migration commit point. Every destination
-			// write and source delete is durable before this marker is replaced, so an
-			// empty/old marker always remains safe to retry after interruption.
-			object_store
-				.put(&marker, Bytes::from_static(CURRENT_LAYOUT_VERSION).into())
-				.await
-				.map_err(StorageError::from)?;
-		}
+		let storage = Self::from_dbs(StorageDbs {
+			string: string_db,
+			hash: hash_db,
+			list: list_db,
+			set: set_db,
+			zset: zset_db,
+		});
+		ensure_current_layout(&storage, object_store.as_ref(), &marker).await?;
 		Ok(storage)
 	}
 
-	pub(crate) fn db_for_type(&self, data_type: DataType) -> &Db {
+	/// Return a physical database for lifecycle, migration, and corruption-test
+	/// code. Command implementations should use their `TypedDb` field instead.
+	pub(crate) fn raw_db_for_type(&self, data_type: DataType) -> &Db {
 		match data_type {
-			DataType::String => &self.string_db,
-			DataType::Hash => &self.hash_db,
-			DataType::List => &self.list_db,
-			DataType::Set => &self.set_db,
-			DataType::ZSet => &self.zset_db,
+			DataType::String => self.string_db.raw(),
+			DataType::Hash => self.hash_db.raw(),
+			DataType::List => self.list_db.raw(),
+			DataType::Set => self.set_db.raw(),
+			DataType::ZSet => self.zset_db.raw(),
 		}
 	}
 
-	pub(crate) fn typed_dbs(&self) -> [(DataType, &Db); 5] {
+	#[cfg(test)]
+	pub(crate) fn all_raw_dbs(&self) -> [(DataType, &Db); 5] {
 		[
-			(DataType::String, &self.string_db),
-			(DataType::Hash, &self.hash_db),
-			(DataType::List, &self.list_db),
-			(DataType::Set, &self.set_db),
-			(DataType::ZSet, &self.zset_db),
+			(DataType::String, self.string_db.raw()),
+			(DataType::Hash, self.hash_db.raw()),
+			(DataType::List, self.list_db.raw()),
+			(DataType::Set, self.set_db.raw()),
+			(DataType::ZSet, self.zset_db.raw()),
 		]
 	}
 
-	fn normalized_top_level(kv: &slatedb::KeyValue) -> Result<NormalizedTopLevel, StorageError> {
-		let mut value = AnyValue::decode(&kv.value)?;
-		if value.version() == Some(0) {
-			value.set_version(kv.seq);
-		}
-
-		let logical_expire_ts = if value.data_type() == DataType::String {
-			// StringValue has no embedded expiration field. Its SlateDB row TTL is
-			// therefore the only recoverable logical deadline during migration.
-			kv.expire_ts
-		} else {
-			let encoded_expire_time = value.expire_time();
-			if encoded_expire_time == 0 {
-				// Older metadata may have relied only on the row TTL. Canonicalize that
-				// deadline into the payload before it is moved to the typed database.
-				if let Some(expire_ts) = kv.expire_ts {
-					value.set_expire_time(expire_ts.max(0) as u64);
-				}
-				kv.expire_ts
-			} else {
-				Some(i64::try_from(encoded_expire_time).map_err(|_| {
-					StorageError::DataInconsistency {
-						message: "metadata expiration exceeds SlateDB timestamp range".to_string(),
-					}
-				})?)
-			}
-		};
-
-		Ok(NormalizedTopLevel {
-			value,
-			logical_expire_ts,
-			row_expire_ts: kv.expire_ts,
-		})
-	}
-
-	fn destination_matches_source(
-		source: &NormalizedTopLevel,
-		destination: &NormalizedTopLevel,
-		expected_type: DataType,
-	) -> bool {
-		if destination.value.data_type() != expected_type
-			|| destination.value.encode() != source.value.encode()
-		{
-			return false;
-		}
-
-		match expected_type {
-			DataType::String => match (source.logical_expire_ts, destination.row_expire_ts) {
-				(None, None) => true,
-				// ExpireAfter is resolved by the destination DB after the migration
-				// call is queued. Accept only a non-shortening deadline: this makes a
-				// durable destination write safe to reuse after a crash without risking
-				// premature String loss.
-				(Some(source_expire_ts), Some(destination_expire_ts)) => {
-					destination_expire_ts >= source_expire_ts
-						&& destination_expire_ts.saturating_sub(source_expire_ts)
-							<= MAX_MIGRATION_TTL_DRIFT_MS
-				}
-				_ => false,
-			},
-			_ => {
-				if destination.logical_expire_ts != source.logical_expire_ts {
-					return false;
-				}
-				match (source.logical_expire_ts, destination.row_expire_ts) {
-					(None, None) => true,
-					(Some(logical_expire_ts), Some(row_expire_ts)) => {
-						row_expire_ts >= logical_expire_ts
-							&& row_expire_ts.saturating_sub(logical_expire_ts)
-								<= MAX_MIGRATION_TTL_DRIFT_MS
-					}
-					_ => false,
-				}
-			}
-		}
-	}
-
-	fn migration_put_opts(logical_expire_ts: Option<i64>) -> PutOptions {
-		let ttl = logical_expire_ts
-			.map(|expire_ts| {
-				let now = chrono::Utc::now().timestamp_millis();
-				slatedb::config::Ttl::ExpireAfter(expire_ts.saturating_sub(now).max(0) as u64)
-			})
-			.unwrap_or(slatedb::config::Ttl::NoExpiry);
-		PutOptions { ttl }
-	}
-
-	async fn copy_top_level_durably(
-		&self,
-		source_db: &Db,
-		destination_db: &Db,
-		encoded_key: Bytes,
-		source_kv: slatedb::KeyValue,
-		expected_type: DataType,
-	) -> Result<(), StorageError> {
-		let durable = WriteOptions {
-			await_durable: true,
-		};
-		if is_expired(source_kv.expire_ts) {
-			source_db.delete_with_options(encoded_key, &durable).await?;
-			return Ok(());
-		}
-
-		let source_value = Self::normalized_top_level(&source_kv)?;
-		if source_value.value.data_type() != expected_type {
-			return Err(StorageError::DataInconsistency {
-				message: format!(
-					"layout migration expected {expected_type:?}, found {:?}",
-					source_value.value.data_type()
-				),
-			});
-		}
-		if is_expired(source_value.logical_expire_ts) {
-			source_db.delete_with_options(encoded_key, &durable).await?;
-			return Ok(());
-		}
-		let normalized_source = source_value.value.encode();
-
-		if let Some(destination_kv) = destination_db.get_key_value(encoded_key.clone()).await? {
-			let destination_value = Self::normalized_top_level(&destination_kv)?;
-			if !Self::destination_matches_source(&source_value, &destination_value, expected_type) {
-				return Err(StorageError::DataInconsistency {
-					message: format!(
-						"conflicting {expected_type:?} metadata authorities during layout migration"
-					),
-				});
-			}
-		} else {
-			let put_opts = Self::migration_put_opts(source_value.logical_expire_ts);
-			destination_db
-				.put_with_options(
-					encoded_key.clone(),
-					normalized_source.clone(),
-					&put_opts,
-					&durable,
-				)
-				.await?;
-
-			let Some(destination_kv) = destination_db.get_key_value(encoded_key.clone()).await?
-			else {
-				// A key can expire while it is being migrated. The source remains a
-				// valid recovery authority unless it is now expired as well.
-				if is_expired(source_value.logical_expire_ts) {
-					source_db.delete_with_options(encoded_key, &durable).await?;
-					return Ok(());
-				}
-				return Err(StorageError::DataInconsistency {
-					message: format!(
-						"{expected_type:?} metadata was not visible after durable migration write"
-					),
-				});
-			};
-			let destination_value = Self::normalized_top_level(&destination_kv)?;
-			if !Self::destination_matches_source(&source_value, &destination_value, expected_type) {
-				// This destination did not exist before this invocation. Remove an
-				// incompatible copy so an old marker can retry instead of becoming
-				// permanently wedged on the next startup.
-				destination_db
-					.delete_with_options(encoded_key.clone(), &durable)
-					.await?;
-				return Err(StorageError::DataInconsistency {
-					message: format!(
-						"{expected_type:?} metadata verification failed after migration"
-					),
-				});
-			}
-		}
-
-		// The destination write is durable before the legacy authority is removed.
-		// A crash before this delete leaves two compatible copies; the next startup
-		// verifies payload, logical expiration and bounded row-TTL drift before it
-		// completes the delete.
-		source_db.delete_with_options(encoded_key, &durable).await?;
-		Ok(())
-	}
-
-	async fn migrate_legacy_source(
-		&self,
-		source_type: DataType,
-		source_db: &Db,
-	) -> Result<(), StorageError> {
-		let mut cursor = None;
-		loop {
-			let start = cursor.map_or(Bound::Unbounded, Bound::Excluded);
-			let mut stream = source_db
-				.scan::<Bytes, _>((start, Bound::Unbounded))
-				.await?;
-			let mut candidates = Vec::with_capacity(MIGRATION_SCAN_CHUNK_SIZE);
-			let mut scanned = 0;
-			let mut last_scanned_key = None;
-
-			while scanned < MIGRATION_SCAN_CHUNK_SIZE {
-				let Some(kv) = stream.next().await? else {
-					break;
-				};
-				scanned += 1;
-				last_scanned_key = Some(kv.key.clone());
-				if decode_exact_meta_key(&kv.key).is_none() || kv.value.is_empty() {
-					continue;
-				}
-				let Some(encoded_type) = DataType::from_u8(kv.value[0]) else {
-					continue;
-				};
-				let is_legacy = match source_type {
-					DataType::String => encoded_type != DataType::String,
-					_ => encoded_type == DataType::String,
-				};
-				if is_legacy {
-					candidates.push((encoded_type, kv));
-				}
-			}
-			drop(stream);
-
-			for (destination_type, kv) in candidates {
-				self.copy_top_level_durably(
-					source_db,
-					self.db_for_type(destination_type),
-					kv.key.clone(),
-					kv,
-					destination_type,
-				)
-				.await?;
-			}
-
-			if scanned < MIGRATION_SCAN_CHUNK_SIZE {
-				break;
-			}
-			cursor = last_scanned_key;
-		}
-		Ok(())
-	}
-
-	async fn migrate_legacy_layout(&self) -> Result<(), StorageError> {
-		// First recover Strings written into hash_db by the earlier hash-only
-		// co-location candidate. New writes never place Strings in collection DBs.
-		for (data_type, db) in self.typed_dbs().into_iter().skip(1) {
-			self.migrate_legacy_source(data_type, db).await?;
-		}
-
-		// Then move legacy collection metadata out of string_db. Each scan is
-		// bounded and dropped before its source rows are durably deleted.
-		self.migrate_legacy_source(DataType::String, &self.string_db)
-			.await?;
-		Ok(())
+	pub(crate) fn collection_raw_dbs(&self) -> [(DataType, &Db); 4] {
+		[
+			(DataType::Hash, self.hash_db.raw()),
+			(DataType::List, self.list_db.raw()),
+			(DataType::Set, self.set_db.raw()),
+			(DataType::ZSet, self.zset_db.raw()),
+		]
 	}
 
 	pub async fn close(&self) -> Result<(), StorageError> {
 		tokio::try_join!(
-			self.hash_db.close(),
-			self.list_db.close(),
-			self.set_db.close(),
-			self.zset_db.close(),
+			self.hash_db.raw().close(),
+			self.list_db.raw().close(),
+			self.set_db.raw().close(),
+			self.zset_db.raw().close(),
 		)?;
-		self.string_db.close().await?;
+		self.string_db.raw().close().await?;
 		Ok(())
 	}
 
@@ -581,103 +315,13 @@ impl Storage {
 			Ok(())
 		}
 
-		clear_db(&self.string_db).await?;
-		clear_db(&self.hash_db).await?;
-		clear_db(&self.list_db).await?;
-		clear_db(&self.set_db).await?;
-		clear_db(&self.zset_db).await?;
+		clear_db(self.string_db.raw()).await?;
+		clear_db(self.hash_db.raw()).await?;
+		clear_db(self.list_db.raw()).await?;
+		clear_db(self.set_db.raw()).await?;
+		clear_db(self.zset_db.raw()).await?;
 
 		Ok(())
-	}
-
-	/// Get and validate top-level data from its authoritative typed database.
-	/// Returns:
-	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
-	/// - Ok(None) if the key doesn't exist (expired keys are already filtered
-	///   by storage)
-	/// - Err if the key exists but is of wrong type
-	pub(crate) async fn get_meta<T: MetaValue>(
-		&self,
-		key: &Bytes,
-	) -> Result<Option<T>, StorageError> {
-		let db = T::data_type()
-			.map(|data_type| self.db_for_type(data_type))
-			// AnyValue is used for String decoding only; cross-type inspection is
-			// explicit through typed_dbs so same-name values can coexist.
-			.unwrap_or(&self.string_db);
-		Self::get_meta_from_db::<T>(db, key).await
-	}
-
-	pub(crate) async fn get_meta_from_db<T: MetaValue>(
-		db: &Db,
-		key: &Bytes,
-	) -> Result<Option<T>, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let kv = match db.get_key_value(meta_encoded_key.clone()).await? {
-			Some(kv) => kv,
-			None => return Ok(None),
-		};
-
-		if is_expired(kv.expire_ts) {
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
-			db.delete_with_options(meta_encoded_key, &write_opts)
-				.await?;
-			return Ok(None);
-		}
-
-		let meta_bytes = kv.value;
-
-		if meta_bytes.is_empty() {
-			return Ok(None);
-		}
-
-		let actual_type_u8 = meta_bytes[0];
-		if !T::is_type_match(actual_type_u8) {
-			return Err(StorageError::WrongType {
-				expected: T::data_type(),
-				actual: DataType::from_u8(actual_type_u8).unwrap_or(DataType::String),
-			});
-		}
-
-		let mut meta_val = T::decode(&meta_bytes)?;
-		if meta_val.version() == Some(0) {
-			meta_val.set_version(kv.seq);
-		}
-
-		let logical_expire_time = meta_val.expire_time();
-		if logical_expire_time == 0 {
-			if let Some(ts) = kv.expire_ts {
-				meta_val.set_expire_time(ts.max(0) as u64);
-			}
-		} else {
-			let logical_expire_ts = i64::try_from(logical_expire_time).map_err(|_| {
-				StorageError::DataInconsistency {
-					message: "metadata expiration exceeds SlateDB timestamp range".to_string(),
-				}
-			})?;
-			if is_expired(Some(logical_expire_ts)) {
-				let write_opts = WriteOptions {
-					await_durable: false,
-				};
-				db.delete_with_options(meta_encoded_key, &write_opts)
-					.await?;
-				return Ok(None);
-			}
-		}
-
-		Ok(Some(meta_val))
-	}
-
-	pub(crate) fn meta_put_opts(meta: &impl MetaValue) -> PutOptions {
-		let ttl = meta
-			.remaining_ttl()
-			.map(|d| d.as_millis() as u64)
-			.map(slatedb::config::Ttl::ExpireAfter)
-			.unwrap_or(slatedb::config::Ttl::NoExpiry);
-		PutOptions { ttl }
 	}
 }
 
@@ -686,6 +330,10 @@ mod tests {
 	use rstest::*;
 
 	use super::*;
+	use crate::layout_migration::test_support::CURRENT_LAYOUT_VERSION;
+	use crate::layout_migration::test_support::MAX_MIGRATION_TTL_DRIFT_MS;
+	use crate::layout_migration::test_support::MIGRATION_SCAN_CHUNK_SIZE;
+	use crate::layout_migration::test_support::logical_expire_ts;
 
 	struct TestContext {
 		storage: Storage,
@@ -787,26 +435,31 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_startup_migrates_every_legacy_collection_metadata_type() {
+		use crate::string::meta::CollectionMeta;
 		use crate::string::meta::HashMetaValue;
 		use crate::string::meta::ListMetaValue;
 		use crate::string::meta::SetMetaValue;
 		use crate::string::meta::ZSetMetaValue;
+		use crate::typed_db::metadata_put_options;
 
-		async fn move_meta_to_legacy<T: MetaValue>(
+		async fn move_meta_to_legacy<T: CollectionMeta>(
 			source: &Db,
 			string_db: &Db,
 			key: &Bytes,
 			delete_source: bool,
 		) -> u64 {
-			let meta = Storage::get_meta_from_db::<T>(source, key)
+			let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
+			let source_row = source
+				.get_key_value(encoded_key.clone())
 				.await
 				.unwrap()
 				.unwrap();
-			let encoded_key = MetaKey::new(key.clone()).encode();
+			let mut meta = T::decode(&source_row.value).unwrap();
+			meta.resolve_pending_generation(source_row.seq);
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};
-			let put_opts = Storage::meta_put_opts(&meta);
+			let put_opts = metadata_put_options(&meta).unwrap();
 			string_db
 				.put_with_options(encoded_key.clone(), meta.encode(), &put_opts, &write_opts)
 				.await
@@ -869,29 +522,29 @@ mod tests {
 		// source-not-deleted state left by a crash between the two migration writes.
 		let migrated_expirations = [
 			move_meta_to_legacy::<HashMetaValue>(
-				&storage.hash_db,
-				&storage.string_db,
+				storage.hash_db.raw(),
+				storage.string_db.raw(),
 				&hash_key,
 				false,
 			)
 			.await,
 			move_meta_to_legacy::<ListMetaValue>(
-				&storage.list_db,
-				&storage.string_db,
+				storage.list_db.raw(),
+				storage.string_db.raw(),
 				&list_key,
 				true,
 			)
 			.await,
 			move_meta_to_legacy::<SetMetaValue>(
-				&storage.set_db,
-				&storage.string_db,
+				storage.set_db.raw(),
+				storage.string_db.raw(),
 				&set_key,
 				true,
 			)
 			.await,
 			move_meta_to_legacy::<ZSetMetaValue>(
-				&storage.zset_db,
-				&storage.string_db,
+				storage.zset_db.raw(),
+				storage.string_db.raw(),
 				&zset_key,
 				true,
 			)
@@ -935,23 +588,26 @@ mod tests {
 			(DataType::Set, set_key),
 			(DataType::ZSet, zset_key),
 		] {
-			let encoded_key = MetaKey::new(key).encode();
+			let encoded_key = TopLevelKey::new(key).unwrap().encode();
 			assert!(
 				storage
 					.string_db
+					.raw()
 					.get(encoded_key.clone())
 					.await
 					.unwrap()
 					.is_none()
 			);
 			let migrated = storage
-				.db_for_type(data_type)
+				.raw_db_for_type(data_type)
 				.get_key_value(encoded_key)
 				.await
 				.unwrap()
 				.unwrap();
-			let normalized = Storage::normalized_top_level(&migrated).unwrap();
-			assert_eq!(normalized.logical_expire_ts, Some(expire_time as i64));
+			assert_eq!(
+				logical_expire_ts(&migrated).unwrap(),
+				Some(expire_time as i64)
+			);
 			let row_expire_ts = migrated.expire_ts.unwrap();
 			assert!(row_expire_ts >= expire_time as i64);
 			assert!(row_expire_ts - expire_time as i64 <= MAX_MIGRATION_TTL_DRIFT_MS);
@@ -974,6 +630,55 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_startup_rejects_malformed_legacy_collection_metadata_without_publishing_marker() {
+		use bytes::BufMut;
+		use bytes::BytesMut;
+
+		use crate::string::meta::HashMetaValue;
+
+		let timestamp = ulid::Ulid::generate().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_malformed_legacy_key_{timestamp}"));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+
+		// SlateDB itself rejects encoded keys longer than u16::MAX, so a historical
+		// 65,536-byte user key could never have been persisted through its write API.
+		// This is the largest persistable row and exercises the same unsafe case: a
+		// collection metadata value whose top-level key boundary is not exact.
+		let key = vec![b'k'; usize::from(u16::MAX) - 2];
+		let mut encoded_key = BytesMut::with_capacity(2 + key.len());
+		encoded_key.put_u16(0);
+		encoded_key.extend_from_slice(&key);
+		let encoded_key = encoded_key.freeze();
+		assert_eq!(&encoded_key[..2], &[0, 0]);
+		storage
+			.string_db
+			.raw()
+			.put(encoded_key, HashMetaValue::new(1, 1).encode())
+			.await
+			.unwrap();
+		storage.close().await.unwrap();
+		drop(storage);
+		mark_layout_legacy(&path).await;
+
+		let error = match Storage::open(&path, None).await {
+			Ok(storage) => {
+				storage.close().await.unwrap();
+				panic!("malformed legacy key must not publish the current layout")
+			}
+			Err(error) => error,
+		};
+		assert!(matches!(
+			error,
+			StorageError::DataInconsistency { message }
+				if message.contains("invalid top-level key length")
+		));
+		assert_eq!(tokio::fs::read(path.join(".nimbis")).await.unwrap(), b"");
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
 	async fn test_startup_recovers_string_from_hash_only_candidate_layout() {
 		use crate::string::value::StringValue;
 
@@ -982,9 +687,10 @@ mod tests {
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
 		let key = Bytes::from_static(b"misplaced-string");
-		let encoded_key = MetaKey::new(key.clone()).encode();
+		let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
 		storage
 			.hash_db
+			.raw()
 			.put(encoded_key.clone(), StringValue::new("value").encode())
 			.await
 			.unwrap();
@@ -1000,12 +706,21 @@ mod tests {
 		assert!(
 			storage
 				.hash_db
+				.raw()
 				.get(encoded_key.clone())
 				.await
 				.unwrap()
 				.is_none()
 		);
-		assert!(storage.string_db.get(encoded_key).await.unwrap().is_some());
+		assert!(
+			storage
+				.string_db
+				.raw()
+				.get(encoded_key)
+				.await
+				.unwrap()
+				.is_some()
+		);
 		storage.close().await.unwrap();
 		drop(storage);
 		let _ = std::fs::remove_dir_all(path);
@@ -1022,7 +737,7 @@ mod tests {
 		std::fs::create_dir_all(&path).unwrap();
 		let storage = Storage::open(&path, None).await.unwrap();
 		let key = Bytes::from_static(b"misplaced-string-retry");
-		let encoded_key = MetaKey::new(key.clone()).encode();
+		let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
 		let encoded_value = StringValue::new("value").encode();
 		let put_opts = PutOptions {
 			ttl: Ttl::ExpireAfter(120_000),
@@ -1033,6 +748,7 @@ mod tests {
 
 		storage
 			.hash_db
+			.raw()
 			.put_with_options(
 				encoded_key.clone(),
 				encoded_value.clone(),
@@ -1043,6 +759,7 @@ mod tests {
 			.unwrap();
 		let source_expire_ts = storage
 			.hash_db
+			.raw()
 			.get_key_value(encoded_key.clone())
 			.await
 			.unwrap()
@@ -1051,11 +768,13 @@ mod tests {
 			.unwrap();
 		storage
 			.string_db
+			.raw()
 			.put_with_options(encoded_key.clone(), encoded_value, &put_opts, &write_opts)
 			.await
 			.unwrap();
 		let destination_expire_ts = storage
 			.string_db
+			.raw()
 			.get_key_value(encoded_key.clone())
 			.await
 			.unwrap()
@@ -1076,6 +795,7 @@ mod tests {
 		assert!(
 			storage
 				.hash_db
+				.raw()
 				.get(encoded_key.clone())
 				.await
 				.unwrap()
@@ -1084,6 +804,7 @@ mod tests {
 		assert_eq!(
 			storage
 				.string_db
+				.raw()
 				.get_key_value(encoded_key)
 				.await
 				.unwrap()
@@ -1108,10 +829,13 @@ mod tests {
 		// This exact top-level key looks like legacy Hash metadata by its type byte,
 		// but is intentionally undecodable. A migration scan would make the next
 		// open fail; the current marker must bypass it.
-		let encoded_key = MetaKey::new("skip-migration-sentinel").encode();
+		let encoded_key = TopLevelKey::new("skip-migration-sentinel")
+			.unwrap()
+			.encode();
 		let invalid_hash_meta = Bytes::from(vec![DataType::Hash as u8]);
 		storage
 			.string_db
+			.raw()
 			.put(encoded_key.clone(), invalid_hash_meta.clone())
 			.await
 			.unwrap();
@@ -1120,7 +844,7 @@ mod tests {
 
 		let storage = Storage::open(&path, None).await.unwrap();
 		assert_eq!(
-			storage.string_db.get(encoded_key).await.unwrap(),
+			storage.string_db.raw().get(encoded_key).await.unwrap(),
 			Some(invalid_hash_meta)
 		);
 		storage.close().await.unwrap();
@@ -1145,8 +869,9 @@ mod tests {
 			let key = Bytes::from(format!("chunked-string-{index:04}"));
 			storage
 				.hash_db
+				.raw()
 				.put_with_options(
-					MetaKey::new(key).encode(),
+					TopLevelKey::new(key).unwrap().encode(),
 					StringValue::new(format!("value-{index}")).encode(),
 					&put_opts,
 					&write_opts,
@@ -1161,12 +886,20 @@ mod tests {
 		let storage = Storage::open(&path, None).await.unwrap();
 		for index in 0..count {
 			let key = Bytes::from(format!("chunked-string-{index:04}"));
-			let encoded_key = MetaKey::new(key.clone()).encode();
+			let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
 			assert_eq!(
 				storage.get(key).await.unwrap(),
 				Some(Bytes::from(format!("value-{index}")))
 			);
-			assert!(storage.hash_db.get(encoded_key).await.unwrap().is_none());
+			assert!(
+				storage
+					.hash_db
+					.raw()
+					.get(encoded_key)
+					.await
+					.unwrap()
+					.is_none()
+			);
 		}
 		storage.close().await.unwrap();
 		drop(storage);
@@ -1174,7 +907,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_meta_put_opts() {
+	fn test_metadata_put_options() {
 		use slatedb::config::Ttl;
 
 		use crate::string::meta::HashMetaValue;
@@ -1183,19 +916,19 @@ mod tests {
 
 		// Case 1: No expiration
 		val.expire_time = 0;
-		let opts = Storage::meta_put_opts(&val);
+		let opts = crate::typed_db::metadata_put_options(&val).unwrap();
 		assert_eq!(opts.ttl, Ttl::NoExpiry);
 
 		// Case 2: Expired
 		val.expire_time =
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
-		let opts = Storage::meta_put_opts(&val);
+		let opts = crate::typed_db::metadata_put_options(&val).unwrap();
 		assert_eq!(opts.ttl, Ttl::ExpireAfter(0));
 
 		// Case 3: Future expiration
 		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
 		val.expire_time = future;
-		let opts = Storage::meta_put_opts(&val);
+		let opts = crate::typed_db::metadata_put_options(&val).unwrap();
 		if let Ttl::ExpireAfter(millis) = opts.ttl {
 			assert!(millis > 0);
 			assert!(millis <= 10000);

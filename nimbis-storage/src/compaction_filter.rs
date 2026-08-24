@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use bytes::Buf;
 use bytes::Bytes;
 use log::debug;
 use log::warn;
@@ -12,8 +11,13 @@ use slatedb::RowEntry;
 use slatedb::ValueDeletable;
 
 use crate::data_type::DataType;
+use crate::hash::field_key::HashFieldKey;
+use crate::list::element_key::ListElementKey;
+use crate::set::member_key::SetMemberKey;
 use crate::string::meta::AnyValue;
-use crate::string::meta::MetaKey;
+use crate::top_level_key::TopLevelKey;
+use crate::zset::member_key::MemberKey;
+use crate::zset::score_key::ScoreKey;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Cutoff {
@@ -42,15 +46,9 @@ impl CollectionCompactionFilter {
 	/// Decode a top-level or sub-key to extract the user-key portion.
 	/// Key format: key_len(u16 BE) + user_key + optional suffix.
 	fn decode_user_key(key: &[u8]) -> Option<Bytes> {
-		if key.len() < 2 {
-			return None;
-		}
-		let mut buf = key;
-		let key_len = buf.get_u16() as usize;
-		if buf.len() < key_len {
-			return None;
-		}
-		Some(Bytes::copy_from_slice(&buf[..key_len]))
+		TopLevelKey::decode_prefix(key)
+			.ok()
+			.map(|(user_key, _)| user_key)
 	}
 
 	fn select_user_key(&mut self, user_key: &Bytes) {
@@ -62,29 +60,19 @@ impl CollectionCompactionFilter {
 	}
 
 	fn is_valid_sub_key(&self, encoded_key: &[u8], user_key: &Bytes) -> bool {
-		let prefix_len = 2 + user_key.len();
-		let Some(suffix) = encoded_key.get(prefix_len..) else {
+		let Ok((decoded_user_key, _)) = TopLevelKey::decode_prefix(encoded_key) else {
 			return false;
 		};
+		if decoded_user_key != user_key {
+			return false;
+		}
 		match self.data_type {
-			DataType::Hash | DataType::Set => {
-				if suffix.len() < 4 {
-					return false;
-				}
-				let mut remaining = suffix;
-				let value_len = remaining.get_u32() as usize;
-				remaining.len() == value_len
+			DataType::Hash => HashFieldKey::decode(encoded_key).is_ok(),
+			DataType::Set => SetMemberKey::decode(encoded_key).is_ok(),
+			DataType::List => ListElementKey::decode(encoded_key).is_ok(),
+			DataType::ZSet => {
+				MemberKey::decode(encoded_key).is_ok() || ScoreKey::decode(encoded_key).is_ok()
 			}
-			DataType::List => suffix.len() == 8,
-			DataType::ZSet => match suffix.first() {
-				Some(b'M') if suffix.len() >= 5 => {
-					let mut remaining = &suffix[1..];
-					let member_len = remaining.get_u32() as usize;
-					remaining.len() == member_len
-				}
-				Some(b'S') => suffix.len() >= 9,
-				_ => false,
-			},
 			DataType::String => false,
 		}
 	}
@@ -182,7 +170,9 @@ impl CompactionFilter for CollectionCompactionFilter {
 		};
 		self.select_user_key(&user_key);
 
-		let meta_encoded_key = MetaKey::new(user_key.clone()).encode();
+		let meta_encoded_key = TopLevelKey::new(user_key.clone())
+			.expect("decoded user key must fit")
+			.encode();
 		if entry.key == meta_encoded_key {
 			self.observe_meta(entry, &user_key);
 			return Ok(CompactionFilterDecision::Keep);
@@ -312,7 +302,9 @@ mod tests {
 			let key = Bytes::from_static(b"collection");
 			let mut filter = filter(data_type);
 			let meta = row(
-				MetaKey::new(key.clone()).encode(),
+				TopLevelKey::new(key.clone())
+					.expect("decoded user key must fit")
+					.encode(),
 				ValueDeletable::Value(encoded_meta),
 				20,
 				None,
@@ -351,7 +343,9 @@ mod tests {
 		let key = Bytes::from_static(b"pending");
 		let mut filter = filter(DataType::Hash);
 		let meta = row(
-			MetaKey::new(key.clone()).encode(),
+			TopLevelKey::new(key.clone())
+				.expect("decoded user key must fit")
+				.encode(),
 			ValueDeletable::Value(HashMetaValue::new(0, 1).encode()),
 			42,
 			None,
@@ -398,7 +392,9 @@ mod tests {
 	#[tokio::test]
 	async fn older_metadata_versions_do_not_override_the_newest() {
 		let key = Bytes::from_static(b"versions");
-		let meta_key = MetaKey::new(key.clone()).encode();
+		let meta_key = TopLevelKey::new(key.clone())
+			.expect("decoded user key must fit")
+			.encode();
 		let mut filter = filter(DataType::Hash);
 		let newest = row(
 			meta_key.clone(),
@@ -432,7 +428,9 @@ mod tests {
 		let key = Bytes::from_static(b"deleted");
 		let mut filter = filter(DataType::Set);
 		let deleted_meta = row(
-			MetaKey::new(key.clone()).encode(),
+			TopLevelKey::new(key.clone())
+				.expect("decoded user key must fit")
+				.encode(),
 			ValueDeletable::Tombstone,
 			20,
 			None,
@@ -474,7 +472,9 @@ mod tests {
 	#[tokio::test]
 	async fn retention_boundary_uses_an_older_snapshot_safe_cutoff() {
 		let key = Bytes::from_static(b"snapshot");
-		let meta_key = MetaKey::new(key.clone()).encode();
+		let meta_key = TopLevelKey::new(key.clone())
+			.expect("decoded user key must fit")
+			.encode();
 		let mut filter = filter(DataType::Hash);
 		filter.retention_min_seq = Some(50);
 
@@ -527,7 +527,9 @@ mod tests {
 
 		let mut expired_filter = filter(DataType::Set);
 		let expired_meta = row(
-			MetaKey::new(key.clone()).encode(),
+			TopLevelKey::new(key.clone())
+				.expect("decoded user key must fit")
+				.encode(),
 			ValueDeletable::Value(SetMetaValue::new(1, 1).encode()),
 			2,
 			Some(999),
@@ -537,10 +539,22 @@ mod tests {
 			expired_filter.filter(&subkey).await.unwrap(),
 			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
 		);
+		let same_batch_subkey = row(
+			sub_key(DataType::Set, &key, b"same-batch-member"),
+			ValueDeletable::Value(Bytes::new()),
+			2,
+			None,
+		);
+		assert_eq!(
+			expired_filter.filter(&same_batch_subkey).await.unwrap(),
+			CompactionFilterDecision::Modify(ValueDeletable::Tombstone)
+		);
 
 		let mut string_filter = filter(DataType::Hash);
 		let string_meta = row(
-			MetaKey::new(key).encode(),
+			TopLevelKey::new(key)
+				.expect("decoded user key must fit")
+				.encode(),
 			ValueDeletable::Value(StringValue::new("replacement").encode()),
 			2,
 			None,

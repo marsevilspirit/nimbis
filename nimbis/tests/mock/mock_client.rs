@@ -12,6 +12,27 @@ use nimbis_resp::RespValue;
 
 use crate::mock::utils::resp_to_strings;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyType {
+	String,
+	Hash,
+	List,
+	Set,
+	ZSet,
+}
+
+impl KeyType {
+	const fn as_str(self) -> &'static str {
+		match self {
+			Self::String => "STRING",
+			Self::Hash => "HASH",
+			Self::List => "LIST",
+			Self::Set => "SET",
+			Self::ZSet => "ZSET",
+		}
+	}
+}
+
 pub struct MockNimbisClient {
 	id: i64,
 	stream: TcpStream,
@@ -120,17 +141,28 @@ impl MockNimbisClient {
 
 	// -- string commands --
 
-	pub fn del(&mut self, data_type: &str, key: &str) -> i64 {
-		self.execute(&["DEL", data_type, key])
+	pub fn del(&mut self, key_type: KeyType, key: &str) -> i64 {
+		self.del_many(key_type, &[key])
+	}
+
+	pub fn del_many(&mut self, key_type: KeyType, keys: &[&str]) -> i64 {
+		let mut args = vec!["DEL", key_type.as_str()];
+		args.extend_from_slice(keys);
+		self.execute(&args)
 			.as_integer()
 			.expect("DEL should return integer")
 	}
 
-	pub fn exists(&mut self, data_type: &str, key: &str) -> bool {
-		self.execute(&["EXISTS", data_type, key])
+	pub fn exists(&mut self, key_type: KeyType, key: &str) -> bool {
+		self.exists_many(key_type, &[key]) == 1
+	}
+
+	pub fn exists_many(&mut self, key_type: KeyType, keys: &[&str]) -> i64 {
+		let mut args = vec!["EXISTS", key_type.as_str()];
+		args.extend_from_slice(keys);
+		self.execute(&args)
 			.as_integer()
 			.expect("EXISTS should return integer")
-			== 1
 	}
 
 	pub fn incr(&mut self, key: &str) -> i64 {
@@ -310,16 +342,16 @@ impl MockNimbisClient {
 
 	// -- expiry commands --
 
-	pub fn expire(&mut self, data_type: &str, key: &str, seconds: u64) -> bool {
+	pub fn expire(&mut self, key_type: KeyType, key: &str, seconds: u64) -> bool {
 		let secs = seconds.to_string();
-		self.execute(&["EXPIRE", data_type, key, &secs])
+		self.execute(&["EXPIRE", key_type.as_str(), key, &secs])
 			.as_integer()
 			.expect("EXPIRE should return integer")
 			== 1
 	}
 
-	pub fn ttl(&mut self, data_type: &str, key: &str) -> i64 {
-		self.execute(&["TTL", data_type, key])
+	pub fn ttl(&mut self, key_type: KeyType, key: &str) -> i64 {
+		self.execute(&["TTL", key_type.as_str(), key])
 			.as_integer()
 			.expect("TTL should return integer")
 	}
