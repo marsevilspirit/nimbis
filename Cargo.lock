@@ -759,13 +759,14 @@ dependencies = [
 
 [[package]]
 name = "fail-parallel"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5666e8ca4ec174d896fb742789c29b1bea9319dcfd623c41bececc0a60c4939d"
+checksum = "c6f4a147ba57fcd64323c54c8f69fd4e045456a99574163010ccf5eea3168aaa"
 dependencies = [
  "log",
  "once_cell",
- "rand 0.8.6",
+ "rand 0.9.2",
+ "tokio",
 ]
 
 [[package]]
