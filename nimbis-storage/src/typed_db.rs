@@ -1,14 +1,18 @@
 use std::marker::PhantomData;
-use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use slatedb::ByteRangeBounds;
 use slatedb::Db;
 use slatedb::DbIterator;
 use slatedb::KeyValue;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
+#[cfg(test)]
+use slatedb_common::metrics::DefaultMetricsRecorder;
+#[cfg(test)]
+use slatedb_common::metrics::lookup_metric;
 
 use crate::error::StorageError;
 use crate::expiration::ttl_for_expiration;
@@ -25,6 +29,8 @@ use crate::top_level_row::normalize_top_level_row;
 /// reserved for lifecycle, migration, and explicit on-disk-state tests.
 pub(crate) struct TypedDb<V> {
 	db: Arc<Db>,
+	#[cfg(test)]
+	metrics: Arc<DefaultMetricsRecorder>,
 	value: PhantomData<fn() -> V>,
 }
 
@@ -32,15 +38,19 @@ impl<V> Clone for TypedDb<V> {
 	fn clone(&self) -> Self {
 		Self {
 			db: self.db.clone(),
+			#[cfg(test)]
+			metrics: self.metrics.clone(),
 			value: PhantomData,
 		}
 	}
 }
 
 impl<V> TypedDb<V> {
-	pub(crate) fn new(db: Arc<Db>) -> Self {
+	pub(crate) fn new(db: Arc<Db>, #[cfg(test)] metrics: Arc<DefaultMetricsRecorder>) -> Self {
 		Self {
 			db,
+			#[cfg(test)]
+			metrics,
 			value: PhantomData,
 		}
 	}
@@ -50,6 +60,12 @@ impl<V> TypedDb<V> {
 	/// command paths must use the typed read APIs and `commit` instead.
 	pub(crate) fn raw(&self) -> &Db {
 		&self.db
+	}
+
+	#[cfg(test)]
+	pub(crate) fn metric(&self, name: &'static str) -> i64 {
+		lookup_metric(&self.metrics, name)
+			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
 	}
 }
 
@@ -77,9 +93,7 @@ impl<V: TopLevelValue> TypedDb<V> {
 	}
 
 	async fn delete_top_level(&self, encoded_key: Bytes) -> Result<(), StorageError> {
-		let write_options = WriteOptions {
-			await_durable: false,
-		};
+		let write_options = WriteOptions::default();
 		self.db
 			.delete_with_options(encoded_key, &write_options)
 			.await?;
@@ -95,9 +109,7 @@ impl TypedDb<StringValue> {
 		key: TopLevelKey,
 		value: StringValue,
 	) -> Result<(), StorageError> {
-		let write_options = WriteOptions {
-			await_durable: false,
-		};
+		let write_options = WriteOptions::default();
 		self.db
 			.put_with_options(
 				key.encode(),
@@ -126,12 +138,11 @@ impl<M: CollectionMeta> TypedDb<M> {
 	}
 
 	/// Scan physical sub-keys belonging to this collection database.
-	pub(crate) async fn scan_entries<K, T>(&self, range: T) -> Result<DbIterator, StorageError>
+	pub(crate) async fn scan_entries<T>(&self, range: T) -> Result<DbIterator, StorageError>
 	where
-		K: AsRef<[u8]> + Send,
-		T: RangeBounds<K> + Send,
+		T: ByteRangeBounds + Send,
 	{
-		Ok(self.db.scan::<K, _>(range).await?)
+		Ok(self.db.scan(range).await?)
 	}
 
 	/// Scan physical sub-keys sharing a prefix in this collection database.
@@ -139,7 +150,7 @@ impl<M: CollectionMeta> TypedDb<M> {
 		&self,
 		prefix: P,
 	) -> Result<DbIterator, StorageError> {
-		Ok(self.db.scan_prefix(prefix).await?)
+		Ok(self.db.scan_prefix(prefix, ..).await?)
 	}
 
 	pub(crate) async fn load(&self, key: &Bytes) -> Result<Option<M>, StorageError> {
@@ -166,9 +177,7 @@ impl<M: CollectionMeta> TypedDb<M> {
 		if batch.is_empty() {
 			return Ok(());
 		}
-		let write_options = WriteOptions {
-			await_durable: false,
-		};
+		let write_options = WriteOptions::default();
 		self.db.write_with_options(batch, &write_options).await?;
 		Ok(())
 	}

@@ -5,6 +5,7 @@ use slatedb::Db;
 use slatedb::config::PutOptions;
 use slatedb::config::WriteOptions;
 use slatedb::object_store::ObjectStore;
+use slatedb::object_store::ObjectStoreExt;
 use slatedb::object_store::path::Path as ObjectStorePath;
 
 use crate::data_type::DataType;
@@ -73,7 +74,7 @@ fn destination_matches_source(
 	match expected_type {
 		DataType::String => match (source.logical_expire_ts, destination.row_expire_ts) {
 			(None, None) => true,
-			// ExpireAfter is resolved by the destination DB after the migration
+			// ExpireAfterMillis is resolved by the destination DB after the migration
 			// call is queued. Accept only a non-shortening deadline: this makes a
 			// durable destination write safe to reuse after a crash without risking
 			// premature String loss.
@@ -116,9 +117,6 @@ async fn copy_top_level_durably(
 	source_kv: slatedb::KeyValue,
 	expected_type: DataType,
 ) -> Result<(), StorageError> {
-	let durable = WriteOptions {
-		await_durable: true,
-	};
 	let source_value = normalize_top_level_row::<AnyValue>(
 		&source_kv.value,
 		source_kv.seq,
@@ -126,7 +124,10 @@ async fn copy_top_level_durably(
 		expected_type,
 	)?;
 	if source_value.is_expired() {
-		source_db.delete_with_options(encoded_key, &durable).await?;
+		let handle = source_db
+			.delete_with_options(encoded_key, &WriteOptions::default())
+			.await?;
+		handle.await_durable().await?;
 		return Ok(());
 	}
 	let normalized_source = source_value.value.encode();
@@ -147,20 +148,24 @@ async fn copy_top_level_durably(
 		}
 	} else {
 		let put_options = migration_put_options(source_value.logical_expire_ts)?;
-		destination_db
+		let handle = destination_db
 			.put_with_options(
 				encoded_key.clone(),
 				normalized_source.clone(),
 				&put_options,
-				&durable,
+				&WriteOptions::default(),
 			)
 			.await?;
+		handle.await_durable().await?;
 
 		let Some(destination_kv) = destination_db.get_key_value(encoded_key.clone()).await? else {
 			// A key can expire while it is being migrated. The source remains a
 			// valid recovery authority unless it is now expired as well.
 			if source_value.is_expired() {
-				source_db.delete_with_options(encoded_key, &durable).await?;
+				let handle = source_db
+					.delete_with_options(encoded_key, &WriteOptions::default())
+					.await?;
+				handle.await_durable().await?;
 				return Ok(());
 			}
 			return Err(StorageError::DataInconsistency {
@@ -179,9 +184,10 @@ async fn copy_top_level_durably(
 			// This destination did not exist before this invocation. Remove an
 			// incompatible copy so an old marker can retry instead of becoming
 			// permanently wedged on the next startup.
-			destination_db
-				.delete_with_options(encoded_key.clone(), &durable)
+			let handle = destination_db
+				.delete_with_options(encoded_key.clone(), &WriteOptions::default())
 				.await?;
+			handle.await_durable().await?;
 			return Err(StorageError::DataInconsistency {
 				message: format!("{expected_type:?} metadata verification failed after migration"),
 			});
@@ -192,7 +198,10 @@ async fn copy_top_level_durably(
 	// A crash before this delete leaves two compatible copies; the next startup
 	// verifies payload, logical expiration and bounded row-TTL drift before it
 	// completes the delete.
-	source_db.delete_with_options(encoded_key, &durable).await?;
+	let handle = source_db
+		.delete_with_options(encoded_key, &WriteOptions::default())
+		.await?;
+	handle.await_durable().await?;
 	Ok(())
 }
 
@@ -204,9 +213,7 @@ async fn migrate_legacy_source(
 	let mut cursor = None;
 	loop {
 		let start = cursor.map_or(Bound::Unbounded, Bound::Excluded);
-		let mut stream = source_db
-			.scan::<Bytes, _>((start, Bound::Unbounded))
-			.await?;
+		let mut stream = source_db.scan((start, Bound::Unbounded)).await?;
 		let mut candidates = Vec::with_capacity(MIGRATION_SCAN_CHUNK_SIZE);
 		let mut scanned = 0;
 		let mut last_scanned_key = None;

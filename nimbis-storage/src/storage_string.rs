@@ -146,11 +146,8 @@ mod tests {
 		DataType::ZSet,
 	];
 
-	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
-		db.metrics()
-			.lookup(name)
-			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
-			.get()
+	fn metric<V>(db: &crate::typed_db::TypedDb<V>, name: &'static str) -> i64 {
+		db.metric(name)
 	}
 
 	async fn seed_all_types(storage: &Storage, key: &Bytes) {
@@ -445,7 +442,7 @@ mod tests {
 		}
 
 		let before_batches = ALL_DATA_TYPES
-			.map(|data_type| metric(storage.raw_db_for_type(data_type), "db/write_batch_count"));
+			.map(|data_type| storage.metric_for_type(data_type, "slatedb.db.write_batch_count"));
 		assert_eq!(
 			storage
 				.del(
@@ -464,9 +461,9 @@ mod tests {
 		);
 
 		for (index, data_type) in ALL_DATA_TYPES.into_iter().enumerate() {
-			let written_batches =
-				metric(storage.raw_db_for_type(data_type), "db/write_batch_count")
-					- before_batches[index];
+			let written_batches = storage
+				.metric_for_type(data_type, "slatedb.db.write_batch_count")
+				- before_batches[index];
 			assert_eq!(
 				written_batches,
 				if data_type == DataType::Hash { 1 } else { 0 },
@@ -495,7 +492,7 @@ mod tests {
 			2
 		);
 
-		let before_missing_delete = metric(storage.hash_db.raw(), "db/write_batch_count");
+		let before_missing_delete = metric(&storage.hash_db, "slatedb.db.write_batch_count");
 		assert_eq!(
 			storage
 				.del(DataType::Hash, [key_a, key_b, missing])
@@ -504,7 +501,7 @@ mod tests {
 			0
 		);
 		assert_eq!(
-			metric(storage.hash_db.raw(), "db/write_batch_count"),
+			metric(&storage.hash_db, "slatedb.db.write_batch_count"),
 			before_missing_delete,
 			"an all-missing typed DEL must not submit an empty batch"
 		);

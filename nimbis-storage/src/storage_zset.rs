@@ -325,11 +325,8 @@ mod tests {
 	use crate::string::meta::ZSetMetaValue;
 	use crate::typed_db::metadata_put_options;
 
-	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
-		db.metrics()
-			.lookup(name)
-			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
-			.get()
+	fn metric<V>(db: &crate::typed_db::TypedDb<V>, name: &'static str) -> i64 {
+		db.metric(name)
 	}
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
@@ -432,9 +429,9 @@ mod tests {
 		let m1 = Bytes::from("m1");
 		let m2 = Bytes::from("m2");
 		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
-		let before_zset_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_zset_ops = metric(storage.zset_db.raw(), "db/write_ops");
-		let before_string_batches = metric(storage.string_db.raw(), "db/write_batch_count");
+		let before_zset_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_zset_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
+		let before_string_batches = metric(&storage.string_db, "slatedb.db.write_batch_count");
 
 		let added = storage
 			.zadd(
@@ -445,15 +442,15 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 2);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_zset_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_zset_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_zset_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_zset_ops,
 			5
 		);
 		assert_eq!(
-			metric(storage.string_db.raw(), "db/write_batch_count") - before_string_batches,
+			metric(&storage.string_db, "slatedb.db.write_batch_count") - before_string_batches,
 			0
 		);
 
@@ -528,8 +525,8 @@ mod tests {
 			.unwrap()
 			.unwrap();
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		assert_eq!(
 			storage
 				.zadd(key.clone(), vec![(2.0, member.clone())])
@@ -538,11 +535,11 @@ mod tests {
 			0
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			4
 		);
 		let raw_meta_after = storage
@@ -585,8 +582,8 @@ mod tests {
 			Some(2.0)
 		);
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		assert_eq!(
 			storage
 				.zadd(
@@ -600,11 +597,11 @@ mod tests {
 		assert_eq!(storage.zadd(key.clone(), Vec::new()).await.unwrap(), 0);
 		assert_eq!(storage.zrem(key, Vec::new()).await.unwrap(), 0);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 
@@ -652,19 +649,19 @@ mod tests {
 			.await
 			.unwrap();
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		let removed = storage
 			.zrem(key.clone(), vec![m1.clone(), m1, m2.clone(), m2])
 			.await
 			.unwrap();
 		assert_eq!(removed, 2);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			5
 		);
 		assert_eq!(storage.zcard(key.clone()).await.unwrap(), 1);
@@ -673,8 +670,8 @@ mod tests {
 			vec![m3.clone()]
 		);
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		assert_eq!(
 			storage
 				.zrem(
@@ -686,16 +683,16 @@ mod tests {
 			0
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		assert_eq!(
 			storage
 				.zrem(key.clone(), vec![m3.clone(), m3])
@@ -704,11 +701,11 @@ mod tests {
 			1
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			3
 		);
 		assert!(
@@ -753,8 +750,8 @@ mod tests {
 			.unwrap_err();
 		assert!(matches!(err, StorageError::DataInconsistency { .. }));
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		let err = storage
 			.zadd(key.clone(), vec![(4.0, corrupt.clone())])
 			.await
@@ -766,11 +763,11 @@ mod tests {
 			.unwrap_err();
 		assert!(matches!(err, StorageError::DataInconsistency { .. }));
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 		assert!(
@@ -812,9 +809,7 @@ mod tests {
 		meta.expire_time =
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_add(60_000);
 		let put_opts = metadata_put_options(&meta).unwrap();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 		storage
 			.zset_db
 			.raw()
@@ -883,9 +878,7 @@ mod tests {
 
 		let mut meta = storage.zset_db.load(&key).await.unwrap().unwrap();
 		meta.len = 1;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 		storage
 			.zset_db
 			.raw()
@@ -898,19 +891,19 @@ mod tests {
 			.await
 			.unwrap();
 
-		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.zset_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.zset_db, "slatedb.db.write_ops");
 		let err = storage
 			.zrem(key.clone(), vec![m1.clone(), m2.clone()])
 			.await
 			.unwrap_err();
 		assert!(matches!(err, StorageError::DataInconsistency { .. }));
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.zset_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.zset_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 		assert!(
