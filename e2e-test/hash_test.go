@@ -119,7 +119,7 @@ var _ = Describe("Hash Commands", func() {
 		Expect(n).To(Equal(int64(1)))
 
 		// Verify key gone
-		exists, err := rdb.Exists(ctx, key).Result()
+		exists, err := util.Exists(ctx, rdb, util.HashType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exists).To(Equal(int64(0)))
 	})

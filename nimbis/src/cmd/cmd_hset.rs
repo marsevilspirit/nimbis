@@ -36,24 +36,15 @@ impl Cmd for HSetCmd {
 			);
 		}
 
-		let key = &args[0];
-		let mut added_count = 0;
-
 		let (chunks, remainder) = args[1..].as_chunks::<2>();
 		debug_assert!(remainder.is_empty());
-		for [field, value] in chunks {
-			// TODO: Optimize by handling errors gracefully or transactional vs partial
-			// success? Redis HSET is atomic per key. Here we do sequential updates.
-			// If one fails, we return error.
-			match storage
-				.hset(key.clone(), field.clone(), value.clone())
-				.await
-			{
-				Ok(count) => added_count += count,
-				Err(e) => return RespValue::error(e.to_string()),
-			}
+		let fields = chunks
+			.iter()
+			.map(|[field, value]| (field.clone(), value.clone()))
+			.collect();
+		match storage.hset_many(args[0].clone(), fields).await {
+			Ok(added_count) => RespValue::integer(added_count),
+			Err(e) => RespValue::error(e.to_string()),
 		}
-
-		RespValue::integer(added_count)
 	}
 }

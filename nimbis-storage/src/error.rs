@@ -1,7 +1,5 @@
 use thiserror::Error;
 
-use crate::data_type::DataType;
-
 #[derive(Debug, Error)]
 pub enum DecoderError {
 	#[error("Empty key, cannot decode")]
@@ -32,15 +30,6 @@ pub enum StorageError {
 		source: Box<dyn std::error::Error + Send + Sync>,
 	},
 
-	/// Type checking error - operation against wrong data type
-	#[error(
-		"WRONGTYPE Operation against a key holding the wrong kind of value (expected: {expected:?}, actual: {actual:?})"
-	)]
-	WrongType {
-		expected: Option<DataType>,
-		actual: DataType,
-	},
-
 	/// Encoding/Decoding error
 	#[error("Failed to decode data: {source}")]
 	DecodeError {
@@ -62,6 +51,14 @@ pub enum StorageError {
 	/// Object store configuration failed
 	#[error("Object store configuration failed: {message}")]
 	ObjectStoreConfig { message: String },
+
+	/// The user key cannot be represented by the on-disk key codec.
+	#[error("Key length {length} exceeds the supported maximum of {max} bytes")]
+	InvalidKeyLength { length: usize, max: usize },
+
+	/// The absolute expiration exceeds Nimbis's supported logical deadline.
+	#[error("Expiration timestamp {timestamp} exceeds the supported maximum of {max} milliseconds")]
+	InvalidExpiration { timestamp: u64, max: u64 },
 }
 
 impl StorageError {
@@ -69,11 +66,12 @@ impl StorageError {
 	pub fn code(&self) -> &'static str {
 		match self {
 			Self::DatabaseError { .. } => "E1000",
-			Self::WrongType { .. } => "E1001",
 			Self::DecodeError { .. } => "E1002",
 			Self::IoError { .. } => "E1003",
 			Self::DataInconsistency { .. } => "E1004",
 			Self::ObjectStoreConfig { .. } => "E1005",
+			Self::InvalidKeyLength { .. } => "E1006",
+			Self::InvalidExpiration { .. } => "E1007",
 		}
 	}
 
@@ -85,14 +83,6 @@ impl StorageError {
 				format!("{}:{}", self.code(), source.code())
 			}
 			_ => self.code().to_string(),
-		}
-	}
-
-	/// Helper to create a WrongType error with expected type
-	pub fn wrong_type(expected: DataType, actual: DataType) -> Self {
-		Self::WrongType {
-			expected: Some(expected),
-			actual,
 		}
 	}
 }
@@ -223,9 +213,6 @@ mod tests {
 		};
 		assert_eq!(db_err.code(), "E1000");
 
-		let wrong_type_err = StorageError::wrong_type(DataType::String, DataType::Hash);
-		assert_eq!(wrong_type_err.code(), "E1001");
-
 		let decode_err = StorageError::from(DecoderError::Empty);
 		assert_eq!(decode_err.code(), "E1002");
 
@@ -244,6 +231,12 @@ mod tests {
 			message: "test".into(),
 		};
 		assert_eq!(object_store_err.code(), "E1005");
+
+		let invalid_expiration = StorageError::InvalidExpiration {
+			timestamp: u64::MAX,
+			max: crate::expiration::MAX_EXPIRATION_TIMESTAMP_MS,
+		};
+		assert_eq!(invalid_expiration.code(), "E1007");
 	}
 
 	#[test]
@@ -264,7 +257,9 @@ mod tests {
 
 	#[test]
 	fn test_storage_error_codes_unique() {
-		let codes = ["E1000", "E1001", "E1002", "E1003", "E1004", "E1005"];
+		let codes = [
+			"E1000", "E1002", "E1003", "E1004", "E1005", "E1006", "E1007",
+		];
 		let unique_codes: std::collections::HashSet<_> = codes.iter().collect();
 		assert_eq!(
 			codes.len(),

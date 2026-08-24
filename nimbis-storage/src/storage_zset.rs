@@ -1,99 +1,111 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use bytes::Bytes;
 use futures::future;
 use nimbis_macros::storage_lock;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
-use slatedb::config::WriteOptions;
 
+use crate::data_type::DataType;
 use crate::error::StorageError;
 use crate::storage::Storage;
-use crate::string::meta::MetaKey;
 use crate::string::meta::ZSetMetaValue;
-use crate::utils::zset_score_user_key_prefix;
+use crate::top_level_key::TopLevelKey;
+use crate::typed_db::MetadataChange;
 use crate::zset::member_key::MemberKey;
 use crate::zset::score_key::ScoreKey;
 
+fn decode_stored_score(value: &[u8]) -> Result<f64, StorageError> {
+	let score_bytes: [u8; 8] = value
+		.try_into()
+		.map_err(|_| StorageError::DataInconsistency {
+			message: format!(
+				"invalid zset member score length: expected 8 bytes, got {}",
+				value.len()
+			),
+		})?;
+	Ok(ScoreKey::decode_score(u64::from_be_bytes(score_bytes)))
+}
+
 impl Storage {
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::ZSet)]
 	#[fastrace::trace]
 	pub async fn zadd(
 		&self,
 		key: Bytes,
 		elements: Vec<(f64, Bytes)>, // (score, member)
 	) -> Result<u64, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
-		let put_opts = PutOptions::default();
-
-		// Get metadata first to obtain version
-		let (mut meta_val, meta_missing) = match self.get_meta::<ZSetMetaValue>(&key).await? {
-			Some(val) => (val, false),
-			None => (ZSetMetaValue::new(0, 0), true),
-		};
-
-		// Deduplicate elements, keeping the LAST score for each member (Redis ZADD
-		// behavior)
-		let mut unique_elements = std::collections::HashMap::new();
+		// Deduplicate elements, keeping the last score for each member (Redis ZADD
+		// behavior). An empty input must not even trigger expired-metadata cleanup.
+		let mut unique_elements = HashMap::new();
 		for (score, member) in elements {
 			unique_elements.insert(member, score);
+		}
+		if unique_elements.is_empty() {
+			return Ok(0);
 		}
 		let elements: Vec<_> = unique_elements
 			.into_iter()
 			.map(|(member, score)| (score, member))
 			.collect();
 
+		let put_opts = PutOptions::default();
+
+		let (mut meta_val, meta_missing) = match self.zset_db.load(&key).await? {
+			Some(val) => (val, false),
+			None => (ZSetMetaValue::new(0, 0), true),
+		};
+
 		// Unconditionally encode all member keys since we need them for insertion
 		let member_encoded_keys: Vec<_> = elements
 			.iter()
 			.map(|(_, member)| MemberKey::new(key.clone(), member.clone()).encode())
-			.collect();
+			.collect::<Result<_, _>>()?;
 
-		let old_values: Vec<_> = if meta_missing {
+		let old_scores: Vec<_> = if meta_missing {
 			vec![None; elements.len()]
 		} else {
 			// Fetch all existing members concurrently
 			let member_futs = member_encoded_keys
 				.iter()
-				.map(|enc| self.zset_db.get_key_value(enc.clone()));
+				.map(|enc| self.zset_db.get_entry(enc.clone()));
 
-			future::join_all(member_futs)
+			let old_values = future::join_all(member_futs)
 				.await
 				.into_iter()
-				.collect::<Result<Vec<_>, _>>()?
+				.collect::<Result<Vec<_>, _>>()?;
+			old_values
 				.into_iter()
-				.map(|entry| match entry {
-					Some(kv) if kv.seq >= meta_val.version => Some(kv.value),
-					_ => None,
+				.map(|entry| -> Result<_, StorageError> {
+					match entry {
+						Some(kv) if kv.seq >= meta_val.version => {
+							Ok(Some(decode_stored_score(&kv.value)?))
+						}
+						_ => Ok(None),
+					}
 				})
-				.collect()
+				.collect::<Result<Vec<_>, _>>()?
 		};
 
-		let mut added_count = 0;
-		let mut first_new_member_key: Option<Bytes> = None;
-		// Use WriteBatch to ensure atomicity of all zset operations
+		let mut added_count = 0_u64;
 		let mut batch = WriteBatch::new();
 		let mut has_writes = false;
 
 		for (idx, (score, member)) in elements.into_iter().enumerate() {
 			let encoded_member_key = &member_encoded_keys[idx];
-			let old_score_bytes = &old_values[idx];
 
-			if let Some(old_score_bytes) = old_score_bytes {
+			if let Some(old_score) = old_scores[idx] {
 				// Update existing member
-				let old_score =
-					ScoreKey::decode_score(u64::from_be_bytes(old_score_bytes[..8].try_into()?));
 				if old_score != score {
 					has_writes = true;
 					// Delete old ScoreKey
 					let old_score_key = ScoreKey::new(key.clone(), old_score, member.clone());
-					batch.delete(old_score_key.encode());
+					batch.delete(old_score_key.encode()?);
 
 					// Add new ScoreKey
 					let new_score_key = ScoreKey::new(key.clone(), score, member.clone());
-					batch.put_with_options(new_score_key.encode(), Bytes::new(), &put_opts);
+					batch.put_with_options(new_score_key.encode()?, Bytes::new(), &put_opts);
 
 					// Update MemberKey
 					let encoded_score = ScoreKey::encode_score(score);
@@ -106,10 +118,12 @@ impl Storage {
 			} else {
 				has_writes = true;
 				// New member
-				added_count += 1;
-				if first_new_member_key.is_none() {
-					first_new_member_key = Some(encoded_member_key.clone());
-				}
+				added_count =
+					added_count
+						.checked_add(1)
+						.ok_or_else(|| StorageError::DataInconsistency {
+							message: "zset added member count overflow during ZADD".to_string(),
+						})?;
 
 				// Add MemberKey
 				let encoded_score = ScoreKey::encode_score(score);
@@ -121,44 +135,32 @@ impl Storage {
 
 				// Add ScoreKey
 				let score_key = ScoreKey::new(key.clone(), score, member);
-				batch.put_with_options(score_key.encode(), Bytes::new(), &put_opts);
+				batch.put_with_options(score_key.encode()?, Bytes::new(), &put_opts);
 			}
 		}
 
-		if has_writes {
-			self.zset_db.write_with_options(batch, &write_opts).await?;
-		}
-
-		if meta_missing && added_count > 0 {
-			let Some(first_key) = first_new_member_key else {
-				return Err(StorageError::DataInconsistency {
-					message: "missing first new zset member key after write".to_string(),
-				});
-			};
-			let first_entry = self
-				.zset_db
-				.get_key_value(first_key)
-				.await?
-				.ok_or_else(|| StorageError::DataInconsistency {
-					message: "failed to read first new zset member after write".to_string(),
-				})?;
-			meta_val.version = first_entry.seq;
+		if !has_writes {
+			return Ok(0);
 		}
 
 		if added_count > 0 {
-			meta_val.len += added_count;
-
-			let put_opts = Storage::meta_put_opts(&meta_val);
-
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+			meta_val.len = meta_val.len.checked_add(added_count).ok_or_else(|| {
+				StorageError::DataInconsistency {
+					message: "zset metadata length overflow after ZADD".to_string(),
+				}
+			})?;
+			// A fresh collection keeps version=0 on disk. Metadata and both
+			// index rows receive the same sequence, and TypedDb::load
+			// resolves zero to that sequence.
 		}
+		self.zset_db
+			.commit(&key, batch, MetadataChange::Put(meta_val))
+			.await?;
 
 		Ok(added_count)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::ZSet)]
 	#[fastrace::trace]
 	pub async fn zrange(
 		&self,
@@ -167,7 +169,7 @@ impl Storage {
 		stop: isize,
 		with_scores: bool,
 	) -> Result<Vec<Bytes>, StorageError> {
-		if let Some(meta) = self.get_meta::<ZSetMetaValue>(&key).await? {
+		if let Some(meta) = self.zset_db.load(&key).await? {
 			// Adjust indices
 			let len = meta.len as isize;
 			let start = if start < 0 { len + start } else { start };
@@ -179,18 +181,12 @@ impl Storage {
 
 			// We need to scan ScoreKeys.
 			// Key format: len(user_key) + user_key + b'S' + score + member
-			let prefix = zset_score_user_key_prefix(&key);
+			let prefix = TopLevelKey::new(key.clone())?.with_suffix(b"S")?;
 
-			let range = prefix.as_ref()..;
-			let mut stream = self.zset_db.scan(range).await?;
+			let mut stream = self.zset_db.scan_entry_prefix(prefix.clone()).await?;
 
 			let mut result = Vec::new();
 			let mut current_idx = 0;
-			// Cache header length and offset to avoid repeated calculation
-			// prefix = key_len(2) + key + b'S'(1), then score(8) + member
-			let header_len = prefix.len() + 8; // prefix + score(8)
-			let score_offset = prefix.len(); // score starts right after prefix
-
 			while let Some(kv) = stream.next().await? {
 				let k = kv.key;
 				if !k.starts_with(&prefix) {
@@ -200,20 +196,13 @@ impl Storage {
 					continue;
 				}
 
-				if current_idx >= start && current_idx <= stop {
-					// Extract member and score
-					// Key: len(user_key) + user_key + b'S' + score(8) + member
-					if k.len() > header_len {
-						let member = k.slice(header_len..);
-						result.push(member);
-						if with_scores {
-							let score_bytes: [u8; 8] =
-								k[score_offset..score_offset + 8].try_into()?;
-							let encoded_score = u64::from_be_bytes(score_bytes);
-							let score = ScoreKey::decode_score(encoded_score);
-							let score_str = score.to_string();
-							result.push(Bytes::copy_from_slice(score_str.as_bytes()));
-						}
+				if current_idx >= start
+					&& current_idx <= stop
+					&& let Ok(score_key) = ScoreKey::decode(&k)
+				{
+					result.push(score_key.member().clone());
+					if with_scores {
+						result.push(Bytes::from(score_key.score().to_string()));
 					}
 				}
 
@@ -228,104 +217,98 @@ impl Storage {
 		}
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::ZSet)]
 	#[fastrace::trace]
 	pub async fn zscore(&self, key: Bytes, member: Bytes) -> Result<Option<f64>, StorageError> {
-		let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? else {
+		let Some(meta_val) = self.zset_db.load(&key).await? else {
 			return Ok(None);
 		};
 
 		let member_key = MemberKey::new(key, member);
-		if let Some(kv) = self.zset_db.get_key_value(member_key.encode()).await?
+		if let Some(kv) = self.zset_db.get_entry(member_key.encode()?).await?
 			&& kv.seq >= meta_val.version
 		{
-			// Val is encoded score (u64 BE)
-			let encoded_score = u64::from_be_bytes(kv.value[..8].try_into()?);
-			Ok(Some(ScoreKey::decode_score(encoded_score)))
+			Ok(Some(decode_stored_score(&kv.value)?))
 		} else {
 			Ok(None)
 		}
 	}
 
-	#[storage_lock(write, key)]
+	#[storage_lock(write, key, DataType::ZSet)]
 	#[fastrace::trace]
 	pub async fn zrem(&self, key: Bytes, members: Vec<Bytes>) -> Result<u64, StorageError> {
-		let meta_key = MetaKey::new(key.clone());
-		let meta_encoded_key = meta_key.encode();
+		let mut unique_members = HashSet::new();
+		let members: Vec<_> = members
+			.into_iter()
+			.filter(|member| unique_members.insert(member.clone()))
+			.collect();
+		if members.is_empty() {
+			return Ok(0);
+		}
 
-		let mut meta_val = match self.get_meta::<ZSetMetaValue>(&key).await? {
+		let mut meta_val = match self.zset_db.load(&key).await? {
 			Some(val) => val,
 			None => return Ok(0),
 		};
 
 		// Fetch all member keys in parallel
-		let mut member_encoded_keys = Vec::with_capacity(members.len());
-		let fetch_futures = members.iter().map(|member| {
-			let member_key = MemberKey::new(key.clone(), member.clone());
-			let encoded_key = member_key.encode();
-			member_encoded_keys.push(encoded_key.clone());
-			self.zset_db.get_key_value(encoded_key)
-		});
+		let member_encoded_keys: Vec<_> = members
+			.iter()
+			.map(|member| MemberKey::new(key.clone(), member.clone()).encode())
+			.collect::<Result<_, _>>()?;
+		let fetch_futures = member_encoded_keys
+			.iter()
+			.map(|encoded_key| self.zset_db.get_entry(encoded_key.clone()));
 
 		let old_values: Result<Vec<_>, _> =
 			future::join_all(fetch_futures).await.into_iter().collect();
-		let old_values = old_values?
-			.into_iter()
-			.map(|entry| match entry {
-				Some(kv) if kv.seq >= meta_val.version => Some(kv.value),
-				_ => None,
-			})
-			.collect::<Vec<_>>();
-
-		// Use WriteBatch to ensure atomicity of all delete operations
-		let mut batch = WriteBatch::new();
-		let mut removed_count = 0;
-
-		for (idx, member) in members.into_iter().enumerate() {
-			if let Some(val) = &old_values[idx] {
-				// Delete MemberKey
-				batch.delete(&member_encoded_keys[idx]);
-
-				// Delete ScoreKey
-				let encoded_score = u64::from_be_bytes(val[..8].try_into()?);
-				let score = ScoreKey::decode_score(encoded_score);
-				let score_key = ScoreKey::new(key.clone(), score, member);
-				batch.delete(score_key.encode());
-
-				removed_count += 1;
+		let old_values = old_values?;
+		let mut removed_members = Vec::new();
+		for ((member, encoded_member_key), entry) in
+			members.into_iter().zip(member_encoded_keys).zip(old_values)
+		{
+			if let Some(kv) = entry
+				&& kv.seq >= meta_val.version
+			{
+				// Validate every score before constructing and committing any writes.
+				let score = decode_stored_score(&kv.value)?;
+				removed_members.push((member, encoded_member_key, score));
 			}
 		}
 
+		let removed_count =
+			u64::try_from(removed_members.len()).map_err(|_| StorageError::DataInconsistency {
+				message: "zset removed member count does not fit in u64".to_string(),
+			})?;
 		if removed_count == 0 {
 			return Ok(0);
 		}
 
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		meta_val.len = meta_val.len.checked_sub(removed_count).ok_or_else(|| {
+			StorageError::DataInconsistency {
+				message: "zset metadata length is smaller than removed member count".to_string(),
+			}
+		})?;
 
-		// Execute all delete operations atomically
-		self.zset_db.write_with_options(batch, &write_opts).await?;
-
-		meta_val.len -= removed_count;
-		if meta_val.len == 0 {
-			self.string_db
-				.delete_with_options(meta_encoded_key, &write_opts)
-				.await?;
-		} else {
-			let put_opts = Storage::meta_put_opts(&meta_val);
-			self.string_db
-				.put_with_options(meta_encoded_key, meta_val.encode(), &put_opts, &write_opts)
-				.await?;
+		let mut batch = WriteBatch::new();
+		for (member, encoded_member_key, score) in removed_members {
+			batch.delete(encoded_member_key);
+			batch.delete(ScoreKey::new(key.clone(), score, member).encode()?);
 		}
+		let metadata = if meta_val.len == 0 {
+			MetadataChange::Delete
+		} else {
+			MetadataChange::Put(meta_val)
+		};
+		self.zset_db.commit(&key, batch, metadata).await?;
 
 		Ok(removed_count)
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, DataType::ZSet)]
 	#[fastrace::trace]
 	pub async fn zcard(&self, key: Bytes) -> Result<u64, StorageError> {
-		if let Some(meta_val) = self.get_meta::<ZSetMetaValue>(&key).await? {
+		if let Some(meta_val) = self.zset_db.load(&key).await? {
 			Ok(meta_val.len)
 		} else {
 			Ok(0)
@@ -335,8 +318,19 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
+	use slatedb::config::WriteOptions;
+
 	use super::*;
+	use crate::data_type::DataType;
 	use crate::string::meta::ZSetMetaValue;
+	use crate::typed_db::metadata_put_options;
+
+	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
+		db.metrics()
+			.lookup(name)
+			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
+			.get()
+	}
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
 		let timestamp = ulid::Ulid::generate().to_string();
@@ -381,6 +375,32 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_zrange_includes_empty_member() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_empty_member");
+		let empty_member = Bytes::new();
+
+		assert_eq!(
+			storage
+				.zadd(key.clone(), vec![(1.0, empty_member.clone())])
+				.await
+				.unwrap(),
+			1
+		);
+		assert_eq!(
+			storage.zrange(key.clone(), 0, -1, false).await.unwrap(),
+			vec![empty_member.clone()]
+		);
+		assert_eq!(
+			storage.zrange(key.clone(), 0, -1, true).await.unwrap(),
+			vec![empty_member.clone(), Bytes::from("1")]
+		);
+		assert_eq!(storage.zscore(key, empty_member).await.unwrap(), Some(1.0));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
 	async fn test_zscore() {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("myzset");
@@ -401,6 +421,192 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(score, None);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zadd_metadata_and_both_indexes_share_one_zset_batch() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("atomic_zset_layout");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		let before_zset_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_zset_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let before_string_batches = metric(storage.string_db.raw(), "db/write_batch_count");
+
+		let added = storage
+			.zadd(
+				key.clone(),
+				vec![(1.0, m1.clone()), (3.0, m1.clone()), (2.0, m2.clone())],
+			)
+			.await
+			.unwrap();
+		assert_eq!(added, 2);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_zset_batches,
+			1
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_zset_ops,
+			5
+		);
+		assert_eq!(
+			metric(storage.string_db.raw(), "db/write_batch_count") - before_string_batches,
+			0
+		);
+
+		let raw_meta = storage
+			.zset_db
+			.raw()
+			.get_key_value(meta_key.clone())
+			.await
+			.unwrap()
+			.expect("zset metadata should be stored in zset_db");
+		let encoded_meta = ZSetMetaValue::decode(&raw_meta.value).unwrap();
+		assert_eq!(encoded_meta.version, 0, "zero marks the batch generation");
+		assert_eq!(encoded_meta.len, 2);
+
+		for (score, member) in [(3.0, m1), (2.0, m2)] {
+			let raw_member = storage
+				.zset_db
+				.raw()
+				.get_key_value(
+					MemberKey::new(key.clone(), member.clone())
+						.encode()
+						.unwrap(),
+				)
+				.await
+				.unwrap()
+				.expect("member index should share the metadata batch");
+			let raw_score = storage
+				.zset_db
+				.raw()
+				.get_key_value(ScoreKey::new(key.clone(), score, member).encode().unwrap())
+				.await
+				.unwrap()
+				.expect("score index should share the metadata batch");
+			assert_eq!(raw_member.seq, raw_meta.seq);
+			assert_eq!(raw_score.seq, raw_meta.seq);
+		}
+
+		let resolved_meta = storage.zset_db.load(&key).await.unwrap().unwrap();
+		assert_eq!(resolved_meta.version, raw_meta.seq);
+		assert!(
+			storage
+				.string_db
+				.raw()
+				.get(meta_key)
+				.await
+				.unwrap()
+				.is_none()
+		);
+		assert_eq!(
+			storage.zscore(key, Bytes::from("m1")).await.unwrap(),
+			Some(3.0)
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zadd_score_update_is_one_batch_and_noop_inputs_do_not_write() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_update_batch");
+		let member = Bytes::from("member");
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		storage
+			.zadd(key.clone(), vec![(1.0, member.clone())])
+			.await
+			.unwrap();
+		let raw_meta_before = storage
+			.zset_db
+			.raw()
+			.get_key_value(meta_key.clone())
+			.await
+			.unwrap()
+			.unwrap();
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		assert_eq!(
+			storage
+				.zadd(key.clone(), vec![(2.0, member.clone())])
+				.await
+				.unwrap(),
+			0
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			1
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			4
+		);
+		let raw_meta_after = storage
+			.zset_db
+			.raw()
+			.get_key_value(meta_key.clone())
+			.await
+			.unwrap()
+			.unwrap();
+		assert!(raw_meta_after.seq > raw_meta_before.seq);
+		let updated_meta = ZSetMetaValue::decode(&raw_meta_after.value).unwrap();
+		assert_eq!(updated_meta.version, raw_meta_before.seq);
+		assert_eq!(updated_meta.len, 1);
+		let member_row = storage
+			.zset_db
+			.raw()
+			.get_key_value(
+				MemberKey::new(key.clone(), member.clone())
+					.encode()
+					.unwrap(),
+			)
+			.await
+			.unwrap()
+			.unwrap();
+		let score_row = storage
+			.zset_db
+			.raw()
+			.get_key_value(
+				ScoreKey::new(key.clone(), 2.0, member.clone())
+					.encode()
+					.unwrap(),
+			)
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(member_row.seq, raw_meta_after.seq);
+		assert_eq!(score_row.seq, raw_meta_after.seq);
+		assert_eq!(
+			storage.zscore(key.clone(), member.clone()).await.unwrap(),
+			Some(2.0)
+		);
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		assert_eq!(
+			storage
+				.zadd(
+					key.clone(),
+					vec![(9.0, member.clone()), (2.0, member.clone())],
+				)
+				.await
+				.unwrap(),
+			0
+		);
+		assert_eq!(storage.zadd(key.clone(), Vec::new()).await.unwrap(), 0);
+		assert_eq!(storage.zrem(key, Vec::new()).await.unwrap(), 0);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			0
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			0
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -427,6 +633,310 @@ mod tests {
 		let members = storage.zrange(key.clone(), 0, -1, false).await.unwrap();
 		assert_eq!(members.len(), 1);
 		assert_eq!(members[0], Bytes::from("two"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zrem_deduplicates_and_commits_indexes_with_metadata_once() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("atomic_zset_remove");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+		let m3 = Bytes::from("m3");
+		storage
+			.zadd(
+				key.clone(),
+				vec![(1.0, m1.clone()), (2.0, m2.clone()), (3.0, m3.clone())],
+			)
+			.await
+			.unwrap();
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let removed = storage
+			.zrem(key.clone(), vec![m1.clone(), m1, m2.clone(), m2])
+			.await
+			.unwrap();
+		assert_eq!(removed, 2);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			1
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			5
+		);
+		assert_eq!(storage.zcard(key.clone()).await.unwrap(), 1);
+		assert_eq!(
+			storage.zrange(key.clone(), 0, -1, false).await.unwrap(),
+			vec![m3.clone()]
+		);
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		assert_eq!(
+			storage
+				.zrem(
+					key.clone(),
+					vec![Bytes::from("missing"), Bytes::from("missing")],
+				)
+				.await
+				.unwrap(),
+			0
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			0
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			0
+		);
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		assert_eq!(
+			storage
+				.zrem(key.clone(), vec![m3.clone(), m3])
+				.await
+				.unwrap(),
+			1
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			1
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			3
+		);
+		assert!(
+			storage
+				.zset_db
+				.raw()
+				.get(TopLevelKey::new(key).unwrap().encode())
+				.await
+				.unwrap()
+				.is_none()
+		);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_corrupt_member_score_returns_error_without_partial_write() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("corrupt_zset_score");
+		let valid = Bytes::from("valid");
+		let corrupt = Bytes::from("corrupt");
+		storage
+			.zadd(
+				key.clone(),
+				vec![(1.0, valid.clone()), (2.0, corrupt.clone())],
+			)
+			.await
+			.unwrap();
+		let corrupt_member_key = MemberKey::new(key.clone(), corrupt.clone())
+			.encode()
+			.unwrap();
+		storage
+			.zset_db
+			.raw()
+			.put(corrupt_member_key.clone(), Bytes::from_static(b"bad"))
+			.await
+			.unwrap();
+
+		let err = storage
+			.zscore(key.clone(), corrupt.clone())
+			.await
+			.unwrap_err();
+		assert!(matches!(err, StorageError::DataInconsistency { .. }));
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let err = storage
+			.zadd(key.clone(), vec![(4.0, corrupt.clone())])
+			.await
+			.unwrap_err();
+		assert!(matches!(err, StorageError::DataInconsistency { .. }));
+		let err = storage
+			.zrem(key.clone(), vec![valid.clone(), corrupt])
+			.await
+			.unwrap_err();
+		assert!(matches!(err, StorageError::DataInconsistency { .. }));
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			0
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			0
+		);
+		assert!(
+			storage
+				.zset_db
+				.raw()
+				.get(MemberKey::new(key.clone(), valid.clone()).encode().unwrap(),)
+				.await
+				.unwrap()
+				.is_some()
+		);
+		assert!(
+			storage
+				.zset_db
+				.raw()
+				.get(corrupt_member_key)
+				.await
+				.unwrap()
+				.is_some()
+		);
+		assert_eq!(storage.zcard(key).await.unwrap(), 2);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zset_mutations_preserve_metadata_ttl() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_ttl_preserved");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		storage
+			.zadd(key.clone(), vec![(1.0, m1.clone())])
+			.await
+			.unwrap();
+
+		let mut meta = storage.zset_db.load(&key).await.unwrap().unwrap();
+		meta.expire_time =
+			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_add(60_000);
+		let put_opts = metadata_put_options(&meta).unwrap();
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		storage
+			.zset_db
+			.raw()
+			.put_with_options(meta_key.clone(), meta.encode(), &put_opts, &write_opts)
+			.await
+			.unwrap();
+		let expire_before = storage
+			.zset_db
+			.raw()
+			.get_key_value(meta_key.clone())
+			.await
+			.unwrap()
+			.unwrap()
+			.expire_ts
+			.expect("metadata should have a SlateDB expiration");
+
+		assert_eq!(
+			storage
+				.zadd(key.clone(), vec![(2.0, m2.clone())])
+				.await
+				.unwrap(),
+			1
+		);
+		let raw_meta = storage
+			.zset_db
+			.raw()
+			.get_key_value(meta_key.clone())
+			.await
+			.unwrap()
+			.unwrap();
+		let expire_after_add = raw_meta
+			.expire_ts
+			.expect("ZADD should preserve the metadata expiration");
+		assert!(expire_before.abs_diff(expire_after_add) <= 50);
+		assert_eq!(ZSetMetaValue::decode(&raw_meta.value).unwrap().len, 2);
+
+		assert_eq!(storage.zrem(key.clone(), vec![m1]).await.unwrap(), 1);
+		let raw_meta = storage
+			.zset_db
+			.raw()
+			.get_key_value(meta_key)
+			.await
+			.unwrap()
+			.unwrap();
+		let expire_after_remove = raw_meta
+			.expire_ts
+			.expect("ZREM should preserve the metadata expiration");
+		assert!(expire_before.abs_diff(expire_after_remove) <= 50);
+		assert_eq!(ZSetMetaValue::decode(&raw_meta.value).unwrap().len, 1);
+		assert_eq!(storage.zscore(key, m2).await.unwrap(), Some(2.0));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_zrem_metadata_underflow_fails_before_write() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("zset_metadata_underflow");
+		let m1 = Bytes::from("m1");
+		let m2 = Bytes::from("m2");
+		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		storage
+			.zadd(key.clone(), vec![(1.0, m1.clone()), (2.0, m2.clone())])
+			.await
+			.unwrap();
+
+		let mut meta = storage.zset_db.load(&key).await.unwrap().unwrap();
+		meta.len = 1;
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		storage
+			.zset_db
+			.raw()
+			.put_with_options(
+				meta_key.clone(),
+				meta.encode(),
+				&metadata_put_options(&meta).unwrap(),
+				&write_opts,
+			)
+			.await
+			.unwrap();
+
+		let before_batches = metric(storage.zset_db.raw(), "db/write_batch_count");
+		let before_ops = metric(storage.zset_db.raw(), "db/write_ops");
+		let err = storage
+			.zrem(key.clone(), vec![m1.clone(), m2.clone()])
+			.await
+			.unwrap_err();
+		assert!(matches!(err, StorageError::DataInconsistency { .. }));
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_batch_count") - before_batches,
+			0
+		);
+		assert_eq!(
+			metric(storage.zset_db.raw(), "db/write_ops") - before_ops,
+			0
+		);
+		assert!(
+			storage
+				.zset_db
+				.raw()
+				.get(MemberKey::new(key.clone(), m1).encode().unwrap())
+				.await
+				.unwrap()
+				.is_some()
+		);
+		assert!(
+			storage
+				.zset_db
+				.raw()
+				.get(MemberKey::new(key, m2).encode().unwrap())
+				.await
+				.unwrap()
+				.is_some()
+		);
+		assert_eq!(
+			ZSetMetaValue::decode(&storage.zset_db.raw().get(meta_key).await.unwrap().unwrap())
+				.unwrap()
+				.len,
+			1
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -473,12 +983,7 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 1);
 
-		let version_v1 = storage
-			.get_meta::<ZSetMetaValue>(&key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_v1 = storage.zset_db.load(&key).await.unwrap().unwrap().version;
 
 		let added = storage
 			.zadd(key.clone(), vec![(2.0, Bytes::from("m1"))])
@@ -486,12 +991,7 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 0);
 
-		let version_after_score_update = storage
-			.get_meta::<ZSetMetaValue>(&key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_after_score_update = storage.zset_db.load(&key).await.unwrap().unwrap().version;
 		assert_eq!(version_after_score_update, version_v1);
 
 		let added = storage
@@ -500,15 +1000,10 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 1);
 
-		let version_after_new_member = storage
-			.get_meta::<ZSetMetaValue>(&key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_after_new_member = storage.zset_db.load(&key).await.unwrap().unwrap().version;
 		assert_eq!(version_after_new_member, version_v1);
 
-		let deleted = storage.del([key.clone()]).await.unwrap();
+		let deleted = storage.del(DataType::ZSet, [key.clone()]).await.unwrap();
 		assert_eq!(deleted, 1);
 
 		let added = storage
@@ -517,12 +1012,7 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 1);
 
-		let version_v2 = storage
-			.get_meta::<ZSetMetaValue>(&key)
-			.await
-			.unwrap()
-			.unwrap()
-			.version;
+		let version_v2 = storage.zset_db.load(&key).await.unwrap().unwrap().version;
 		assert!(version_v2 > version_v1);
 
 		let members = storage.zrange(key.clone(), 0, -1, false).await.unwrap();

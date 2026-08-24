@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"time"
 
 	"github.com/marsevilspirit/nimbis/e2e-test/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -9,382 +10,260 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var _ = Describe("Type Conflict & Persistence", func() {
+var _ = Describe("Same-Name Typed Keyspaces", func() {
 	var rdb *redis.Client
 	var ctx context.Context
+
+	testKeys := []string{
+		"same_name_all_types",
+		"same_name_mutations",
+		"same_name_del",
+		"same_name_del_a",
+		"same_name_del_b",
+		"same_name_missing",
+		"same_name_expire",
+		"same_name_empty_values",
+		"key:shared:🔑",
+	}
+
+	seedAllTypes := func(key string) {
+		Expect(rdb.Set(ctx, key, "string-v1", 0).Err()).To(Succeed())
+		Expect(rdb.HSet(ctx, key, "field-1", "hash-v1").Err()).To(Succeed())
+		Expect(rdb.RPush(ctx, key, "list-1", "list-2").Err()).To(Succeed())
+		Expect(rdb.SAdd(ctx, key, "set-1", "set-2").Err()).To(Succeed())
+		Expect(rdb.ZAdd(ctx, key,
+			redis.Z{Score: 1, Member: "zset-1"},
+			redis.Z{Score: 2, Member: "zset-2"},
+		).Err()).To(Succeed())
+	}
+
+	expectSeededTypes := func(key string) {
+		value, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(value).To(Equal("string-v1"))
+
+		hashValue, err := rdb.HGet(ctx, key, "field-1").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hashValue).To(Equal("hash-v1"))
+
+		listValues, err := rdb.LRange(ctx, key, 0, -1).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listValues).To(Equal([]string{"list-1", "list-2"}))
+
+		setValues, err := rdb.SMembers(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(setValues).To(ConsistOf("set-1", "set-2"))
+
+		zsetValues, err := rdb.ZRange(ctx, key, 0, -1).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(zsetValues).To(Equal([]string{"zset-1", "zset-2"}))
+	}
+
+	expectTypedExists := func(keyType util.KeyType, key string, expected int64) {
+		exists, err := util.Exists(ctx, rdb, keyType, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(Equal(expected))
+	}
 
 	BeforeEach(func() {
 		rdb = util.NewClient()
 		ctx = context.Background()
 		Expect(rdb.Ping(ctx).Err()).To(Succeed())
-
-		// Ensure clean state for keys used in tests
-		rdb.Del(ctx, "s_key", "h_key", "conflict_key", "conflict_key_2", "del_key", "complex_key", "edge_key", "key:🔑:special")
+		for _, keyType := range []util.KeyType{
+			util.StringType,
+			util.HashType,
+			util.ListType,
+			util.SetType,
+			util.ZSetType,
+		} {
+			Expect(util.Del(ctx, rdb, keyType, testKeys...).Err()).To(Succeed())
+		}
 	})
 
 	AfterEach(func() {
+		for _, keyType := range []util.KeyType{
+			util.StringType,
+			util.HashType,
+			util.ListType,
+			util.SetType,
+			util.ZSetType,
+		} {
+			Expect(util.Del(ctx, rdb, keyType, testKeys...).Err()).To(Succeed())
+		}
 		Expect(rdb.Close()).To(Succeed())
 	})
 
-	Context("String to Hash Conflicts", func() {
-		It("should return WRONGTYPE when performing Hash operations on a String key", func() {
-			key := "s_key"
-			// 1. Setup String
-			err := rdb.Set(ctx, key, "value", 0).Err()
-			Expect(err).NotTo(HaveOccurred())
+	It("allows String, Hash, List, Set, and ZSet values to share one name", func() {
+		key := "same_name_all_types"
+		seedAllTypes(key)
 
-			// 2. Hash operations should fail
-			// HSET
-			err = rdb.HSet(ctx, key, "field", "value").Err()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
+		expectSeededTypes(key)
 
-			// HGET
-			err = rdb.HGet(ctx, key, "field").Err()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// HMGET
-			_, err = rdb.HMGet(ctx, key, "field").Result()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// HGETALL
-			_, err = rdb.HGetAll(ctx, key).Result()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// HLEN
-			_, err = rdb.HLen(ctx, key).Result()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// 3. String operations should still success
-			val, err := rdb.Get(ctx, key).Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal("value"))
-		})
+		expectTypedExists(util.StringType, key, 1)
+		expectTypedExists(util.HashType, key, 1)
+		expectTypedExists(util.ListType, key, 1)
+		expectTypedExists(util.SetType, key, 1)
+		expectTypedExists(util.ZSetType, key, 1)
 	})
 
-	Context("Hash to String Conflicts", func() {
-		It("should return WRONGTYPE when performing String operations on a Hash key", func() {
-			key := "h_key"
-			// 1. Setup Hash
-			err := rdb.HSet(ctx, key, "f1", "v1").Err()
-			Expect(err).NotTo(HaveOccurred())
+	It("isolates every type-specific mutation to its own namespace", func() {
+		key := "same_name_mutations"
+		seedAllTypes(key)
 
-			// 2. String GET should fail
-			// Note: SET overwrites (valid), but GET checks type
-			err = rdb.Get(ctx, key).Err()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
+		Expect(rdb.Set(ctx, key, "string-v2", 0).Err()).To(Succeed())
+		Expect(rdb.HSet(ctx, key, "field-1", "hash-v2", "field-2", "hash-v3").Err()).To(Succeed())
+		Expect(rdb.LPush(ctx, key, "list-0").Err()).To(Succeed())
+		Expect(rdb.SRem(ctx, key, "set-1").Err()).To(Succeed())
+		Expect(rdb.SAdd(ctx, key, "set-3").Err()).To(Succeed())
+		Expect(rdb.ZRem(ctx, key, "zset-1").Err()).To(Succeed())
+		Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 3, Member: "zset-3"}).Err()).To(Succeed())
 
-			// 3. Hash operations should still success
-			val, err := rdb.HGet(ctx, key, "f1").Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal("v1"))
+		value, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(value).To(Equal("string-v2"))
 
-			all, err := rdb.HGetAll(ctx, key).Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(all).To(HaveLen(1))
-			Expect(all["f1"]).To(Equal("v1"))
-		})
+		hashValues, err := rdb.HGetAll(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hashValues).To(Equal(map[string]string{
+			"field-1": "hash-v2",
+			"field-2": "hash-v3",
+		}))
+
+		listValues, err := rdb.LRange(ctx, key, 0, -1).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(listValues).To(Equal([]string{"list-0", "list-1", "list-2"}))
+
+		setValues, err := rdb.SMembers(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(setValues).To(ConsistOf("set-2", "set-3"))
+
+		zsetValues, err := rdb.ZRange(ctx, key, 0, -1).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(zsetValues).To(Equal([]string{"zset-2", "zset-3"}))
 	})
 
-	Context("Type Overwrite with Cleanup", func() {
-		It("should properly cleanup Hash fields when overwritten by String", func() {
-			key := "conflict_key"
+	It("routes DEL to exactly one same-name namespace", func() {
+		key := "same_name_del"
+		seedAllTypes(key)
 
-			// 1. Setup Hash with multiple fields
-			err := rdb.HSet(ctx, key, "f1", "v1", "f2", "v2").Err()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(rdb.HLen(ctx, key).Val()).To(Equal(int64(2)))
+		deleted, err := util.Del(ctx, rdb, util.HashType, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleted).To(Equal(int64(1)))
 
-			// 2. Overwrite with SET (Valid operation in Redis)
-			err = rdb.Set(ctx, key, "new_string_val", 0).Err()
-			Expect(err).NotTo(HaveOccurred())
+		_, err = rdb.HGet(ctx, key, "field-1").Result()
+		Expect(err).To(Equal(redis.Nil))
+		expectTypedExists(util.HashType, key, 0)
+		expectTypedExists(util.StringType, key, 1)
+		expectTypedExists(util.ListType, key, 1)
+		expectTypedExists(util.SetType, key, 1)
+		expectTypedExists(util.ZSetType, key, 1)
+		Expect(rdb.Get(ctx, key).Val()).To(Equal("string-v1"))
+		Expect(rdb.LRange(ctx, key, 0, -1).Val()).To(Equal([]string{"list-1", "list-2"}))
+		Expect(rdb.SMembers(ctx, key).Val()).To(ConsistOf("set-1", "set-2"))
+		Expect(rdb.ZRange(ctx, key, 0, -1).Val()).To(Equal([]string{"zset-1", "zset-2"}))
 
-			// 3. Verify it is now a String
-			val, err := rdb.Get(ctx, key).Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal("new_string_val"))
-
-			// 4. Verify Hash operation returns WRONGTYPE
-			// Note: If the cleanup wasn't done properly, or if only meta was updated,
-			// we rely on the implementation. If the implementation checks meta first, it sees String.
-			// But we also want to ensure the old data is conceptually 'gone'.
-			// In a black-box test, we verify the interface behavior.
-			err = rdb.HGet(ctx, key, "f1").Err()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-		})
-
-		It("should NOT overwrite String with Hash when using HSET", func() {
-			// clarification: Redis HSET on existing String key is WRONGTYPE.
-			// It does NOT overwrite. Only SET overwrites any type.
-			key := "conflict_key_2"
-
-			// 1. Setup String
-			rdb.Set(ctx, key, "str_val", 0)
-
-			// 2. Try HSET -> WRONGTYPE
-			err := rdb.HSet(ctx, key, "f1", "v1").Err()
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// 3. Value remains String
-			val, _ := rdb.Get(ctx, key).Result()
-			Expect(val).To(Equal("str_val"))
-		})
+		deleted, err = util.Del(ctx, rdb, util.HashType, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleted).To(Equal(int64(0)))
 	})
 
-	Context("DEL and Type Switching", func() {
-		It("should allow creating different type after DEL", func() {
-			key := "del_key"
+	It("allows multi-key DEL only within its selected type", func() {
+		firstKey := "same_name_del_a"
+		secondKey := "same_name_del_b"
+		seedAllTypes(firstKey)
+		seedAllTypes(secondKey)
 
-			// 1. String -> DEL -> Hash
-			rdb.Set(ctx, key, "s_val", 0)
-			rdb.Del(ctx, key)
-
-			err := rdb.HSet(ctx, key, "f1", "v1").Err()
-			Expect(err).NotTo(HaveOccurred())
-
-			val, err := rdb.HGet(ctx, key, "f1").Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal("v1"))
-
-			// 2. Hash -> DEL -> String
-			rdb.Del(ctx, key)
-
-			err = rdb.Set(ctx, key, "new_s_val", 0).Err()
-			Expect(err).NotTo(HaveOccurred())
-
-			sVal, err := rdb.Get(ctx, key).Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(sVal).To(Equal("new_s_val"))
-		})
-
-		It("should handle DEL on non-existent key silently", func() {
-			n, err := rdb.Del(ctx, "nonexistent_key").Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(n).To(Equal(int64(0)))
-		})
+		deleted, err := util.Del(
+			ctx,
+			rdb,
+			util.SetType,
+			firstKey,
+			secondKey,
+			"same_name_missing",
+		).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleted).To(Equal(int64(2)))
+		expectTypedExists(util.SetType, firstKey, 0)
+		expectTypedExists(util.SetType, secondKey, 0)
+		expectTypedExists(util.StringType, firstKey, 1)
+		expectTypedExists(util.HashType, secondKey, 1)
+		expectTypedExists(util.ListType, firstKey, 1)
+		expectTypedExists(util.ZSetType, secondKey, 1)
 	})
 
-	Context("Complex Alternating Operations", func() {
-		It("should handle multiple type transitions correctly", func() {
-			key := "complex_key"
+	It("routes EXPIRE and EXISTS to exactly one same-name namespace", func() {
+		key := "same_name_expire"
+		seedAllTypes(key)
 
-			// String
-			rdb.Set(ctx, key, "1", 0)
-			Expect(rdb.Get(ctx, key).Val()).To(Equal("1"))
+		expired, err := util.Expire(ctx, rdb, util.HashType, key, 2*time.Second).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(expired).To(BeTrue())
+		expectSeededTypes(key)
 
-			// Fail HSET
-			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
+		Eventually(func(g Gomega) {
+			exists, err := util.Exists(ctx, rdb, util.HashType, key).Result()
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(exists).To(Equal(int64(0)))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
-			// Overwrite with String again
-			rdb.Set(ctx, key, "2", 0)
-			Expect(rdb.Get(ctx, key).Val()).To(Equal("2"))
-
-			// DEL
-			rdb.Del(ctx, key)
-
-			// Hash
-			rdb.HSet(ctx, key, "f", "1")
-			Expect(rdb.HGet(ctx, key, "f").Val()).To(Equal("1"))
-
-			// Fail GET
-			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
-
-			// Overwrite with SET (Force type change)
-			rdb.Set(ctx, key, "3", 0)
-			Expect(rdb.Get(ctx, key).Val()).To(Equal("3"))
-
-			// Verify Hash operation fails now
-			Expect(rdb.HGet(ctx, key, "f").Err()).To(HaveOccurred())
-		})
+		_, err = rdb.HGet(ctx, key, "field-1").Result()
+		Expect(err).To(Equal(redis.Nil))
+		expectTypedExists(util.StringType, key, 1)
+		expectTypedExists(util.ListType, key, 1)
+		expectTypedExists(util.SetType, key, 1)
+		expectTypedExists(util.ZSetType, key, 1)
 	})
 
-	Context("List Conflicts", func() {
-		It("should return WRONGTYPE when performing List operations on a String key", func() {
-			key := "s_list_key"
-			// 1. Setup String
-			rdb.Set(ctx, key, "value", 0)
+	It("supports same-name typed values with Unicode keys and payloads", func() {
+		key := "key:shared:🔑"
+		Expect(rdb.Set(ctx, key, "string:✨", 0).Err()).To(Succeed())
+		Expect(rdb.HSet(ctx, key, "field:🚀", "hash:🌙").Err()).To(Succeed())
+		Expect(rdb.RPush(ctx, key, "list:星").Err()).To(Succeed())
+		Expect(rdb.SAdd(ctx, key, "set:云").Err()).To(Succeed())
+		Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "zset:雨"}).Err()).To(Succeed())
 
-			// 2. List operations should fail
-			Expect(rdb.LPush(ctx, key, "v").Err()).To(HaveOccurred())
-			Expect(rdb.LPush(ctx, key, "v").Err().Error()).To(ContainSubstring("WRONGTYPE"))
-
-			Expect(rdb.RPush(ctx, key, "v").Err()).To(HaveOccurred())
-			Expect(rdb.LPop(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.RPop(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.LLen(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.LRange(ctx, key, 0, -1).Err()).To(HaveOccurred())
-		})
-
-		It("should return WRONGTYPE when performing String/Hash operations on a List key", func() {
-			key := "l_other_key"
-			// 1. Setup List
-			rdb.LPush(ctx, key, "v1")
-
-			// 2. String operations should fail
-			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.Get(ctx, key).Err().Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// 3. Hash operations should fail
-			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
-			Expect(rdb.HGet(ctx, key, "f").Err()).To(HaveOccurred())
-		})
-
-		It("should overwrite List with SET", func() {
-			key := "l_overwrite_key"
-			rdb.LPush(ctx, key, "v1")
-			Expect(rdb.LLen(ctx, key).Val()).To(Equal(int64(1)))
-
-			// Overwrite
-			rdb.Set(ctx, key, "new_val", 0)
-			expectVal, _ := rdb.Get(ctx, key).Result()
-			Expect(expectVal).To(Equal("new_val"))
-
-			// Old list gone
-			Expect(rdb.LLen(ctx, key).Err()).To(HaveOccurred())
-		})
-
+		Expect(rdb.Get(ctx, key).Val()).To(Equal("string:✨"))
+		Expect(rdb.HGet(ctx, key, "field:🚀").Val()).To(Equal("hash:🌙"))
+		Expect(rdb.LRange(ctx, key, 0, -1).Val()).To(Equal([]string{"list:星"}))
+		Expect(rdb.SMembers(ctx, key).Val()).To(ConsistOf("set:云"))
+		Expect(rdb.ZRange(ctx, key, 0, -1).Val()).To(Equal([]string{"zset:雨"}))
 	})
 
-	Context("Set Conflicts", func() {
-		It("should return WRONGTYPE when performing Set operations on a String key", func() {
-			key := "s_set_key"
-			// 1. Setup String
-			rdb.Set(ctx, key, "value", 0)
+	It("keeps empty payloads isolated across typed namespaces", func() {
+		key := "same_name_empty_values"
+		Expect(rdb.Set(ctx, key, "", 0).Err()).To(Succeed())
+		Expect(rdb.HSet(ctx, key, "", "").Err()).To(Succeed())
+		Expect(rdb.RPush(ctx, key, "").Err()).To(Succeed())
+		Expect(rdb.SAdd(ctx, key, "").Err()).To(Succeed())
+		Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: ""}).Err()).To(Succeed())
 
-			// 2. Set operations should fail
-			Expect(rdb.SAdd(ctx, key, "m1").Err()).To(HaveOccurred())
-			Expect(rdb.SAdd(ctx, key, "m1").Err().Error()).To(ContainSubstring("WRONGTYPE"))
+		value, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(value).To(BeEmpty())
+		hashValue, err := rdb.HGet(ctx, key, "").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hashValue).To(BeEmpty())
+		Expect(rdb.LRange(ctx, key, 0, -1).Val()).To(Equal([]string{""}))
+		Expect(rdb.SMembers(ctx, key).Val()).To(ConsistOf(""))
+		Expect(rdb.ZRange(ctx, key, 0, -1).Val()).To(Equal([]string{""}))
 
-			Expect(rdb.SMembers(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.SIsMember(ctx, key, "m1").Err()).To(HaveOccurred())
-			Expect(rdb.SRem(ctx, key, "m1").Err()).To(HaveOccurred())
-			Expect(rdb.SCard(ctx, key).Err()).To(HaveOccurred())
-		})
+		for _, keyType := range []util.KeyType{
+			util.StringType,
+			util.HashType,
+			util.ListType,
+			util.SetType,
+			util.ZSetType,
+		} {
+			expectTypedExists(keyType, key, 1)
+		}
 
-		It("should return WRONGTYPE when performing String/Hash/List operations on a Set key", func() {
-			key := "set_other_key"
-			// 1. Setup Set
-			rdb.SAdd(ctx, key, "m1")
-
-			// 2. String operations should fail
-			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.Get(ctx, key).Err().Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// 3. Hash operations should fail
-			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
-			Expect(rdb.HGet(ctx, key, "f").Err()).To(HaveOccurred())
-
-			// 4. List operations should fail
-			Expect(rdb.LPush(ctx, key, "v").Err()).To(HaveOccurred())
-			Expect(rdb.LPop(ctx, key).Err()).To(HaveOccurred())
-		})
-
-		It("should overwrite Set with SET", func() {
-			key := "set_overwrite_key"
-			rdb.SAdd(ctx, key, "m1")
-			Expect(rdb.SCard(ctx, key).Val()).To(Equal(int64(1)))
-
-			// Overwrite
-			rdb.Set(ctx, key, "new_val", 0)
-			expectVal, _ := rdb.Get(ctx, key).Result()
-			Expect(expectVal).To(Equal("new_val"))
-
-			// Old set gone
-			Expect(rdb.SCard(ctx, key).Err()).To(HaveOccurred())
-		})
-	})
-
-	Context("Edge Cases", func() {
-		It("should handle empty values", func() {
-			key := "edge_key"
-
-			// Empty String
-			rdb.Set(ctx, key, "", 0)
-			val, err := rdb.Get(ctx, key).Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal(""))
-
-			// Try HSET -> WRONGTYPE
-			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
-
-			rdb.Del(ctx, key)
-
-			// Empty Hash Field Value
-			rdb.HSet(ctx, key, "empty_field", "")
-			hVal, err := rdb.HGet(ctx, key, "empty_field").Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(hVal).To(Equal(""))
-
-			// Try GET -> WRONGTYPE
-			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
-		})
-
-		It("should handle special character keys", func() {
-			key := "key:🔑:special"
-
-			rdb.HSet(ctx, key, "field.🚀", "val.✨")
-			val, err := rdb.HGet(ctx, key, "field.🚀").Result()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(val).To(Equal("val.✨"))
-
-			// Conflict check
-			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
-		})
-	})
-	Context("ZSet Conflicts", func() {
-		It("should return WRONGTYPE when performing ZSet operations on a String key", func() {
-			key := "s_zset_key"
-			// 1. Setup String
-			rdb.Set(ctx, key, "value", 0)
-
-			// 2. ZSet operations should fail
-			Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"}).Err()).To(HaveOccurred())
-			Expect(rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"}).Err().Error()).To(ContainSubstring("WRONGTYPE"))
-
-			Expect(rdb.ZRange(ctx, key, 0, -1).Err()).To(HaveOccurred())
-			Expect(rdb.ZScore(ctx, key, "m1").Err()).To(HaveOccurred())
-			Expect(rdb.ZRem(ctx, key, "m1").Err()).To(HaveOccurred())
-			Expect(rdb.ZCard(ctx, key).Err()).To(HaveOccurred())
-		})
-
-		It("should return WRONGTYPE when performing String/Hash/List/Set operations on a ZSet key", func() {
-			key := "zset_other_key"
-			// 1. Setup ZSet
-			rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"})
-
-			// 2. String operations should fail
-			Expect(rdb.Get(ctx, key).Err()).To(HaveOccurred())
-			Expect(rdb.Get(ctx, key).Err().Error()).To(ContainSubstring("WRONGTYPE"))
-
-			// 3. Hash operations should fail
-			Expect(rdb.HSet(ctx, key, "f", "v").Err()).To(HaveOccurred())
-
-			// 4. List operations should fail
-			Expect(rdb.LPush(ctx, key, "v").Err()).To(HaveOccurred())
-
-			// 5. Set operations should fail
-			Expect(rdb.SAdd(ctx, key, "m").Err()).To(HaveOccurred())
-		})
-
-		It("should overwrite ZSet with SET", func() {
-			key := "zset_overwrite_key"
-			rdb.ZAdd(ctx, key, redis.Z{Score: 1, Member: "m1"})
-			Expect(rdb.ZCard(ctx, key).Val()).To(Equal(int64(1)))
-
-			// Overwrite
-			rdb.Set(ctx, key, "new_val", 0)
-			expectVal, _ := rdb.Get(ctx, key).Result()
-			Expect(expectVal).To(Equal("new_val"))
-
-			// Old zset gone
-			Expect(rdb.ZCard(ctx, key).Err()).To(HaveOccurred())
-		})
+		deleted, err := util.Del(ctx, rdb, util.HashType, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deleted).To(Equal(int64(1)))
+		Expect(rdb.HGet(ctx, key, "").Err()).To(Equal(redis.Nil))
+		expectTypedExists(util.StringType, key, 1)
+		expectTypedExists(util.ListType, key, 1)
+		expectTypedExists(util.SetType, key, 1)
+		expectTypedExists(util.ZSetType, key, 1)
 	})
 })

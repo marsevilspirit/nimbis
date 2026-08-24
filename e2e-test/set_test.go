@@ -18,11 +18,11 @@ var _ = Describe("Set Commands", func() {
 		rdb = util.NewClient()
 		ctx = context.Background()
 		Expect(rdb.Ping(ctx).Err()).To(Succeed())
-		rdb.Del(ctx, "myset")
+		util.Del(ctx, rdb, util.SetType, "myset")
 	})
 
 	AfterEach(func() {
-		rdb.Del(ctx, "myset")
+		util.Del(ctx, rdb, util.SetType, "myset")
 		Expect(rdb.Close()).To(Succeed())
 	})
 
@@ -67,7 +67,7 @@ var _ = Describe("Set Commands", func() {
 
 	It("should deduplicate members during initial meta_missing SADD", func() {
 		key := "myset_dedup"
-		rdb.Del(ctx, key)
+		util.Del(ctx, rdb, util.SetType, key)
 
 		// Cold insert with duplicate members in the SAME command
 		n, err := rdb.SAdd(ctx, key, "a", "a", "b", "c", "b").Result()
@@ -78,7 +78,7 @@ var _ = Describe("Set Commands", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(card).To(Equal(int64(3))) // Should not be inflated to 5
 
-		rdb.Del(ctx, key)
+		util.Del(ctx, rdb, util.SetType, key)
 	})
 
 	It("should support SREM", func() {
@@ -99,12 +99,14 @@ var _ = Describe("Set Commands", func() {
 		Expect(card).To(Equal(int64(1)))
 	})
 
-	It("should handle WRONGTYPE", func() {
-		key := "myset_wrongtype"
-		rdb.Set(ctx, key, "value", 0)
+	It("should isolate a Set from a same-name String", func() {
+		key := "myset_same_name"
+		Expect(rdb.Set(ctx, key, "value", 0).Err()).NotTo(HaveOccurred())
+		Expect(rdb.SAdd(ctx, key, "m1").Err()).NotTo(HaveOccurred())
 
-		err := rdb.SAdd(ctx, key, "m1").Err()
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("WRONGTYPE"))
+		value, err := rdb.Get(ctx, key).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(value).To(Equal("value"))
+		Expect(rdb.SIsMember(ctx, key, "m1").Val()).To(BeTrue())
 	})
 })

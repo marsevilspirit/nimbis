@@ -1,6 +1,12 @@
+use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+
+use crate::error::DecoderError;
+use crate::error::StorageError;
+use crate::top_level_key::MAX_ENCODED_KEY_LEN;
+use crate::top_level_key::TopLevelKey;
 
 #[derive(Debug, PartialEq)]
 pub struct MemberKey {
@@ -16,24 +22,40 @@ impl MemberKey {
 		}
 	}
 
-	pub fn encode(&self) -> Bytes {
+	pub fn encode(&self) -> Result<Bytes, StorageError> {
 		// Key format: len(user_key) (u16 BE) + user_key + b'M' +
 		// len(member) (u32 BE) + member
-		let user_key_len = self.user_key.len() as u16;
-		let member_len = self.member.len() as u32;
+		let top_level_key = TopLevelKey::new(self.user_key.clone())?;
+		let suffix_len =
+			5usize
+				.checked_add(self.member.len())
+				.ok_or(StorageError::InvalidKeyLength {
+					length: usize::MAX,
+					max: MAX_ENCODED_KEY_LEN,
+				})?;
+		top_level_key.ensure_suffix_len(suffix_len)?;
+		let member_len =
+			u32::try_from(self.member.len()).map_err(|_| StorageError::InvalidKeyLength {
+				length: self.member.len(),
+				max: MAX_ENCODED_KEY_LEN,
+			})?;
 
-		let mut bytes =
-			BytesMut::with_capacity(2 + self.user_key.len() + 1 + 4 + self.member.len());
-		bytes.put_u16(user_key_len);
-		bytes.extend_from_slice(&self.user_key);
-		bytes.put_u8(b'M');
-		bytes.put_u32(member_len);
-		bytes.extend_from_slice(&self.member);
-		bytes.freeze()
+		let mut suffix = BytesMut::with_capacity(suffix_len);
+		suffix.put_u8(b'M');
+		suffix.put_u32(member_len);
+		suffix.extend_from_slice(&self.member);
+		top_level_key.with_suffix(&suffix)
 	}
 
-	/// Returns the user_key from this member key.
-	pub fn user_key(&self) -> &Bytes {
-		&self.user_key
+	pub(crate) fn decode(encoded: &[u8]) -> Result<Self, DecoderError> {
+		let (user_key, mut suffix) = TopLevelKey::decode_prefix(encoded)?;
+		if suffix.len() < 5 || suffix.get_u8() != b'M' {
+			return Err(DecoderError::InvalidLength);
+		}
+		let member_len = suffix.get_u32() as usize;
+		if suffix.len() != member_len {
+			return Err(DecoderError::InvalidLength);
+		}
+		Ok(Self::new(user_key, Bytes::copy_from_slice(suffix)))
 	}
 }

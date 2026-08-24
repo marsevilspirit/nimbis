@@ -4,6 +4,7 @@ use quote::quote;
 use syn::Data;
 use syn::DeriveInput;
 use syn::Error;
+use syn::Expr;
 use syn::Fields;
 use syn::FnArg;
 use syn::Ident;
@@ -17,6 +18,7 @@ use syn::parse_macro_input;
 struct StorageLockArgs {
 	mode: Ident,
 	key: Option<Ident>,
+	data_type: Option<Expr>,
 }
 
 impl Parse for StorageLockArgs {
@@ -28,14 +30,24 @@ impl Parse for StorageLockArgs {
 		} else {
 			None
 		};
+		let data_type = if input.peek(Token![,]) {
+			input.parse::<Token![,]>()?;
+			Some(input.parse()?)
+		} else {
+			None
+		};
 
 		if !input.is_empty() {
 			return Err(input.error(
-				"unsupported storage_lock arguments; expected `read, key`, `write, key`, `read_many, keys`, `write_many, keys`, or `global_write`",
+				"unsupported storage_lock arguments; expected `read, key, data_type`, `write, key, data_type`, `read_many, keys, data_type`, `write_many, keys, data_type`, or `global_write`",
 			));
 		}
 
-		Ok(Self { mode, key })
+		Ok(Self {
+			mode,
+			key,
+			data_type,
+		})
 	}
 }
 
@@ -57,31 +69,44 @@ pub fn storage_lock(attr: TokenStream, item: TokenStream) -> TokenStream {
 	}
 
 	let mode = args.mode.to_string();
-	let lock = match (mode.as_str(), args.key) {
-		("read", Some(key)) => quote! {
-			let _guard = self.read_lock([#key.clone()]).await;
+	let lock = match (mode.as_str(), args.key, args.data_type) {
+		("read", Some(key), Some(data_type)) => quote! {
+			let _guard = self.read_lock(#data_type, [#key.clone()]).await;
 		},
-		("write", Some(key)) => quote! {
-			let _guard = self.write_lock([#key.clone()]).await;
+		("write", Some(key), Some(data_type)) => quote! {
+			let _guard = self.write_lock(#data_type, [#key.clone()]).await;
 		},
-		("read_many", Some(keys)) => quote! {
+		("read_many", Some(keys), Some(data_type)) => quote! {
 			let #keys: Vec<_> = #keys.into_iter().collect();
-			let _guard = self.read_lock(#keys.iter().cloned()).await;
+			let _guard = self.read_lock(#data_type, #keys.iter().cloned()).await;
 		},
-		("write_many", Some(keys)) => quote! {
+		("write_many", Some(keys), Some(data_type)) => quote! {
 			let #keys: Vec<_> = #keys.into_iter().collect();
-			let _guard = self.write_lock(#keys.iter().cloned()).await;
+			let _guard = self.write_lock(#data_type, #keys.iter().cloned()).await;
 		},
-		("global_write", None) => quote! {
+		("global_write", None, None) => quote! {
 			let _guard = self.global_write_lock().await;
 		},
-		("global_write", Some(key)) => {
+		("global_write", Some(key), _) => {
 			return Error::new_spanned(key, "global_write storage_lock does not take a key")
 				.to_compile_error()
 				.into();
 		}
-		("read" | "write" | "read_many" | "write_many", None) => {
+		("global_write", None, Some(data_type)) => {
+			return Error::new_spanned(
+				data_type,
+				"global_write storage_lock does not take a data type",
+			)
+			.to_compile_error()
+			.into();
+		}
+		("read" | "write" | "read_many" | "write_many", None, _) => {
 			return Error::new_spanned(args.mode, "storage_lock mode requires a key argument")
+				.to_compile_error()
+				.into();
+		}
+		("read" | "write" | "read_many" | "write_many", Some(key), None) => {
+			return Error::new_spanned(key, "storage_lock mode requires a data type argument")
 				.to_compile_error()
 				.into();
 		}

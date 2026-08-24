@@ -31,11 +31,27 @@ var _ = Describe("Expire/TTL Commands", func() {
 		ctx = context.Background()
 		Expect(rdb.Ping(ctx).Err()).To(Succeed())
 		// Clean up potentially conflicting keys
-		rdb.Del(ctx, ttlTestKeys...)
+		for _, keyType := range []util.KeyType{
+			util.StringType,
+			util.HashType,
+			util.ListType,
+			util.SetType,
+			util.ZSetType,
+		} {
+			util.Del(ctx, rdb, keyType, ttlTestKeys...)
+		}
 	})
 
 	AfterEach(func() {
-		rdb.Del(ctx, ttlTestKeys...)
+		for _, keyType := range []util.KeyType{
+			util.StringType,
+			util.HashType,
+			util.ListType,
+			util.SetType,
+			util.ZSetType,
+		} {
+			util.Del(ctx, rdb, keyType, ttlTestKeys...)
+		}
 		Expect(rdb.Close()).To(Succeed())
 	})
 
@@ -48,17 +64,17 @@ var _ = Describe("Expire/TTL Commands", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// 2. Check TTL (no expiry) -> -1
-		ttl, err := rdb.TTL(ctx, key).Result()
+		ttl, err := util.TTL(ctx, rdb, util.StringType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttl).To(Equal(time.Duration(-1)))
 
 		// 3. Set Expiry (2 seconds) using EXPIRE cmd
-		res, err := rdb.Expire(ctx, key, 2*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.StringType, key, 2*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
 		// 4. Check TTL -> should be between 0 and 2s
-		ttl, err = rdb.TTL(ctx, key).Result()
+		ttl, err = util.TTL(ctx, rdb, util.StringType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttl).To(BeNumerically(">", 0))
 		Expect(ttl).To(BeNumerically("<=", 2*time.Second))
@@ -67,28 +83,35 @@ var _ = Describe("Expire/TTL Commands", func() {
 		time.Sleep(2500 * time.Millisecond)
 
 		// 6. Check if key is gone
-		exists, err := rdb.Exists(ctx, key).Result()
+		exists, err := util.Exists(ctx, rdb, util.StringType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exists).To(Equal(int64(0)))
 
 		// 7. Check TTL on missing key -> -2
-		ttl, err = rdb.TTL(ctx, key).Result()
+		ttl, err = util.TTL(ctx, rdb, util.StringType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttl).To(Equal(time.Duration(-2)))
 	})
 
 	It("should count multiple keys in EXISTS", func() {
 		Expect(rdb.Set(ctx, "expire_key", "value", 0).Err()).NotTo(HaveOccurred())
-		Expect(rdb.HSet(ctx, "hash_expire_key", "f1", "v1").Err()).NotTo(HaveOccurred())
+		Expect(rdb.Set(ctx, "no_expire_key", "value", 0).Err()).NotTo(HaveOccurred())
 
-		exists, err := rdb.Exists(ctx, "expire_key", "hash_expire_key", "missing").Result()
+		exists, err := util.Exists(
+			ctx,
+			rdb,
+			util.StringType,
+			"expire_key",
+			"no_expire_key",
+			"missing",
+		).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exists).To(Equal(int64(2)))
 	})
 
 	It("should handle EXPIRE on non-existent key", func() {
 		key := "non_existent_key_expire"
-		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.StringType, key, 10*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeFalse())
 	})
@@ -98,17 +121,17 @@ var _ = Describe("Expire/TTL Commands", func() {
 		rdb.Set(ctx, key, "val", 0)
 
 		// Set 10s
-		rdb.Expire(ctx, key, 10*time.Second)
-		ttl, _ := rdb.TTL(ctx, key).Result()
+		util.Expire(ctx, rdb, util.StringType, key, 10*time.Second)
+		ttl, _ := util.TTL(ctx, rdb, util.StringType, key).Result()
 		Expect(ttl).To(BeNumerically(">", 8*time.Second))
 
 		// Update to 1s
-		res, err := rdb.Expire(ctx, key, 1*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.StringType, key, time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
 		// Check updated TTL
-		ttl, _ = rdb.TTL(ctx, key).Result()
+		ttl, _ = util.TTL(ctx, rdb, util.StringType, key).Result()
 		Expect(ttl).To(BeNumerically("<=", 1*time.Second))
 	})
 
@@ -120,12 +143,12 @@ var _ = Describe("Expire/TTL Commands", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// 2. EXPIRE
-		res, err := rdb.Expire(ctx, key, 2*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.HashType, key, 2*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
 		// 3. TTL check
-		ttl, _ := rdb.TTL(ctx, key).Result()
+		ttl, _ := util.TTL(ctx, rdb, util.HashType, key).Result()
 		Expect(ttl).To(BeNumerically(">", 0))
 
 		// 4. Wait
@@ -136,7 +159,7 @@ var _ = Describe("Expire/TTL Commands", func() {
 		Expect(err).To(Equal(redis.Nil))
 
 		// 6. Exists -> 0
-		exists, _ := rdb.Exists(ctx, key).Result()
+		exists, _ := util.Exists(ctx, rdb, util.HashType, key).Result()
 		Expect(exists).To(Equal(int64(0)))
 	})
 
@@ -145,18 +168,18 @@ var _ = Describe("Expire/TTL Commands", func() {
 		_, err := rdb.SAdd(ctx, key, "m1", "m2").Result()
 		Expect(err).NotTo(HaveOccurred())
 
-		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.SetType, key, 10*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
-		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		ttlBefore, err := util.TTL(ctx, rdb, util.SetType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
 		_, err = rdb.SRem(ctx, key, "m1").Result()
 		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := util.TTL(ctx, rdb, util.SetType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
@@ -167,18 +190,18 @@ var _ = Describe("Expire/TTL Commands", func() {
 		err := rdb.HSet(ctx, key, "f1", "v1").Err()
 		Expect(err).NotTo(HaveOccurred())
 
-		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.HashType, key, 10*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
-		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		ttlBefore, err := util.TTL(ctx, rdb, util.HashType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
 		err = rdb.HSet(ctx, key, "f2", "v2").Err()
 		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := util.TTL(ctx, rdb, util.HashType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
@@ -189,18 +212,18 @@ var _ = Describe("Expire/TTL Commands", func() {
 		_, err := rdb.LPush(ctx, key, "m1").Result()
 		Expect(err).NotTo(HaveOccurred())
 
-		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.ListType, key, 10*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
-		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		ttlBefore, err := util.TTL(ctx, rdb, util.ListType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
 		_, err = rdb.LPush(ctx, key, "m2").Result()
 		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := util.TTL(ctx, rdb, util.ListType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))
@@ -211,18 +234,18 @@ var _ = Describe("Expire/TTL Commands", func() {
 		_, err := rdb.ZAdd(ctx, key, redis.Z{Score: 1.0, Member: "m1"}).Result()
 		Expect(err).NotTo(HaveOccurred())
 
-		res, err := rdb.Expire(ctx, key, 10*time.Second).Result()
+		res, err := util.Expire(ctx, rdb, util.ZSetType, key, 10*time.Second).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res).To(BeTrue())
 
-		ttlBefore, err := rdb.TTL(ctx, key).Result()
+		ttlBefore, err := util.TTL(ctx, rdb, util.ZSetType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlBefore).To(BeNumerically(">", 0))
 
 		_, err = rdb.ZAdd(ctx, key, redis.Z{Score: 2.0, Member: "m2"}).Result()
 		Expect(err).NotTo(HaveOccurred())
 
-		ttlAfter, err := rdb.TTL(ctx, key).Result()
+		ttlAfter, err := util.TTL(ctx, rdb, util.ZSetType, key).Result()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ttlAfter).To(BeNumerically(">", 0))
 		Expect(ttlAfter).To(BeNumerically("<=", ttlBefore))

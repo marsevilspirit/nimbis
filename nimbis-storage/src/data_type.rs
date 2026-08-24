@@ -9,7 +9,7 @@ pub enum DataType {
 }
 
 impl DataType {
-	pub fn from_u8(v: u8) -> Option<Self> {
+	pub(crate) fn from_u8(v: u8) -> Option<Self> {
 		match v {
 			b's' => Some(Self::String),
 			b'h' => Some(Self::Hash),

@@ -29,7 +29,7 @@ var _ = Describe("Version Isolation", func() {
 	Describe("Set version isolation", func() {
 		It("should not leak old members after DEL and re-create", func() {
 			key := "version_set_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.SetType, key)
 
 			// 1. Create a set with members
 			n, err := rdb.SAdd(ctx, key, "old_m1", "old_m2", "old_m3").Result()
@@ -37,12 +37,12 @@ var _ = Describe("Version Isolation", func() {
 			Expect(n).To(Equal(int64(3)))
 
 			// 2. DEL the set (logical delete, O(1))
-			deleted, err := rdb.Del(ctx, key).Result()
+			deleted, err := util.Del(ctx, rdb, util.SetType, key).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(deleted).To(Equal(int64(1)))
 
 			// 3. Verify set is gone
-			exists, err := rdb.Exists(ctx, key).Result()
+			exists, err := util.Exists(ctx, rdb, util.SetType, key).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(Equal(int64(0)))
 
@@ -63,21 +63,21 @@ var _ = Describe("Version Isolation", func() {
 			Expect(card).To(Equal(int64(2)))
 
 			// Cleanup
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.SetType, key)
 		})
 	})
 
 	Describe("Hash version isolation", func() {
 		It("should not leak old fields after DEL and re-create", func() {
 			key := "version_hash_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.HashType, key)
 
 			// 1. Create a hash with fields
 			err := rdb.HSet(ctx, key, "old_f1", "v1", "old_f2", "v2").Err()
 			Expect(err).NotTo(HaveOccurred())
 
 			// 2. DEL the hash
-			deleted, err := rdb.Del(ctx, key).Result()
+			deleted, err := util.Del(ctx, rdb, util.HashType, key).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(deleted).To(Equal(int64(1)))
 
@@ -101,14 +101,14 @@ var _ = Describe("Version Isolation", func() {
 			Expect(val).To(BeEmpty())
 
 			// Cleanup
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.HashType, key)
 		})
 	})
 
 	Describe("ZSet version isolation", func() {
 		It("should not leak old members after DEL and re-create", func() {
 			key := "version_zset_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ZSetType, key)
 
 			// 1. Create a sorted set
 			n, err := rdb.ZAdd(ctx, key,
@@ -119,7 +119,7 @@ var _ = Describe("Version Isolation", func() {
 			Expect(n).To(Equal(int64(2)))
 
 			// 2. DEL the zset
-			deleted, err := rdb.Del(ctx, key).Result()
+			deleted, err := util.Del(ctx, rdb, util.ZSetType, key).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(deleted).To(Equal(int64(1)))
 
@@ -143,14 +143,14 @@ var _ = Describe("Version Isolation", func() {
 			Expect(card).To(Equal(int64(1)))
 
 			// Cleanup
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ZSetType, key)
 		})
 	})
 
 	Describe("List version isolation", func() {
 		It("should not leak old elements after DEL and re-create", func() {
 			key := "version_list_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ListType, key)
 
 			// 1. Create a list
 			n, err := rdb.RPush(ctx, key, "old_e1", "old_e2", "old_e3").Result()
@@ -158,7 +158,7 @@ var _ = Describe("Version Isolation", func() {
 			Expect(n).To(Equal(int64(3)))
 
 			// 2. DEL the list
-			deleted, err := rdb.Del(ctx, key).Result()
+			deleted, err := util.Del(ctx, rdb, util.ListType, key).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(deleted).To(Equal(int64(1)))
 
@@ -178,14 +178,14 @@ var _ = Describe("Version Isolation", func() {
 			Expect(llen).To(Equal(int64(1)))
 
 			// Cleanup
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ListType, key)
 		})
 	})
 
 	Describe("Non-recreate updates", func() {
 		It("should keep existing set members visible across normal updates", func() {
 			key := "version_set_non_recreate_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.SetType, key)
 
 			// Initial generation
 			n, err := rdb.SAdd(ctx, key, "m1", "m2").Result()
@@ -220,12 +220,12 @@ var _ = Describe("Version Isolation", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(card).To(Equal(int64(3)))
 
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.SetType, key)
 		})
 
 		It("should keep existing zset members visible across score updates", func() {
 			key := "version_zset_non_recreate_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ZSetType, key)
 
 			n, err := rdb.ZAdd(ctx, key,
 				redis.Z{Score: 1.0, Member: "m1"},
@@ -264,12 +264,12 @@ var _ = Describe("Version Isolation", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(card).To(Equal(int64(3)))
 
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ZSetType, key)
 		})
 
 		It("should keep existing list elements visible across push and pop", func() {
 			key := "version_list_non_recreate_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ListType, key)
 
 			n, err := rdb.RPush(ctx, key, "a", "b").Result()
 			Expect(err).NotTo(HaveOccurred())
@@ -298,7 +298,7 @@ var _ = Describe("Version Isolation", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(llen).To(Equal(int64(3)))
 
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.ListType, key)
 		})
 	})
 
@@ -306,7 +306,7 @@ var _ = Describe("Version Isolation", func() {
 	Describe("Rapid create-delete cycles", func() {
 		It("should not accumulate stale data across many cycles", func() {
 			key := "version_stress_test"
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.SetType, key)
 
 			// Perform 20 create-delete cycles
 			for i := 0; i < 20; i++ {
@@ -321,13 +321,13 @@ var _ = Describe("Version Isolation", func() {
 				Expect(n).To(Equal(int64(3)))
 
 				// DEL
-				deleted, err := rdb.Del(ctx, key).Result()
+				deleted, err := util.Del(ctx, rdb, util.SetType, key).Result()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(deleted).To(Equal(int64(1)))
 			}
 
 			// After all cycles, key should not exist
-			exists, err := rdb.Exists(ctx, key).Result()
+			exists, err := util.Exists(ctx, rdb, util.SetType, key).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(Equal(int64(0)))
 
@@ -346,7 +346,7 @@ var _ = Describe("Version Isolation", func() {
 			Expect(card).To(Equal(int64(1)))
 
 			// Cleanup
-			rdb.Del(ctx, key)
+			util.Del(ctx, rdb, util.SetType, key)
 		})
 	})
 })
