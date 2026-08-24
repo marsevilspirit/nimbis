@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::utils::parse_data_type;
 
 pub struct DelCmd {
 	meta: CmdMeta,
@@ -16,7 +17,7 @@ impl Default for DelCmd {
 		Self {
 			meta: CmdMeta {
 				name: "DEL".to_string(),
-				arity: -2,
+				arity: -3, // DEL type key [key ...]
 			},
 		}
 	}
@@ -29,7 +30,12 @@ impl Cmd for DelCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		match storage.del(args.iter().cloned()).await {
+		let data_type = match parse_data_type(&args[0]) {
+			Ok(data_type) => data_type,
+			Err(error) => return RespValue::error(error),
+		};
+
+		match storage.del(data_type, args[1..].iter().cloned()).await {
 			Ok(deleted) => RespValue::Integer(deleted),
 			Err(e) => RespValue::error(e.to_string()),
 		}

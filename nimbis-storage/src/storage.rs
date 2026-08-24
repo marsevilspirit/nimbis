@@ -1,5 +1,7 @@
+use std::ops::Bound;
 use std::sync::Arc;
 
+use bytes::Buf;
 use bytes::Bytes;
 use nimbis_macros::storage_lock;
 use slatedb::Db;
@@ -18,9 +20,20 @@ use crate::error::StorageError;
 use crate::lock::StorageLock;
 use crate::lock::StorageLockGuard;
 use crate::lock::StorageLocks;
+use crate::string::meta::AnyValue;
 use crate::string::meta::MetaKey;
 use crate::string::meta::MetaValue;
 use crate::utils::is_expired;
+
+const CURRENT_LAYOUT_VERSION: &[u8] = b"nimbis-layout:type-local-metadata:v1\n";
+const MIGRATION_SCAN_CHUNK_SIZE: usize = 64;
+const MAX_MIGRATION_TTL_DRIFT_MS: i64 = 5_000;
+
+struct NormalizedTopLevel {
+	value: AnyValue,
+	logical_expire_ts: Option<i64>,
+	row_expire_ts: Option<i64>,
+}
 
 #[derive(Clone)]
 pub struct Storage {
@@ -36,6 +49,29 @@ fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStor
 	match shard_id {
 		Some(id) => base_path.child(format!("shard-{}", id)),
 		None => base_path,
+	}
+}
+
+fn decode_exact_meta_key(encoded: &[u8]) -> Option<Bytes> {
+	if encoded.len() < 2 {
+		return None;
+	}
+	let mut remaining = encoded;
+	let key_len = remaining.get_u16() as usize;
+	if remaining.len() != key_len {
+		return None;
+	}
+	Some(Bytes::copy_from_slice(remaining))
+}
+
+async fn layout_marker_is_current(
+	object_store: &dyn ObjectStore,
+	marker: &ObjectStorePath,
+) -> Result<bool, StorageError> {
+	match object_store.get(marker).await {
+		Ok(result) => Ok(result.bytes().await?.as_ref() == CURRENT_LAYOUT_VERSION),
+		Err(slatedb::object_store::Error::NotFound { .. }) => Ok(false),
+		Err(error) => Err(error.into()),
 	}
 }
 
@@ -181,10 +217,7 @@ impl Storage {
 		let child_path = |name: &'static str| root_path.child(name);
 
 		let marker = child_path(".nimbis");
-		object_store
-			.put(&marker, bytes::Bytes::new().into())
-			.await
-			.map_err(StorageError::from)?;
+		let layout_is_current = layout_marker_is_current(object_store.as_ref(), &marker).await?;
 
 		// Create a single shared cache for all databases in this shard
 		let cache = Arc::new(FoyerCache::new());
@@ -201,27 +234,25 @@ impl Storage {
 			Arc::new(db)
 		};
 
-		// Open collection DBs with CollectionCompactionFilter referencing string_db
+		// Open every collection DB with a local, I/O-free compaction filter. Metadata
+		// lives in the same DB as its sub-keys; the filter only uses metadata rows
+		// that are already part of the ordered compaction stream.
 		let open_db_with_collection_filter = |name: &'static str, data_type: DataType| {
 			let store = object_store.clone();
 			let cache = cache.clone();
-			let string_db = string_db.clone();
 			let db_path = child_path(name);
 			async move {
+				let filter_supplier = Arc::new(CollectionCompactionFilterSupplier::new(data_type));
 				let compactor_builder =
 					slatedb::CompactorBuilder::new(db_path.clone(), store.clone())
-						.with_compaction_filter_supplier(Arc::new(
-							CollectionCompactionFilterSupplier {
-								string_db,
-								data_type,
-							},
-						));
-				let db: Result<Db, slatedb::Error> = Db::builder(db_path, store)
+						.with_compaction_filter_supplier(filter_supplier);
+				let db = Db::builder(db_path, store)
 					.with_db_cache(cache)
 					.with_compactor_builder(compactor_builder)
 					.build()
-					.await;
-				db.map_err(StorageError::from)
+					.await
+					.map_err(StorageError::from)?;
+				Ok::<Arc<Db>, StorageError>(Arc::new(db))
 			}
 		};
 
@@ -232,13 +263,288 @@ impl Storage {
 			open_db_with_collection_filter("zset", DataType::ZSet)
 		)?;
 
-		Ok(Self::new(
-			string_db,
-			Arc::new(hash_db),
-			Arc::new(list_db),
-			Arc::new(set_db),
-			Arc::new(zset_db),
-		))
+		let storage = Self::new(string_db, hash_db, list_db, set_db, zset_db);
+		// This runs before the server can accept commands. It is intentionally
+		// durable and idempotent so databases created by the old split-metadata
+		// layout converge to a single local authority without a runtime dual-read
+		// fallback.
+		if !layout_is_current {
+			storage.migrate_legacy_layout().await?;
+			// Publishing the version is the migration commit point. Every destination
+			// write and source delete is durable before this marker is replaced, so an
+			// empty/old marker always remains safe to retry after interruption.
+			object_store
+				.put(&marker, Bytes::from_static(CURRENT_LAYOUT_VERSION).into())
+				.await
+				.map_err(StorageError::from)?;
+		}
+		Ok(storage)
+	}
+
+	pub(crate) fn db_for_type(&self, data_type: DataType) -> &Db {
+		match data_type {
+			DataType::String => &self.string_db,
+			DataType::Hash => &self.hash_db,
+			DataType::List => &self.list_db,
+			DataType::Set => &self.set_db,
+			DataType::ZSet => &self.zset_db,
+		}
+	}
+
+	pub(crate) fn typed_dbs(&self) -> [(DataType, &Db); 5] {
+		[
+			(DataType::String, &self.string_db),
+			(DataType::Hash, &self.hash_db),
+			(DataType::List, &self.list_db),
+			(DataType::Set, &self.set_db),
+			(DataType::ZSet, &self.zset_db),
+		]
+	}
+
+	fn normalized_top_level(kv: &slatedb::KeyValue) -> Result<NormalizedTopLevel, StorageError> {
+		let mut value = AnyValue::decode(&kv.value)?;
+		if value.version() == Some(0) {
+			value.set_version(kv.seq);
+		}
+
+		let logical_expire_ts = if value.data_type() == DataType::String {
+			// StringValue has no embedded expiration field. Its SlateDB row TTL is
+			// therefore the only recoverable logical deadline during migration.
+			kv.expire_ts
+		} else {
+			let encoded_expire_time = value.expire_time();
+			if encoded_expire_time == 0 {
+				// Older metadata may have relied only on the row TTL. Canonicalize that
+				// deadline into the payload before it is moved to the typed database.
+				if let Some(expire_ts) = kv.expire_ts {
+					value.set_expire_time(expire_ts.max(0) as u64);
+				}
+				kv.expire_ts
+			} else {
+				Some(i64::try_from(encoded_expire_time).map_err(|_| {
+					StorageError::DataInconsistency {
+						message: "metadata expiration exceeds SlateDB timestamp range".to_string(),
+					}
+				})?)
+			}
+		};
+
+		Ok(NormalizedTopLevel {
+			value,
+			logical_expire_ts,
+			row_expire_ts: kv.expire_ts,
+		})
+	}
+
+	fn destination_matches_source(
+		source: &NormalizedTopLevel,
+		destination: &NormalizedTopLevel,
+		expected_type: DataType,
+	) -> bool {
+		if destination.value.data_type() != expected_type
+			|| destination.value.encode() != source.value.encode()
+		{
+			return false;
+		}
+
+		match expected_type {
+			DataType::String => match (source.logical_expire_ts, destination.row_expire_ts) {
+				(None, None) => true,
+				// ExpireAfter is resolved by the destination DB after the migration
+				// call is queued. Accept only a non-shortening deadline: this makes a
+				// durable destination write safe to reuse after a crash without risking
+				// premature String loss.
+				(Some(source_expire_ts), Some(destination_expire_ts)) => {
+					destination_expire_ts >= source_expire_ts
+						&& destination_expire_ts.saturating_sub(source_expire_ts)
+							<= MAX_MIGRATION_TTL_DRIFT_MS
+				}
+				_ => false,
+			},
+			_ => {
+				if destination.logical_expire_ts != source.logical_expire_ts {
+					return false;
+				}
+				match (source.logical_expire_ts, destination.row_expire_ts) {
+					(None, None) => true,
+					(Some(logical_expire_ts), Some(row_expire_ts)) => {
+						row_expire_ts >= logical_expire_ts
+							&& row_expire_ts.saturating_sub(logical_expire_ts)
+								<= MAX_MIGRATION_TTL_DRIFT_MS
+					}
+					_ => false,
+				}
+			}
+		}
+	}
+
+	fn migration_put_opts(logical_expire_ts: Option<i64>) -> PutOptions {
+		let ttl = logical_expire_ts
+			.map(|expire_ts| {
+				let now = chrono::Utc::now().timestamp_millis();
+				slatedb::config::Ttl::ExpireAfter(expire_ts.saturating_sub(now).max(0) as u64)
+			})
+			.unwrap_or(slatedb::config::Ttl::NoExpiry);
+		PutOptions { ttl }
+	}
+
+	async fn copy_top_level_durably(
+		&self,
+		source_db: &Db,
+		destination_db: &Db,
+		encoded_key: Bytes,
+		source_kv: slatedb::KeyValue,
+		expected_type: DataType,
+	) -> Result<(), StorageError> {
+		let durable = WriteOptions {
+			await_durable: true,
+		};
+		if is_expired(source_kv.expire_ts) {
+			source_db.delete_with_options(encoded_key, &durable).await?;
+			return Ok(());
+		}
+
+		let source_value = Self::normalized_top_level(&source_kv)?;
+		if source_value.value.data_type() != expected_type {
+			return Err(StorageError::DataInconsistency {
+				message: format!(
+					"layout migration expected {expected_type:?}, found {:?}",
+					source_value.value.data_type()
+				),
+			});
+		}
+		if is_expired(source_value.logical_expire_ts) {
+			source_db.delete_with_options(encoded_key, &durable).await?;
+			return Ok(());
+		}
+		let normalized_source = source_value.value.encode();
+
+		if let Some(destination_kv) = destination_db.get_key_value(encoded_key.clone()).await? {
+			let destination_value = Self::normalized_top_level(&destination_kv)?;
+			if !Self::destination_matches_source(&source_value, &destination_value, expected_type) {
+				return Err(StorageError::DataInconsistency {
+					message: format!(
+						"conflicting {expected_type:?} metadata authorities during layout migration"
+					),
+				});
+			}
+		} else {
+			let put_opts = Self::migration_put_opts(source_value.logical_expire_ts);
+			destination_db
+				.put_with_options(
+					encoded_key.clone(),
+					normalized_source.clone(),
+					&put_opts,
+					&durable,
+				)
+				.await?;
+
+			let Some(destination_kv) = destination_db.get_key_value(encoded_key.clone()).await?
+			else {
+				// A key can expire while it is being migrated. The source remains a
+				// valid recovery authority unless it is now expired as well.
+				if is_expired(source_value.logical_expire_ts) {
+					source_db.delete_with_options(encoded_key, &durable).await?;
+					return Ok(());
+				}
+				return Err(StorageError::DataInconsistency {
+					message: format!(
+						"{expected_type:?} metadata was not visible after durable migration write"
+					),
+				});
+			};
+			let destination_value = Self::normalized_top_level(&destination_kv)?;
+			if !Self::destination_matches_source(&source_value, &destination_value, expected_type) {
+				// This destination did not exist before this invocation. Remove an
+				// incompatible copy so an old marker can retry instead of becoming
+				// permanently wedged on the next startup.
+				destination_db
+					.delete_with_options(encoded_key.clone(), &durable)
+					.await?;
+				return Err(StorageError::DataInconsistency {
+					message: format!(
+						"{expected_type:?} metadata verification failed after migration"
+					),
+				});
+			}
+		}
+
+		// The destination write is durable before the legacy authority is removed.
+		// A crash before this delete leaves two compatible copies; the next startup
+		// verifies payload, logical expiration and bounded row-TTL drift before it
+		// completes the delete.
+		source_db.delete_with_options(encoded_key, &durable).await?;
+		Ok(())
+	}
+
+	async fn migrate_legacy_source(
+		&self,
+		source_type: DataType,
+		source_db: &Db,
+	) -> Result<(), StorageError> {
+		let mut cursor = None;
+		loop {
+			let start = cursor.map_or(Bound::Unbounded, Bound::Excluded);
+			let mut stream = source_db
+				.scan::<Bytes, _>((start, Bound::Unbounded))
+				.await?;
+			let mut candidates = Vec::with_capacity(MIGRATION_SCAN_CHUNK_SIZE);
+			let mut scanned = 0;
+			let mut last_scanned_key = None;
+
+			while scanned < MIGRATION_SCAN_CHUNK_SIZE {
+				let Some(kv) = stream.next().await? else {
+					break;
+				};
+				scanned += 1;
+				last_scanned_key = Some(kv.key.clone());
+				if decode_exact_meta_key(&kv.key).is_none() || kv.value.is_empty() {
+					continue;
+				}
+				let Some(encoded_type) = DataType::from_u8(kv.value[0]) else {
+					continue;
+				};
+				let is_legacy = match source_type {
+					DataType::String => encoded_type != DataType::String,
+					_ => encoded_type == DataType::String,
+				};
+				if is_legacy {
+					candidates.push((encoded_type, kv));
+				}
+			}
+			drop(stream);
+
+			for (destination_type, kv) in candidates {
+				self.copy_top_level_durably(
+					source_db,
+					self.db_for_type(destination_type),
+					kv.key.clone(),
+					kv,
+					destination_type,
+				)
+				.await?;
+			}
+
+			if scanned < MIGRATION_SCAN_CHUNK_SIZE {
+				break;
+			}
+			cursor = last_scanned_key;
+		}
+		Ok(())
+	}
+
+	async fn migrate_legacy_layout(&self) -> Result<(), StorageError> {
+		// First recover Strings written into hash_db by the earlier hash-only
+		// co-location candidate. New writes never place Strings in collection DBs.
+		for (data_type, db) in self.typed_dbs().into_iter().skip(1) {
+			self.migrate_legacy_source(data_type, db).await?;
+		}
+
+		// Then move legacy collection metadata out of string_db. Each scan is
+		// bounded and dropped before its source rows are durably deleted.
+		self.migrate_legacy_source(DataType::String, &self.string_db)
+			.await?;
+		Ok(())
 	}
 
 	pub async fn close(&self) -> Result<(), StorageError> {
@@ -284,7 +590,7 @@ impl Storage {
 		Ok(())
 	}
 
-	/// Helper to get and validate metadata for any collection type.
+	/// Get and validate top-level data from its authoritative typed database.
 	/// Returns:
 	/// - Ok(Some(meta)) if the key is a valid, non-expired meta of type T
 	/// - Ok(None) if the key doesn't exist (expired keys are already filtered
@@ -294,13 +600,21 @@ impl Storage {
 		&self,
 		key: &Bytes,
 	) -> Result<Option<T>, StorageError> {
+		let db = T::data_type()
+			.map(|data_type| self.db_for_type(data_type))
+			// AnyValue is used for String decoding only; cross-type inspection is
+			// explicit through typed_dbs so same-name values can coexist.
+			.unwrap_or(&self.string_db);
+		Self::get_meta_from_db::<T>(db, key).await
+	}
+
+	pub(crate) async fn get_meta_from_db<T: MetaValue>(
+		db: &Db,
+		key: &Bytes,
+	) -> Result<Option<T>, StorageError> {
 		let meta_key = MetaKey::new(key.clone());
 		let meta_encoded_key = meta_key.encode();
-		let kv = match self
-			.string_db
-			.get_key_value(meta_encoded_key.clone())
-			.await?
-		{
+		let kv = match db.get_key_value(meta_encoded_key.clone()).await? {
 			Some(kv) => kv,
 			None => return Ok(None),
 		};
@@ -309,8 +623,7 @@ impl Storage {
 			let write_opts = WriteOptions {
 				await_durable: false,
 			};
-			self.string_db
-				.delete_with_options(meta_encoded_key, &write_opts)
+			db.delete_with_options(meta_encoded_key, &write_opts)
 				.await?;
 			return Ok(None);
 		}
@@ -330,9 +643,29 @@ impl Storage {
 		}
 
 		let mut meta_val = T::decode(&meta_bytes)?;
+		if meta_val.version() == Some(0) {
+			meta_val.set_version(kv.seq);
+		}
 
-		if let Some(ts) = kv.expire_ts {
-			meta_val.set_expire_time(ts as u64);
+		let logical_expire_time = meta_val.expire_time();
+		if logical_expire_time == 0 {
+			if let Some(ts) = kv.expire_ts {
+				meta_val.set_expire_time(ts.max(0) as u64);
+			}
+		} else {
+			let logical_expire_ts = i64::try_from(logical_expire_time).map_err(|_| {
+				StorageError::DataInconsistency {
+					message: "metadata expiration exceeds SlateDB timestamp range".to_string(),
+				}
+			})?;
+			if is_expired(Some(logical_expire_ts)) {
+				let write_opts = WriteOptions {
+					await_durable: false,
+				};
+				db.delete_with_options(meta_encoded_key, &write_opts)
+					.await?;
+				return Ok(None);
+			}
 		}
 
 		Ok(Some(meta_val))
@@ -365,6 +698,19 @@ mod tests {
 		}
 	}
 
+	async fn mark_layout_legacy(path: &std::path::Path) {
+		tokio::fs::write(path.join(".nimbis"), Bytes::new())
+			.await
+			.unwrap();
+	}
+
+	async fn assert_current_layout_marker(path: &std::path::Path) {
+		assert_eq!(
+			tokio::fs::read(path.join(".nimbis")).await.unwrap(),
+			CURRENT_LAYOUT_VERSION
+		);
+	}
+
 	#[fixture]
 	async fn ctx() -> TestContext {
 		let timestamp = ulid::Ulid::generate().to_string();
@@ -391,6 +737,7 @@ mod tests {
 		storage.close().await.unwrap();
 
 		assert!(path.join("shard-3").exists());
+		assert_current_layout_marker(&path.join("shard-3")).await;
 		let _ = std::fs::remove_dir_all(path);
 	}
 
@@ -411,10 +758,17 @@ mod tests {
 		assert_eq!(stored, vec![Bytes::from("old_member")]);
 
 		// DEL (Logical Delete - only Meta)
-		ctx.storage.del([key.clone()]).await.unwrap();
+		ctx.storage
+			.del(DataType::ZSet, [key.clone()])
+			.await
+			.unwrap();
 
 		// Verify empty
-		let exists = ctx.storage.exists(key.clone()).await.unwrap();
+		let exists = ctx
+			.storage
+			.exists(DataType::ZSet, key.clone())
+			.await
+			.unwrap();
 		assert!(!exists);
 
 		// ZSET: Re-create (Version 2)
@@ -431,96 +785,392 @@ mod tests {
 		assert_eq!(stored[0], Bytes::from("new_member"));
 	}
 
-	/// Verifies that after a logical delete (O(1)), the compaction filter
-	/// correctly identifies all orphaned data for physical reclamation. This
-	/// test detects potential "data leaks" where stale data remains on disk
-	/// permanently.
-	#[rstest]
 	#[tokio::test]
-	async fn test_physical_cleanup_after_logical_delete(#[future] ctx: TestContext) {
-		use slatedb::CompactionFilter;
+	async fn test_startup_migrates_every_legacy_collection_metadata_type() {
+		use crate::string::meta::HashMetaValue;
+		use crate::string::meta::ListMetaValue;
+		use crate::string::meta::SetMetaValue;
+		use crate::string::meta::ZSetMetaValue;
 
-		use crate::compaction_filter::CollectionCompactionFilter;
-		use crate::data_type::DataType;
-
-		let ctx = ctx.await;
-		let key = Bytes::from("leak_test_set");
-
-		// SADD: Add multiple members
-		let members: Vec<Bytes> = (0..10)
-			.map(|i| Bytes::from(format!("member_{}", i)))
-			.collect();
-		let added = ctx
-			.storage
-			.sadd(key.clone(), members.clone())
-			.await
-			.unwrap();
-		assert_eq!(added, 10);
-
-		// Verify all members are logically visible
-		let stored = ctx.storage.smembers(key.clone()).await.unwrap();
-		assert_eq!(stored.len(), 10);
-
-		// DEL: Logical delete (O(1) - only meta is removed)
-		let deleted = ctx.storage.del([key.clone()]).await.unwrap();
-		assert_eq!(deleted, 1, "DEL should delete one key");
-
-		// Verify logically empty
-		let exists = ctx.storage.exists(key.clone()).await.unwrap();
-		assert!(!exists);
-
-		// KEY VERIFICATION: Scan raw set_db to prove physical data still exists
-		let scan_range = ..;
-		let mut stream = ctx
-			.storage
-			.set_db
-			.scan::<Bytes, _>(scan_range)
-			.await
-			.unwrap();
-		let mut raw_count = 0;
-		let mut raw_entries = Vec::new();
-		while let Some(kv) = stream.next().await.unwrap() {
-			raw_count += 1;
-			raw_entries.push(kv);
+		async fn move_meta_to_legacy<T: MetaValue>(
+			source: &Db,
+			string_db: &Db,
+			key: &Bytes,
+			delete_source: bool,
+		) -> u64 {
+			let meta = Storage::get_meta_from_db::<T>(source, key)
+				.await
+				.unwrap()
+				.unwrap();
+			let encoded_key = MetaKey::new(key.clone()).encode();
+			let write_opts = WriteOptions {
+				await_durable: false,
+			};
+			let put_opts = Storage::meta_put_opts(&meta);
+			string_db
+				.put_with_options(encoded_key.clone(), meta.encode(), &put_opts, &write_opts)
+				.await
+				.unwrap();
+			if delete_source {
+				source
+					.delete_with_options(encoded_key, &write_opts)
+					.await
+					.unwrap();
+			}
+			meta.expire_time()
 		}
-		// Physical data should still be present (zombie data)
+
+		let timestamp = ulid::Ulid::generate().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_layout_migration_{timestamp}"));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+		let hash_key = Bytes::from_static(b"legacy-hash");
+		let list_key = Bytes::from_static(b"legacy-list");
+		let set_key = Bytes::from_static(b"legacy-set");
+		let zset_key = Bytes::from_static(b"legacy-zset");
+
+		storage
+			.hset(
+				hash_key.clone(),
+				Bytes::from_static(b"field"),
+				Bytes::from_static(b"value"),
+			)
+			.await
+			.unwrap();
+		storage
+			.rpush(list_key.clone(), vec![Bytes::from_static(b"element")])
+			.await
+			.unwrap();
+		storage
+			.sadd(set_key.clone(), vec![Bytes::from_static(b"member")])
+			.await
+			.unwrap();
+		storage
+			.zadd(zset_key.clone(), vec![(1.0, Bytes::from_static(b"member"))])
+			.await
+			.unwrap();
+
+		let expire_time = (chrono::Utc::now().timestamp_millis().max(0) as u64) + 120_000;
+		for (data_type, key) in [
+			(DataType::Hash, &hash_key),
+			(DataType::List, &list_key),
+			(DataType::Set, &set_key),
+			(DataType::ZSet, &zset_key),
+		] {
+			assert!(
+				storage
+					.expire(data_type, key.clone(), expire_time)
+					.await
+					.unwrap()
+			);
+		}
+
+		// Hash deliberately remains in both locations. This is the durable-target /
+		// source-not-deleted state left by a crash between the two migration writes.
+		let migrated_expirations = [
+			move_meta_to_legacy::<HashMetaValue>(
+				&storage.hash_db,
+				&storage.string_db,
+				&hash_key,
+				false,
+			)
+			.await,
+			move_meta_to_legacy::<ListMetaValue>(
+				&storage.list_db,
+				&storage.string_db,
+				&list_key,
+				true,
+			)
+			.await,
+			move_meta_to_legacy::<SetMetaValue>(
+				&storage.set_db,
+				&storage.string_db,
+				&set_key,
+				true,
+			)
+			.await,
+			move_meta_to_legacy::<ZSetMetaValue>(
+				&storage.zset_db,
+				&storage.string_db,
+				&zset_key,
+				true,
+			)
+			.await,
+		];
+		assert_eq!(migrated_expirations, [expire_time; 4]);
+		storage.close().await.unwrap();
+		drop(storage);
+		mark_layout_legacy(&path).await;
+
+		let storage = Storage::open(&path, None).await.unwrap();
+		assert_current_layout_marker(&path).await;
+		assert_eq!(
+			storage
+				.hget(hash_key.clone(), Bytes::from_static(b"field"))
+				.await
+				.unwrap(),
+			Some(Bytes::from_static(b"value"))
+		);
+		assert_eq!(
+			storage.lrange(list_key.clone(), 0, -1).await.unwrap(),
+			vec![Bytes::from_static(b"element")]
+		);
 		assert!(
-			raw_count >= 10,
-			"Expected at least 10 physical entries, found {}. Data was physically deleted instead of lazily!",
-			raw_count
+			storage
+				.sismember(set_key.clone(), Bytes::from_static(b"member"))
+				.await
+				.unwrap()
+		);
+		assert_eq!(
+			storage
+				.zscore(zset_key.clone(), Bytes::from_static(b"member"))
+				.await
+				.unwrap(),
+			Some(1.0)
 		);
 
-		// Run compaction filter logic on all raw entries
-		let mut filter = CollectionCompactionFilter {
-			string_db: ctx.storage.string_db.clone(),
-			data_type: DataType::Set,
+		for (data_type, key) in [
+			(DataType::Hash, hash_key),
+			(DataType::List, list_key),
+			(DataType::Set, set_key),
+			(DataType::ZSet, zset_key),
+		] {
+			let encoded_key = MetaKey::new(key).encode();
+			assert!(
+				storage
+					.string_db
+					.get(encoded_key.clone())
+					.await
+					.unwrap()
+					.is_none()
+			);
+			let migrated = storage
+				.db_for_type(data_type)
+				.get_key_value(encoded_key)
+				.await
+				.unwrap()
+				.unwrap();
+			let normalized = Storage::normalized_top_level(&migrated).unwrap();
+			assert_eq!(normalized.logical_expire_ts, Some(expire_time as i64));
+			let row_expire_ts = migrated.expire_ts.unwrap();
+			assert!(row_expire_ts >= expire_time as i64);
+			assert!(row_expire_ts - expire_time as i64 <= MAX_MIGRATION_TTL_DRIFT_MS);
+		}
+		storage.close().await.unwrap();
+		drop(storage);
+
+		// A second startup is idempotent and does not need a legacy read path.
+		let storage = Storage::open(&path, None).await.unwrap();
+		assert_eq!(
+			storage
+				.hlen(Bytes::from_static(b"legacy-hash"))
+				.await
+				.unwrap(),
+			1
+		);
+		storage.close().await.unwrap();
+		drop(storage);
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_startup_recovers_string_from_hash_only_candidate_layout() {
+		use crate::string::value::StringValue;
+
+		let timestamp = ulid::Ulid::generate().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_string_recovery_{timestamp}"));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+		let key = Bytes::from_static(b"misplaced-string");
+		let encoded_key = MetaKey::new(key.clone()).encode();
+		storage
+			.hash_db
+			.put(encoded_key.clone(), StringValue::new("value").encode())
+			.await
+			.unwrap();
+		storage.close().await.unwrap();
+		drop(storage);
+		mark_layout_legacy(&path).await;
+
+		let storage = Storage::open(&path, None).await.unwrap();
+		assert_eq!(
+			storage.get(key).await.unwrap(),
+			Some(Bytes::from_static(b"value"))
+		);
+		assert!(
+			storage
+				.hash_db
+				.get(encoded_key.clone())
+				.await
+				.unwrap()
+				.is_none()
+		);
+		assert!(storage.string_db.get(encoded_key).await.unwrap().is_some());
+		storage.close().await.unwrap();
+		drop(storage);
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_string_migration_reuses_non_shortening_ttl_destination() {
+		use slatedb::config::Ttl;
+
+		use crate::string::value::StringValue;
+
+		let timestamp = ulid::Ulid::generate().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_string_retry_{timestamp}"));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+		let key = Bytes::from_static(b"misplaced-string-retry");
+		let encoded_key = MetaKey::new(key.clone()).encode();
+		let encoded_value = StringValue::new("value").encode();
+		let put_opts = PutOptions {
+			ttl: Ttl::ExpireAfter(120_000),
+		};
+		let write_opts = WriteOptions {
+			await_durable: false,
 		};
 
-		let mut reclaimed_count = 0;
-		for kv in &raw_entries {
-			let entry = slatedb::RowEntry {
-				key: kv.key.clone(),
-				value: slatedb::ValueDeletable::Value(kv.value.clone()),
-				seq: 0,
-				create_ts: None,
-				expire_ts: None,
-			};
-			let decision = filter.filter(&entry).await.unwrap();
-			if decision
-				== slatedb::CompactionFilterDecision::Modify(slatedb::ValueDeletable::Tombstone)
-			{
-				reclaimed_count += 1;
-			}
-		}
+		storage
+			.hash_db
+			.put_with_options(
+				encoded_key.clone(),
+				encoded_value.clone(),
+				&put_opts,
+				&write_opts,
+			)
+			.await
+			.unwrap();
+		let source_expire_ts = storage
+			.hash_db
+			.get_key_value(encoded_key.clone())
+			.await
+			.unwrap()
+			.unwrap()
+			.expire_ts
+			.unwrap();
+		storage
+			.string_db
+			.put_with_options(encoded_key.clone(), encoded_value, &put_opts, &write_opts)
+			.await
+			.unwrap();
+		let destination_expire_ts = storage
+			.string_db
+			.get_key_value(encoded_key.clone())
+			.await
+			.unwrap()
+			.unwrap()
+			.expire_ts
+			.unwrap();
+		assert!(destination_expire_ts >= source_expire_ts);
+		assert!(destination_expire_ts - source_expire_ts <= MAX_MIGRATION_TTL_DRIFT_MS);
+		storage.close().await.unwrap();
+		drop(storage);
+		mark_layout_legacy(&path).await;
 
-		// ALL orphaned entries should be marked for reclamation
+		let storage = Storage::open(&path, None).await.unwrap();
 		assert_eq!(
-			reclaimed_count,
-			raw_count,
-			"Data leak detected! {} out of {} entries were NOT reclaimed by the compaction filter",
-			raw_count - reclaimed_count,
-			raw_count
+			storage.get(key).await.unwrap(),
+			Some(Bytes::from_static(b"value"))
 		);
+		assert!(
+			storage
+				.hash_db
+				.get(encoded_key.clone())
+				.await
+				.unwrap()
+				.is_none()
+		);
+		assert_eq!(
+			storage
+				.string_db
+				.get_key_value(encoded_key)
+				.await
+				.unwrap()
+				.unwrap()
+				.expire_ts,
+			Some(destination_expire_ts)
+		);
+		assert_current_layout_marker(&path).await;
+		storage.close().await.unwrap();
+		drop(storage);
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_current_layout_marker_skips_migration_on_second_open() {
+		let timestamp = ulid::Ulid::generate().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_marker_skip_{timestamp}"));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+		assert_current_layout_marker(&path).await;
+
+		// This exact top-level key looks like legacy Hash metadata by its type byte,
+		// but is intentionally undecodable. A migration scan would make the next
+		// open fail; the current marker must bypass it.
+		let encoded_key = MetaKey::new("skip-migration-sentinel").encode();
+		let invalid_hash_meta = Bytes::from(vec![DataType::Hash as u8]);
+		storage
+			.string_db
+			.put(encoded_key.clone(), invalid_hash_meta.clone())
+			.await
+			.unwrap();
+		storage.close().await.unwrap();
+		drop(storage);
+
+		let storage = Storage::open(&path, None).await.unwrap();
+		assert_eq!(
+			storage.string_db.get(encoded_key).await.unwrap(),
+			Some(invalid_hash_meta)
+		);
+		storage.close().await.unwrap();
+		drop(storage);
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_startup_migration_crosses_scan_chunk_boundary() {
+		use crate::string::value::StringValue;
+
+		let timestamp = ulid::Ulid::generate().to_string();
+		let path = std::env::temp_dir().join(format!("nimbis_chunked_migration_{timestamp}"));
+		std::fs::create_dir_all(&path).unwrap();
+		let storage = Storage::open(&path, None).await.unwrap();
+		let count = MIGRATION_SCAN_CHUNK_SIZE + 1;
+		let put_opts = PutOptions::default();
+		let write_opts = WriteOptions {
+			await_durable: false,
+		};
+		for index in 0..count {
+			let key = Bytes::from(format!("chunked-string-{index:04}"));
+			storage
+				.hash_db
+				.put_with_options(
+					MetaKey::new(key).encode(),
+					StringValue::new(format!("value-{index}")).encode(),
+					&put_opts,
+					&write_opts,
+				)
+				.await
+				.unwrap();
+		}
+		storage.close().await.unwrap();
+		drop(storage);
+		mark_layout_legacy(&path).await;
+
+		let storage = Storage::open(&path, None).await.unwrap();
+		for index in 0..count {
+			let key = Bytes::from(format!("chunked-string-{index:04}"));
+			let encoded_key = MetaKey::new(key.clone()).encode();
+			assert_eq!(
+				storage.get(key).await.unwrap(),
+				Some(Bytes::from(format!("value-{index}")))
+			);
+			assert!(storage.hash_db.get(encoded_key).await.unwrap().is_none());
+		}
+		storage.close().await.unwrap();
+		drop(storage);
+		let _ = std::fs::remove_dir_all(path);
 	}
 
 	#[test]

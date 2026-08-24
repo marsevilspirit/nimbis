@@ -1,6 +1,9 @@
 # Nimbis
 
-A Redis-compatible database built with Rust, using object storage as the backend.
+A RESP-speaking database built with Rust, using object storage as the backend.
+Nimbis supports a Redis-client-compatible command subset, but intentionally
+uses independent typed key namespaces and typed lifecycle commands where that
+produces a simpler and faster storage path.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/marsevilspirit/nimbis)
 
@@ -11,7 +14,10 @@ See [ROADMAP.md](ROADMAP.md) for the detailed development plan and upcoming feat
 
 ## Features
 
-- **Redis-Compatible Commands**: Comprehensive support for string, hash, list, set, and sorted set data types. See [Commands](docs/commands.md) for the complete list of supported commands and implementation guide.
+- **Redis-Client-Compatible Command Subset**: Supports string, hash, list, set,
+  and sorted set data types over RESP. `DEL`, `EXISTS`, `EXPIRE`, and `TTL`
+  intentionally require an explicit key type and therefore differ from Redis.
+  See [Commands](docs/commands.md) for the complete command contract.
 - **Persistence**: Data is persisted to [SlateDB](https://github.com/slatedb/slatedb) (object storage compatible).
 - **Configuration**: Dynamic configuration updates.
 - **Observability**: Detailed build and environment information (git hash, branch, rustc version) displayed on startup.

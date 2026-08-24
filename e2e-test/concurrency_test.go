@@ -131,7 +131,7 @@ var _ = Describe("Concurrency Tests", func() {
 		const totalItems = numGoroutines * numPushes
 
 		// Ensure list is empty
-		client.Del(ctx, key)
+		util.Del(ctx, client, util.ListType, key)
 
 		var wg sync.WaitGroup
 		wg.Add(numGoroutines)
@@ -161,7 +161,7 @@ var _ = Describe("Concurrency Tests", func() {
 		const numAdds = 200
 		const totalUniqueItems = numGoroutines * numAdds
 
-		client.Del(ctx, key)
+		util.Del(ctx, client, util.SetType, key)
 
 		var wg sync.WaitGroup
 		wg.Add(numGoroutines)

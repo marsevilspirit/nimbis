@@ -173,13 +173,19 @@ directly to `redis-benchmark`.
 
 Covered command groups:
 
-- String/generic: `DEL`, `EXISTS`, `DECR`, `APPEND`
+- String: `DECR`, `APPEND`
+- Typed key lifecycle: `DEL STRING key [key ...]`,
+  `EXISTS STRING key [key ...]`, `EXPIRE STRING key seconds`, and
+  `TTL STRING key`
 - Hash: `HDEL`, `HGET`, `HLEN`, `HMGET`, `HGETALL`
 - List: `LLEN`, `LRANGE`
 - Set: `SMEMBERS`, `SISMEMBER`, `SREM`, `SCARD`
 - Sorted set: `ZRANGE`, `ZSCORE`, `ZREM`, `ZCARD`
-- TTL: `EXPIRE`, `TTL`
 - Control smoke: `HELLO 2`, `CONFIG GET *`, `CLIENT ID`
+
+The lifecycle workload uses the `STRING` type because its random fixtures are
+seeded with `SET`. Fixed List, Set, and ZSet fixtures are reset with the matching
+typed `DEL` form before they are seeded.
 
 `FLUSHDB` is used only for setup and cleanup isolation. It is not included in
 throughput comparisons.
@@ -195,6 +201,7 @@ The `comparison` profile is intentionally smaller than `full`. It benchmarks:
 - For `just redis-bench`, the target Nimbis server must already be running. The
   branch comparison command builds and starts both servers automatically.
 - Each suite uses stable key prefixes to reduce cross-test pollution.
-- Destructive commands such as `DEL`, `HDEL`, `SREM`, and `ZREM` are seeded
-  before benchmarking so they do not benchmark an entirely cold miss path.
+- Destructive commands such as `DEL STRING`, `HDEL`, `SREM`, and `ZREM` are
+  seeded before benchmarking so they do not benchmark an entirely cold miss
+  path.
 - `__rand_int__` is used with `-r` for random-key workloads.

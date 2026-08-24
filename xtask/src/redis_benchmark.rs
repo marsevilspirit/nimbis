@@ -258,7 +258,7 @@ fn seed_fixed_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 			"value3",
 		],
 	)?;
-	redis_cli(config, runner, &["DEL", "bench:list"])?;
+	redis_cli(config, runner, &["DEL", "LIST", "bench:list"])?;
 	redis_cli(
 		config,
 		runner,
@@ -277,10 +277,14 @@ fn seed_fixed_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 			"j",
 		],
 	)?;
-	redis_cli(config, runner, &["DEL", "bench:set:a", "bench:set:b"])?;
+	redis_cli(
+		config,
+		runner,
+		&["DEL", "SET", "bench:set:a", "bench:set:b"],
+	)?;
 	redis_cli(config, runner, &["SADD", "bench:set:a", "a", "b", "c"])?;
 	redis_cli(config, runner, &["SADD", "bench:set:b", "b", "c", "d"])?;
-	redis_cli(config, runner, &["DEL", "bench:zset"])?;
+	redis_cli(config, runner, &["DEL", "ZSET", "bench:zset"])?;
 	redis_cli(
 		config,
 		runner,
@@ -388,6 +392,7 @@ fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 			"del_multi_key",
 			&[
 				"DEL",
+				"STRING",
 				"bench:string:del:a:__rand_int__",
 				"bench:string:del:b:__rand_int__",
 			],
@@ -396,6 +401,7 @@ fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 			"exists_multi_key",
 			&[
 				"EXISTS",
+				"STRING",
 				"bench:string:a:__rand_int__",
 				"bench:string:b:__rand_int__",
 				"bench:string:missing:__rand_int__",
@@ -426,9 +432,14 @@ fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 		("zcard", &["ZCARD", "bench:zset"]),
 		(
 			"expire",
-			&["EXPIRE", "bench:string:expire:__rand_int__", "300"],
+			&[
+				"EXPIRE",
+				"STRING",
+				"bench:string:expire:__rand_int__",
+				"300",
+			],
 		),
-		("ttl", &["TTL", "bench:string:ttl"]),
+		("ttl", &["TTL", "STRING", "bench:string:ttl"]),
 	];
 
 	for (label, args) in benchmarks {
@@ -790,6 +801,14 @@ mod tests {
 			.collect()
 	}
 
+	fn args_end_with(args: &[String], suffix: &[&str]) -> bool {
+		args.len() >= suffix.len()
+			&& args[args.len() - suffix.len()..]
+				.iter()
+				.map(String::as_str)
+				.eq(suffix.iter().copied())
+	}
+
 	impl Runner for FakeRunner {
 		fn run_status(&self, program: &str, args: &[String]) -> Result<(), String> {
 			self.status_calls.borrow_mut().push(RecordedCall {
@@ -980,6 +999,56 @@ mod tests {
 					]
 			})
 		}));
+		assert!(
+			redis_cli_calls
+				.iter()
+				.any(|args| args_end_with(args, &["DEL", "LIST", "bench:list"]))
+		);
+		assert!(
+			redis_cli_calls
+				.iter()
+				.any(|args| args_end_with(args, &["DEL", "SET", "bench:set:a", "bench:set:b"]))
+		);
+		assert!(
+			redis_cli_calls
+				.iter()
+				.any(|args| args_end_with(args, &["DEL", "ZSET", "bench:zset"]))
+		);
+
+		let streamed_calls = runner.streaming_calls.borrow();
+		assert!(streamed_calls.iter().any(|call| args_end_with(
+			&call.args,
+			&[
+				"DEL",
+				"STRING",
+				"bench:string:del:a:__rand_int__",
+				"bench:string:del:b:__rand_int__",
+			]
+		)));
+		assert!(streamed_calls.iter().any(|call| args_end_with(
+			&call.args,
+			&[
+				"EXISTS",
+				"STRING",
+				"bench:string:a:__rand_int__",
+				"bench:string:b:__rand_int__",
+				"bench:string:missing:__rand_int__",
+			]
+		)));
+		assert!(streamed_calls.iter().any(|call| args_end_with(
+			&call.args,
+			&[
+				"EXPIRE",
+				"STRING",
+				"bench:string:expire:__rand_int__",
+				"300",
+			]
+		)));
+		assert!(
+			streamed_calls
+				.iter()
+				.any(|call| args_end_with(&call.args, &["TTL", "STRING", "bench:string:ttl"]))
+		);
 		assert!(config.output_dir.join("builtin_supported.txt").exists());
 		assert!(config.output_dir.join("client_id.txt").exists());
 	}
@@ -1005,6 +1074,12 @@ mod tests {
 		assert_eq!(
 			runner.streamed_commands(),
 			benchmarked_command_set(COMPARISON_PROFILE_COMMANDS)
+		);
+		let setup_calls = runner.status_commands("/bin/echo");
+		assert!(
+			setup_calls
+				.iter()
+				.any(|args| args_end_with(args, &["DEL", "LIST", "bench:list"]))
 		);
 		assert!(!config.output_dir.join("hello_2.txt").exists());
 	}

@@ -113,11 +113,11 @@ var _ = Describe("Prefix Collision Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Expire 'user1'
-			rdb.Expire(ctx, key1, 1*time.Second)
+			util.Expire(ctx, rdb, util.ZSetType, key1, time.Second)
 			time.Sleep(1500 * time.Millisecond)
 
 			// Trigger lazy expiration
-			n, err := rdb.Exists(ctx, key1).Result()
+			n, err := util.Exists(ctx, rdb, util.ZSetType, key1).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(Equal(int64(0)))
 

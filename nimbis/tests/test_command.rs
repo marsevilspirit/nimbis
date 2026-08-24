@@ -49,12 +49,12 @@ fn test_flushdb_helper() {
 
 	assert_eq!(client.set("it:flushdb:string", "value"), "OK");
 	assert_eq!(client.hset("it:flushdb:hash", "field", "value"), 1);
-	assert!(client.exists("it:flushdb:string"));
-	assert!(client.exists("it:flushdb:hash"));
+	assert!(client.exists("STRING", "it:flushdb:string"));
+	assert!(client.exists("HASH", "it:flushdb:hash"));
 
 	assert!(client.flushdb());
-	assert!(!client.exists("it:flushdb:string"));
-	assert!(!client.exists("it:flushdb:hash"));
+	assert!(!client.exists("STRING", "it:flushdb:string"));
+	assert!(!client.exists("HASH", "it:flushdb:hash"));
 }
 
 #[test]
@@ -64,10 +64,10 @@ fn test_del_and_exists() {
 	let mut client = server.get_client();
 
 	client.set("it:del:key", "hello");
-	assert!(client.exists("it:del:key"));
-	assert_eq!(client.del("it:del:key"), 1);
-	assert!(!client.exists("it:del:key"));
-	assert_eq!(client.del("it:del:key"), 0);
+	assert!(client.exists("STRING", "it:del:key"));
+	assert_eq!(client.del("STRING", "it:del:key"), 1);
+	assert!(!client.exists("STRING", "it:del:key"));
+	assert_eq!(client.del("STRING", "it:del:key"), 0);
 	assert_eq!(client.get("it:del:key"), "");
 }
 
@@ -81,15 +81,21 @@ fn test_del_and_exists_multi_key() {
 	assert_eq!(client.set("it:del:key:2", "world"), "OK");
 
 	assert_eq!(
-		client.execute(&["EXISTS", "it:del:key:1", "it:del:key:2", "missing"]),
+		client.execute(&[
+			"EXISTS",
+			"STRING",
+			"it:del:key:1",
+			"it:del:key:2",
+			"missing",
+		]),
 		RespValue::Integer(2)
 	);
 	assert_eq!(
-		client.execute(&["DEL", "it:del:key:1", "it:del:key:2", "missing"]),
+		client.execute(&["DEL", "STRING", "it:del:key:1", "it:del:key:2", "missing",]),
 		RespValue::Integer(2)
 	);
 	assert_eq!(
-		client.execute(&["EXISTS", "it:del:key:1", "it:del:key:2"]),
+		client.execute(&["EXISTS", "STRING", "it:del:key:1", "it:del:key:2"]),
 		RespValue::Integer(0)
 	);
 }
@@ -341,18 +347,18 @@ fn test_expire_and_ttl() {
 	client.set("it:ttl:key", "temp");
 
 	// no expiry set
-	assert_eq!(client.ttl("it:ttl:key"), -1);
+	assert_eq!(client.ttl("STRING", "it:ttl:key"), -1);
 
 	// set expiry
-	assert!(client.expire("it:ttl:key", 300));
-	let ttl = client.ttl("it:ttl:key");
+	assert!(client.expire("STRING", "it:ttl:key", 300));
+	let ttl = client.ttl("STRING", "it:ttl:key");
 	assert!(ttl > 0 && ttl <= 300);
 
 	// expire non-existent key
-	assert!(!client.expire("it:ttl:missing", 100));
+	assert!(!client.expire("STRING", "it:ttl:missing", 100));
 
 	// ttl of non-existent key
-	assert_eq!(client.ttl("it:ttl:missing"), -2);
+	assert_eq!(client.ttl("STRING", "it:ttl:missing"), -2);
 }
 
 #[test]
@@ -361,23 +367,93 @@ fn test_del_across_types() {
 	let server = MockNimbisServer::new();
 	let mut client = server.get_client();
 
-	client.set("it:cross:str", "v");
-	client.hset("it:cross:hash", "f", "v");
-	client.rpush("it:cross:list", &["a"]);
-	client.sadd("it:cross:set", &["m"]);
-	client.zadd("it:cross:zset", &[("1", "z")]);
+	let key = "it:cross:key";
+	client.set(key, "v");
+	client.hset(key, "f", "v");
+	client.rpush(key, &["a"]);
+	client.sadd(key, &["m"]);
+	client.zadd(key, &[("1", "z")]);
 
-	assert_eq!(client.del("it:cross:str"), 1);
-	assert_eq!(client.del("it:cross:hash"), 1);
-	assert_eq!(client.del("it:cross:list"), 1);
-	assert_eq!(client.del("it:cross:set"), 1);
-	assert_eq!(client.del("it:cross:zset"), 1);
+	for data_type in ["STRING", "HASH", "LIST", "SET", "ZSET"] {
+		assert!(client.exists(data_type, key));
+	}
 
-	assert!(!client.exists("it:cross:str"));
-	assert!(!client.exists("it:cross:hash"));
-	assert!(!client.exists("it:cross:list"));
-	assert!(!client.exists("it:cross:set"));
-	assert!(!client.exists("it:cross:zset"));
+	for (index, data_type) in ["HASH", "LIST", "SET", "ZSET", "STRING"]
+		.into_iter()
+		.enumerate()
+	{
+		assert_eq!(client.del(data_type, key), 1);
+		assert!(!client.exists(data_type, key));
+		for remaining_type in ["HASH", "LIST", "SET", "ZSET", "STRING"]
+			.into_iter()
+			.skip(index + 1)
+		{
+			assert!(client.exists(remaining_type, key));
+		}
+	}
+}
+
+#[test]
+#[serial]
+fn test_typed_expire_and_ttl_do_not_cross_namespaces() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let key = "it:typed:ttl";
+
+	client.set(key, "string");
+	client.hset(key, "field", "hash");
+	assert_eq!(client.ttl("STRING", key), -1);
+	assert_eq!(client.ttl("HASH", key), -1);
+
+	assert!(client.expire("hash", key, 300));
+	let hash_ttl = client.ttl("HaSh", key);
+	assert!(hash_ttl > 0 && hash_ttl <= 300);
+	assert_eq!(client.ttl("STRING", key), -1);
+
+	assert_eq!(client.del("HASH", key), 1);
+	assert!(!client.exists("HASH", key));
+	assert!(client.exists("STRING", key));
+}
+
+#[test]
+#[serial]
+fn test_typed_key_commands_reject_legacy_and_invalid_forms() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+
+	for command in [
+		vec!["DEL", "key"],
+		vec!["EXISTS", "key"],
+		vec!["EXPIRE", "key", "10"],
+		vec!["TTL", "key"],
+	] {
+		let name = command[0].to_lowercase();
+		assert_eq!(
+			resp_error(client.execute(&command)),
+			format!("ERR wrong number of arguments for '{name}' command")
+		);
+	}
+
+	for command in [
+		vec!["DEL", "STREAM", "key"],
+		vec!["EXISTS", "ALL", "key"],
+		vec!["EXPIRE", "STR", "key", "10"],
+		vec!["TTL", "ZSET_ALIAS", "key"],
+	] {
+		assert_eq!(
+			resp_error(client.execute(&command)),
+			"ERR invalid key type; expected STRING, HASH, LIST, SET, or ZSET"
+		);
+	}
+
+	assert_eq!(
+		resp_error(client.execute(&["EXPIRE", "STRING", "key", "-1"])),
+		"ERR value is not an integer or out of range"
+	);
+	assert_eq!(
+		resp_error(client.execute(&["EXPIRE", "STRING", "key", "18446744073709551615",])),
+		"ERR value is not an integer or out of range"
+	);
 }
 
 #[test]

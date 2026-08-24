@@ -9,7 +9,7 @@ use crate::data_type::DataType;
 use crate::error::DecoderError;
 use crate::string::value::StringValue;
 
-/// Trait for values stored in the string database that carry TTL and type
+/// Trait for top-level values and collection metadata that carry TTL and type
 /// information.
 pub trait MetaValue: Sized {
 	/// Decode the value from bytes.
@@ -23,6 +23,15 @@ pub trait MetaValue: Sized {
 	fn expire_time(&self) -> u64;
 	/// Set the expiration timestamp in milliseconds since Unix epoch.
 	fn set_expire_time(&mut self, timestamp: u64);
+	/// Return the collection generation used to hide stale sub-keys.
+	///
+	/// A zero generation is pending: when metadata and the first sub-keys share
+	/// a WriteBatch, readers resolve it to the metadata row's commit sequence.
+	fn version(&self) -> Option<u64> {
+		None
+	}
+	/// Replace the collection generation after resolving a pending version.
+	fn set_version(&mut self, _version: u64) {}
 	/// Get the remaining time until expiration.
 	fn remaining_ttl(&self) -> Option<Duration> {
 		let expire_time = self.expire_time();
@@ -163,6 +172,14 @@ impl MetaValue for HashMetaValue {
 	fn set_expire_time(&mut self, timestamp: u64) {
 		self.expire_time = timestamp;
 	}
+
+	fn version(&self) -> Option<u64> {
+		Some(self.version)
+	}
+
+	fn set_version(&mut self, version: u64) {
+		self.version = version;
+	}
 }
 
 #[derive(Debug, PartialEq)]
@@ -248,6 +265,14 @@ impl MetaValue for ListMetaValue {
 	fn set_expire_time(&mut self, timestamp: u64) {
 		self.expire_time = timestamp;
 	}
+
+	fn version(&self) -> Option<u64> {
+		Some(self.version)
+	}
+
+	fn set_version(&mut self, version: u64) {
+		self.version = version;
+	}
 }
 
 #[derive(Debug, PartialEq)]
@@ -324,6 +349,14 @@ impl MetaValue for SetMetaValue {
 	fn set_expire_time(&mut self, timestamp: u64) {
 		self.expire_time = timestamp;
 	}
+
+	fn version(&self) -> Option<u64> {
+		Some(self.version)
+	}
+
+	fn set_version(&mut self, version: u64) {
+		self.version = version;
+	}
 }
 
 #[derive(Debug, PartialEq)]
@@ -399,6 +432,14 @@ impl MetaValue for ZSetMetaValue {
 
 	fn set_expire_time(&mut self, timestamp: u64) {
 		self.expire_time = timestamp;
+	}
+
+	fn version(&self) -> Option<u64> {
+		Some(self.version)
+	}
+
+	fn set_version(&mut self, version: u64) {
+		self.version = version;
 	}
 }
 
@@ -517,6 +558,20 @@ impl MetaValue for AnyValue {
 			Self::List(v) => v.set_expire_time(timestamp),
 			Self::Set(v) => v.set_expire_time(timestamp),
 			Self::ZSet(v) => v.set_expire_time(timestamp),
+		}
+	}
+
+	fn version(&self) -> Option<u64> {
+		self.version()
+	}
+
+	fn set_version(&mut self, version: u64) {
+		match self {
+			Self::String(_) => {}
+			Self::Hash(v) => v.version = version,
+			Self::List(v) => v.version = version,
+			Self::Set(v) => v.version = version,
+			Self::ZSet(v) => v.version = version,
 		}
 	}
 }

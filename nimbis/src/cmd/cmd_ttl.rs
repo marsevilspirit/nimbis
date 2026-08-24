@@ -6,6 +6,7 @@ use nimbis_storage::Storage;
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::utils::parse_data_type;
 
 #[derive(Debug, Clone)]
 pub struct TtlCmd {
@@ -17,7 +18,7 @@ impl Default for TtlCmd {
 		Self {
 			meta: CmdMeta {
 				name: "TTL".to_string(),
-				arity: 2, // TTL key
+				arity: 3, // TTL type key
 			},
 		}
 	}
@@ -30,8 +31,12 @@ impl Cmd for TtlCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let key = args[0].clone();
-		match storage.ttl(key).await {
+		let data_type = match parse_data_type(&args[0]) {
+			Ok(data_type) => data_type,
+			Err(error) => return RespValue::error(error),
+		};
+		let key = args[1].clone();
+		match storage.ttl(data_type, key).await {
 			Ok(Some(ttl_ms)) => RespValue::Integer(match ttl_ms {
 				-1 => -1,
 				_ => ttl_ms / 1000,

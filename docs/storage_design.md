@@ -6,11 +6,11 @@ This document describes the current storage design in `nimbis-storage`.
 
 Nimbis uses **five isolated SlateDB instances** for the logical database:
 
-- `string_db`: String payloads and metadata for non-string types
-- `hash_db`: Hash fields
-- `list_db`: List elements
-- `set_db`: Set members
-- `zset_db`: Sorted-set indexes
+- `string_db`: String values
+- `hash_db`: Hash metadata and fields
+- `list_db`: List metadata and elements
+- `set_db`: Set metadata and members
+- `zset_db`: Sorted-set metadata and both indexes
 
 The `Storage` struct is defined in `nimbis-storage/src/storage.rs`:
 
@@ -27,6 +27,9 @@ pub struct Storage {
 ```
 
 Each data type has its own database instance for isolation and predictable performance.
+The same raw user key may exist independently in multiple type databases. Type-specific
+commands only access their own database, so, for example, `SET k v` and `HSET k f v`
+can coexist without a cross-type `WRONGTYPE` lookup.
 `Storage::open(path, shard_id)` and `Storage::open_object_store(url, options, shard_id)`
 open all five DBs under either the root path (`None`) or a shard subdirectory (`Some(id)`).
 The server opens one shared storage instance with `None`.
@@ -54,14 +57,15 @@ regular key commands.
 Lock selection happens inside storage methods, not in command handlers. Public
 APIs such as `get`, `set`, `incr`, `hset`, `lrange`, `zadd`, and `flush_all`
 acquire the appropriate lock before touching SlateDB. Multi-key APIs such as
-`del_many` and `exists_many` acquire the whole stripe set in one storage call
-so their lock ordering and deduplication stay centralized.
+`del(data_type, keys)` and `exists_many(data_type, keys)` acquire the whole
+stripe set in one storage call so their lock ordering and deduplication stay
+centralized.
 
 ## Key Encoding
 
 All user keys are length-prefixed (`u16 BE`) to avoid prefix collisions.
 
-### Meta key (in `string_db`)
+### Top-level key
 
 ```text
 [len(user_key) (u16 BE)] [user_key]
@@ -75,25 +79,28 @@ All user keys are length-prefixed (`u16 BE`) to avoid prefix collisions.
 
 > TTL for string keys is maintained by SlateDB TTL metadata (not embedded in the payload bytes).
 
-### Hash metadata (`string_db`)
+The exact top-level key is stored in the database for its type. For String it
+contains the value; for a collection it contains the collection metadata below.
+
+### Hash metadata (`hash_db`)
 
 ```text
 [type (u8)] [version (u64 BE)] [len (u64 BE)] [expire_time_ms (u64 BE)]
 ```
 
-### List metadata (`string_db`)
+### List metadata (`list_db`)
 
 ```text
 [type (u8)] [version (u64 BE)] [len (u64 BE)] [head (u64 BE)] [tail (u64 BE)] [expire_time_ms (u64 BE)]
 ```
 
-### Set metadata (`string_db`)
+### Set metadata (`set_db`)
 
 ```text
 [type (u8)] [version (u64 BE)] [len (u64 BE)] [expire_time_ms (u64 BE)]
 ```
 
-### ZSet metadata (`string_db`)
+### ZSet metadata (`zset_db`)
 
 ```text
 [type (u8)] [version (u64 BE)] [len (u64 BE)] [expire_time_ms (u64 BE)]
@@ -111,24 +118,60 @@ ZSet score encoding uses bit transforms so lexicographic key order matches numer
 
 ## Version + Compaction Strategy
 
-Collection metadata includes a `version`. Collection entry records are written with versioned key prefixes (via `MetaKeyVersion`).
+Collection metadata includes a `version`. The first metadata row and all initial
+sub-keys are committed in one SlateDB `WriteBatch`. The encoded initial version
+is `0`, meaning "resolve this generation to the metadata row's commit sequence";
+SlateDB assigns the same sequence to every row in that batch.
 
 - Read path uses metadata version to determine visible entries.
-- Overwrite/delete can advance version and logically invalidate old records.
-- `CollectionCompactionFilter` removes stale collection entries during compaction by checking current metadata and type.
+- Runtime collection mutations update sub-keys and metadata in one batch in the
+  corresponding type DB.
+- Delete/recreate advances the effective generation and logically invalidates old records.
+- `CollectionCompactionFilter` performs no point reads. It only reclaims stale
+  rows when a safe metadata cutoff is present in the same ordered compaction
+  input; otherwise it fails open and keeps data.
 
-This keeps front-path operations simple while cleaning obsolete records asynchronously.
+This keeps the foreground path atomic and avoids a compactor reading the DB it is
+currently compacting. Because SlateDB may remove a metadata tombstone before the
+custom filter observes it, physical orphan cleanup is opportunistic; logical
+visibility remains correct, but some stale sub-keys can remain until a future
+dedicated GC/fence format is implemented.
 
 ## TTL / Expiration
 
-Expiration for all top-level keys is driven by `string_db` metadata TTL:
+Expiration for every top-level value is driven by the metadata/value row in its
+own typed database:
 
 - `Storage::meta_put_opts` converts `MetaValue::remaining_ttl()` into SlateDB TTL options.
-- `Storage::get_meta` additionally checks `kv.expire_ts`; expired metadata is lazily deleted and treated as missing.
-- Collection DB entries do not have independent TTL; they are considered nonexistent once their metadata expires.
-- Compaction filters later clean up orphaned collection records.
+- Collection metadata embeds an absolute expiration timestamp, which is the
+  logical source of truth. String expiration uses the SlateDB row TTL because
+  String values do not have an embedded metadata timestamp.
+- The current SlateDB API accepts a relative `ExpireAfter` duration rather than
+  an absolute deadline. Collection reads therefore enforce the embedded
+  deadline even if a row-TTL rewrite or restart introduces a few milliseconds
+  of scheduling drift.
+- Collection sub-keys do not have independent TTL; they are considered
+  nonexistent once their local metadata expires.
+- Rewriting collection TTL resolves a pending `version=0` first, so changing TTL
+  never changes the collection generation.
 
-`TTL` command semantics:
+Key lifecycle commands require an explicit type selector. `DEL`, `EXISTS`,
+`EXPIRE`, and `TTL` resolve that selector once and access only the corresponding
+SlateDB instance. A same-name value in another type database is neither read nor
+modified.
+
+`DEL <TYPE> key [key ...]` restricts every key in the command to one selected
+type database. Existing top-level rows are deleted in one SlateDB `WriteBatch`,
+so multi-key deletion has one atomic commit within that database. Collection
+fields/elements from an older generation become unreachable as soon as their
+local metadata row is deleted and are reclaimed by the compaction filter.
+
+`EXPIRE <TYPE> key seconds` rewrites only the selected type's top-level row.
+`EXISTS <TYPE> ...` and `TTL <TYPE> ...` likewise perform no cross-database
+probe. This deliberately trades Redis wire compatibility for deterministic
+single-database cost and avoids cross-DB transaction semantics entirely.
+
+`TTL <TYPE> key` command semantics for the selected namespace:
 
 - `> 0`: seconds remaining
 - `-1`: key exists without expiration
@@ -165,4 +208,11 @@ let storage = Storage::open_object_store(
 ```
 
 This flow parses the URL/options into an object store backend, then opens the
-five SlateDB instances under the configured root.
+five SlateDB instances under the configured root. Before serving traffic it also
+runs an idempotent, durable migration for the legacy layout: collection metadata
+is copied to its typed DB, verified, and only then removed from `string_db`.
+Migration scans use bounded 64-row cursor windows so startup memory is bounded.
+After every typed migration and source cleanup succeeds, Nimbis writes the root
+layout marker `.nimbis` with `nimbis-layout:type-local-metadata:v1`; subsequent
+opens skip the full legacy scan. If startup is interrupted before that marker is
+written, replay is safe and completes the remaining verified cleanup.

@@ -120,14 +120,14 @@ impl MockNimbisClient {
 
 	// -- string commands --
 
-	pub fn del(&mut self, key: &str) -> i64 {
-		self.execute(&["DEL", key])
+	pub fn del(&mut self, data_type: &str, key: &str) -> i64 {
+		self.execute(&["DEL", data_type, key])
 			.as_integer()
 			.expect("DEL should return integer")
 	}
 
-	pub fn exists(&mut self, key: &str) -> bool {
-		self.execute(&["EXISTS", key])
+	pub fn exists(&mut self, data_type: &str, key: &str) -> bool {
+		self.execute(&["EXISTS", data_type, key])
 			.as_integer()
 			.expect("EXISTS should return integer")
 			== 1
@@ -310,16 +310,16 @@ impl MockNimbisClient {
 
 	// -- expiry commands --
 
-	pub fn expire(&mut self, key: &str, seconds: u64) -> bool {
+	pub fn expire(&mut self, data_type: &str, key: &str, seconds: u64) -> bool {
 		let secs = seconds.to_string();
-		self.execute(&["EXPIRE", key, &secs])
+		self.execute(&["EXPIRE", data_type, key, &secs])
 			.as_integer()
 			.expect("EXPIRE should return integer")
 			== 1
 	}
 
-	pub fn ttl(&mut self, key: &str) -> i64 {
-		self.execute(&["TTL", key])
+	pub fn ttl(&mut self, data_type: &str, key: &str) -> i64 {
+		self.execute(&["TTL", data_type, key])
 			.as_integer()
 			.expect("TTL should return integer")
 	}
