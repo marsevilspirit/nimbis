@@ -11,6 +11,7 @@ Procedural macros for the configuration system.
 
 **Key Components**:
 - `OnlineConfig` derive macro
+- `storage_lock` attribute macro for typed key and global storage locks
 - Attribute parsing for `immutable` and `callback`
 
 ### `resp`
@@ -34,7 +35,8 @@ Persistent storage layer using SlateDB.
 - `Storage` struct with 5 isolated SlateDB instances (`string_db`, `hash_db`, `list_db`, `set_db`, `zset_db`)
 - Shared logical database storage opened once by the server
 - Storage-owned database and per-key API locking
-- Type-specific encoding logic (StringKey, HashFieldKey, etc.)
+- Internal `TypedDb<V>` boundary for metadata reads and atomic collection commits
+- Central `TopLevelKey` plus type-specific field/member/index codecs
 - SlateDB integration
 
 **Documentation**: See [Storage Design](storage_design.md)

@@ -1,6 +1,9 @@
 # Commands
 
-This document summarizes the command framework and the currently implemented Redis-compatible commands.
+This document summarizes the command framework and the currently implemented
+Nimbis commands. Nimbis intentionally diverges from Redis for typed key
+lifecycle commands so they can route to one physical database without type
+discovery.
 
 ## Command Framework
 
@@ -28,20 +31,28 @@ Examples:
 
 - `GET key` => arity `2`
 - `PING [message]` => arity `-1`
-- `EXISTS key [key ...]` => arity `-2`
+- `EXISTS STRING key [key ...]` => arity `-3`
 
 ## Supported Commands (Current)
 
 Source of truth: `nimbis/src/cmd/table.rs`.
 
+Nimbis extends Redis key semantics by giving each data type an independent
+namespace. The same raw key may simultaneously hold a String, Hash, List, Set,
+and ZSet; type-specific commands do not overwrite or reject the other types.
+`DEL`, `EXISTS`, `EXPIRE`, and `TTL` require a type selector as their first
+argument. The selector is case-insensitive and must be one of `STRING`, `HASH`,
+`LIST`, `SET`, or `ZSET`. Each command touches only that type's database; there
+is no cross-database type discovery or fallback.
+
 ### Generic
 
 - `PING` (`-1`)
 - `HELLO` (`-1`) — supports protocol `2` and `3`
-- `DEL` (`-2`)
-- `EXISTS` (`-2`)
-- `EXPIRE` (`3`)
-- `TTL` (`2`)
+- `DEL <TYPE> key [key ...]` (`-3`)
+- `EXISTS <TYPE> key [key ...]` (`-3`)
+- `EXPIRE <TYPE> key seconds` (`4`)
+- `TTL <TYPE> key` (`3`)
 - `INCR` (`2`)
 - `DECR` (`2`)
 - `FLUSHDB` (`1`)
@@ -120,6 +131,13 @@ still contain only commands listed in this document.
 
 Nimbis is Redis-compatible for the implemented subset, but does **not** yet implement full Redis semantics.
 
+- Unlike Redis's single global key type, Nimbis uses independent typed
+  namespaces, so one raw key can hold values of several types concurrently.
+- Redis lifecycle command shapes such as `DEL key` and `TTL key` are rejected.
+  Clients must send the explicit Nimbis type selector; for example,
+  `DEL HASH users` or `TTL ZSET leaderboard`. High-level Redis client helpers
+  for these four commands generally cannot express this syntax, so use their
+  raw-command API.
 - `SET` currently documents/implements the basic `SET key value` form only (no `NX|XX|EX|PX|KEEPTTL|GET` options).
 - `ZRANGE` supports `start stop [WITHSCORES]` rank mode only; flags such as `BYSCORE`, `BYLEX`, `REV`, and `LIMIT` are not part of this interface.
 - `CONFIG` is limited to `GET` and `SET` subcommands.

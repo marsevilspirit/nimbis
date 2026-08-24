@@ -18,7 +18,7 @@ pub struct CmdContext {
 impl CmdMeta {
 	/// Validate argument count against arity
 	/// - Positive arity: requires exact match
-	/// - Negative arity: allows up to abs(arity) arguments
+	/// - Negative arity: requires at least abs(arity) arguments
 	pub fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
 		if self.arity > 0 {
 			// Positive: exact match required
@@ -98,8 +98,6 @@ impl TryFrom<RespValue> for ParsedCmd {
 	}
 }
 
-pub mod utils;
-
 mod cmd_append;
 mod cmd_client;
 mod cmd_config;
@@ -137,6 +135,8 @@ mod cmd_zrange;
 mod cmd_zrem;
 mod cmd_zscore;
 mod table;
+mod typed_key_args;
+mod utils;
 
 pub use cmd_append::AppendCmd;
 pub use cmd_client::ClientCmd;

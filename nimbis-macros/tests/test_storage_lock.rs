@@ -12,6 +12,21 @@ struct TestGuard {
 	events: Arc<Mutex<Vec<String>>>,
 }
 
+#[derive(Clone, Copy)]
+enum TestDataType {
+	String,
+	Hash,
+}
+
+impl TestDataType {
+	fn name(self) -> &'static str {
+		match self {
+			Self::String => "string",
+			Self::Hash => "hash",
+		}
+	}
+}
+
 impl Drop for TestGuard {
 	fn drop(&mut self) {
 		self.events.lock().unwrap().push("drop".to_string());
@@ -19,17 +34,31 @@ impl Drop for TestGuard {
 }
 
 impl TestStorage {
-	async fn read_lock(&self, keys: impl IntoIterator<Item = String>) -> TestGuard {
+	async fn read_lock(
+		&self,
+		data_type: TestDataType,
+		keys: impl IntoIterator<Item = String>,
+	) -> TestGuard {
 		let keys = keys.into_iter().collect::<Vec<_>>().join(",");
-		self.events.lock().unwrap().push(format!("read:{keys}"));
+		self.events
+			.lock()
+			.unwrap()
+			.push(format!("read:{}:{keys}", data_type.name()));
 		TestGuard {
 			events: self.events.clone(),
 		}
 	}
 
-	async fn write_lock(&self, keys: impl IntoIterator<Item = String>) -> TestGuard {
+	async fn write_lock(
+		&self,
+		data_type: TestDataType,
+		keys: impl IntoIterator<Item = String>,
+	) -> TestGuard {
 		let keys = keys.into_iter().collect::<Vec<_>>().join(",");
-		self.events.lock().unwrap().push(format!("write:{keys}"));
+		self.events
+			.lock()
+			.unwrap()
+			.push(format!("write:{}:{keys}", data_type.name()));
 		TestGuard {
 			events: self.events.clone(),
 		}
@@ -42,14 +71,14 @@ impl TestStorage {
 		}
 	}
 
-	#[storage_lock(read, key)]
+	#[storage_lock(read, key, TestDataType::String)]
 	async fn read_one(&self, key: String) -> usize {
 		self.events.lock().unwrap().push(format!("body:{key}"));
 		7
 	}
 
-	#[storage_lock(write_many, keys)]
-	async fn write_many<I>(&self, keys: I) -> usize
+	#[storage_lock(write_many, keys, data_type)]
+	async fn write_many<I>(&self, data_type: TestDataType, keys: I) -> usize
 	where
 		I: IntoIterator<Item = String>,
 	{
@@ -76,7 +105,7 @@ async fn storage_lock_read_wraps_function_body() {
 	assert_eq!(result, 7);
 	assert_eq!(
 		*storage.events.lock().unwrap(),
-		vec!["read:alpha", "body:alpha", "drop"],
+		vec!["read:string:alpha", "body:alpha", "drop"],
 	);
 }
 
@@ -85,13 +114,16 @@ async fn storage_lock_many_collects_keys_before_locking() {
 	let storage = TestStorage::default();
 
 	let result = storage
-		.write_many(["alpha".to_string(), "beta".to_string()])
+		.write_many(
+			TestDataType::Hash,
+			["alpha".to_string(), "beta".to_string()],
+		)
 		.await;
 
 	assert_eq!(result, 2);
 	assert_eq!(
 		*storage.events.lock().unwrap(),
-		vec!["write:alpha,beta", "body:alpha,beta", "drop"],
+		vec!["write:hash:alpha,beta", "body:alpha,beta", "drop"],
 	);
 }
 

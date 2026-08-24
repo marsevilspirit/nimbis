@@ -2,10 +2,13 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
+use nimbis_storage::StorageError;
 
 use super::Cmd;
 use super::CmdContext;
 use super::CmdMeta;
+use super::typed_key_args::TypedKeyArgs;
+use super::utils::parse_int;
 
 #[derive(Debug, Clone)]
 pub struct ExpireCmd {
@@ -17,7 +20,7 @@ impl Default for ExpireCmd {
 		Self {
 			meta: CmdMeta {
 				name: "EXPIRE".to_string(),
-				arity: 3, // EXPIRE key seconds
+				arity: 4, // EXPIRE type key seconds
 			},
 		}
 	}
@@ -30,24 +33,36 @@ impl Cmd for ExpireCmd {
 	}
 
 	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let key = args[0].clone();
-		let seconds_str = String::from_utf8_lossy(&args[1]);
-		let seconds = match seconds_str.parse::<u64>() {
+		let typed_key = match TypedKeyArgs::parse(args) {
+			Ok(typed_key) => typed_key,
+			Err(error) => return RespValue::error(error),
+		};
+		let (data_type, key) = typed_key.into_parts();
+		let seconds = match parse_int::<u64>(&args[2]) {
 			Ok(s) => s,
-			Err(_) => {
-				return RespValue::Error(Bytes::from(
-					"ERR value is not an integer or out of range",
-				));
-			}
+			Err(error) => return RespValue::error(error),
 		};
 
-		let now = chrono::Utc::now().timestamp_millis() as u64;
+		let now = match u64::try_from(chrono::Utc::now().timestamp_millis()) {
+			Ok(now) => now,
+			Err(_) => {
+				return RespValue::error("ERR value is not an integer or out of range");
+			}
+		};
+		let expire_time = match seconds
+			.checked_mul(1000)
+			.and_then(|duration| now.checked_add(duration))
+		{
+			Some(expire_time) => expire_time,
+			None => return RespValue::error("ERR value is not an integer or out of range"),
+		};
 
-		let expire_time = now + seconds * 1000;
-
-		match storage.expire(key, expire_time).await {
+		match storage.expire(data_type, key, expire_time).await {
 			Ok(true) => RespValue::Integer(1),
 			Ok(false) => RespValue::Integer(0),
+			Err(StorageError::InvalidExpiration { .. }) => {
+				RespValue::error("ERR value is not an integer or out of range")
+			}
 			Err(e) => RespValue::Error(Bytes::from(e.to_string())),
 		}
 	}

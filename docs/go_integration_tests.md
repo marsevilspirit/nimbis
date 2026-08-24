@@ -119,8 +119,10 @@ The current integration tests cover the following functional areas of the Nimbis
 
 ### 4.3 Key Deletion (`delete_test.go`)
 - **String Deletion**: Deleting single and multiple string keys.
-- **Hash Deletion**: Deleting hash keys (ensures underlying fields are cleaned up).
-- **Mixed Deletion**: Deleting a mix of string, hash, and non-existent keys in a single command.
+- **Hash Deletion**: Deleting hash keys through `DEL HASH ...` while leaving
+  same-name values in other type databases untouched.
+- **Typed Multi-key Deletion**: Deleting existing and missing keys from one
+  selected type database in a single command.
 - **Return Value**: Verifies `DEL` returns the correct count of actually deleted keys.
 
 ### 4.4 Configuration (`config_test.go`)
@@ -132,31 +134,19 @@ The current integration tests cover the following functional areas of the Nimbis
   - Verification of immutable fields protection (`host`, `port`, `object_store_url` cannot be changed at runtime).
   - Error reporting for unknown fields.
 
-### 4.5 Type Conflict Handling (`conflict_key_test.go`)
-This suite ensures Nimbis behaves correctly (like Redis) when multiple data types share the same key namespace.
+### 4.5 Same-name Typed Namespaces (`conflict_key_test.go`)
+This suite verifies Nimbis's typed-key extension. String, Hash, List, Set, and
+ZSet values may use the same raw key at the same time; each type-specific command
+accesses only its own database.
 
-- **String vs Hash Conflicts**:
-  - `HSET` on an existing String key -> Returns `WRONGTYPE` error (does not overwrite).
-  - `GET` on an existing Hash key -> Returns `WRONGTYPE` error.
-- **Type Overwrite (SET)**:
-- **String vs List Conflicts**:
-  - `LPUSH` on an existing String key -> Returns `WRONGTYPE` error.
-  - `GET` on an existing List key -> Returns `WRONGTYPE` error.
-- **String vs Set Conflicts**:
-  - `SADD` on an existing String key -> Returns `WRONGTYPE` error.
-  - `GET` on an existing Set key -> Returns `WRONGTYPE` error.
-- **String vs ZSet Conflicts**:
-  - `ZADD` on an existing String key -> Returns `WRONGTYPE` error.
-  - `GET` on an existing ZSet key -> Returns `WRONGTYPE` error.
-- **Cross-Type Conflicts**:
-  - Hash/List/Set/ZSet operations on keys of different types return `WRONGTYPE` errors.
-  - `SET` command forces overwrite of any existing key type (Hash, List, Set, ZSet).
-  - Verifies that when a complex type is overwritten by a String, the old data structures are properly cleaned up and inaccessible.
-- **DEL and Type Reuse**:
-  - Verifies a key can be reused for a different type after being deleted (e.g., String -> DEL -> Hash).
-- **Edge Cases**:
-  - Empty string values.
-  - Keys with special characters (Unicode, Emoji).
+- Creating or updating one type does not overwrite the other four types.
+- Reads for every type return their independent value under the shared raw key.
+- `DEL <TYPE>` removes only the selected typed namespace, including for
+  multi-key deletion.
+- `EXISTS <TYPE>` reports only the selected namespace.
+- `EXPIRE <TYPE>` and `TTL <TYPE>` apply to and report only the selected
+  namespace; other same-name values remain live.
+- Empty values and keys with special characters remain isolated correctly.
 
 ### 4.6 Expire and TTL (`ttl_test.go`)
 - **Basic Expiration**: Verifies that String and Hash keys are deleted after the specified timeout.

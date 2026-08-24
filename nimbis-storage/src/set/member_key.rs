@@ -1,6 +1,12 @@
+use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+
+use crate::error::DecoderError;
+use crate::error::StorageError;
+use crate::top_level_key::MAX_ENCODED_KEY_LEN;
+use crate::top_level_key::TopLevelKey;
 
 #[derive(Debug, PartialEq)]
 pub struct SetMemberKey {
@@ -16,21 +22,43 @@ impl SetMemberKey {
 		}
 	}
 
-	pub fn encode(&self) -> Bytes {
+	pub fn encode(&self) -> Result<Bytes, StorageError> {
 		// Key format: len(user_key) (u16 BE) + user_key + len(member) (u32 BE) + member
-		let member_len = self.member.len() as u32;
+		let top_level_key = TopLevelKey::new(self.user_key.clone())?;
+		let suffix_len =
+			4usize
+				.checked_add(self.member.len())
+				.ok_or(StorageError::InvalidKeyLength {
+					length: usize::MAX,
+					max: MAX_ENCODED_KEY_LEN,
+				})?;
+		top_level_key.ensure_suffix_len(suffix_len)?;
+		let member_len =
+			u32::try_from(self.member.len()).map_err(|_| StorageError::InvalidKeyLength {
+				length: self.member.len(),
+				max: MAX_ENCODED_KEY_LEN,
+			})?;
 
-		let mut bytes = BytesMut::with_capacity(2 + self.user_key.len() + 4 + self.member.len());
-		bytes.put_u16(self.user_key.len() as u16);
-		bytes.extend_from_slice(&self.user_key);
-		bytes.put_u32(member_len);
-		bytes.extend_from_slice(&self.member);
-		bytes.freeze()
+		let mut suffix = BytesMut::with_capacity(suffix_len);
+		suffix.put_u32(member_len);
+		suffix.extend_from_slice(&self.member);
+		top_level_key.with_suffix(&suffix)
 	}
 
-	/// Returns the user_key from this member key.
-	pub fn user_key(&self) -> &Bytes {
-		&self.user_key
+	pub(crate) fn decode(encoded: &[u8]) -> Result<Self, DecoderError> {
+		let (user_key, mut suffix) = TopLevelKey::decode_prefix(encoded)?;
+		if suffix.len() < 4 {
+			return Err(DecoderError::InvalidLength);
+		}
+		let member_len = suffix.get_u32() as usize;
+		if suffix.len() != member_len {
+			return Err(DecoderError::InvalidLength);
+		}
+		Ok(Self::new(user_key, Bytes::copy_from_slice(suffix)))
+	}
+
+	pub(crate) fn member(&self) -> &Bytes {
+		&self.member
 	}
 }
 
@@ -48,7 +76,7 @@ mod tests {
 			Bytes::copy_from_slice(key.as_bytes()),
 			Bytes::copy_from_slice(member.as_bytes()),
 		);
-		let encoded = member_key.encode();
+		let encoded = member_key.encode().unwrap();
 		// Verify format: key_len(u16) + key + member_len(u32) + member
 		assert_eq!(&encoded[..2], &(key.len() as u16).to_be_bytes());
 		assert_eq!(&encoded[2..2 + key.len()], key.as_bytes());

@@ -5,13 +5,16 @@ use std::time::Duration;
 use std::time::Instant;
 
 use bytes::Bytes;
+use criterion::BatchSize;
 use criterion::Criterion;
 use criterion::Throughput;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use nimbis_storage::Storage;
-use nimbis_storage::error::StorageError;
+use nimbis_storage::StorageError;
 use tokio::runtime::Runtime;
+
+const COLLECTION_BATCH_SIZE: usize = 8;
 
 fn bench_runtime() -> Runtime {
 	Runtime::new().expect("failed to create benchmark runtime")
@@ -106,6 +109,11 @@ fn bench_hash_hset(c: &mut Criterion) {
 	let key = Bytes::from("bench:hash");
 	let value = Bytes::from(vec![b'h'; 64]);
 	let mut next_field = 0;
+	let mut next_new_key = 0;
+	let mut next_delete_key = 0;
+	let delete_fields: Vec<_> = (0..COLLECTION_BATCH_SIZE)
+		.map(|i| Bytes::from(format!("delete-field:{i}")))
+		.collect();
 	let mut group = c.benchmark_group("storage_hash");
 
 	group.throughput(Throughput::Elements(1));
@@ -123,6 +131,51 @@ fn bench_hash_hset(c: &mut Criterion) {
 			);
 		})
 	});
+	group.bench_function("hset_new_key_1_field", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:hash:new:{next_new_key}"));
+				next_new_key += 1;
+				(key, Bytes::from("field"), value.clone())
+			},
+			|(key, field, value)| {
+				bench.run(
+					bench
+						.storage
+						.hset(black_box(key), black_box(field), black_box(value)),
+					"hset should create a new hash key",
+				)
+			},
+			BatchSize::SmallInput,
+		)
+	});
+	group.throughput(Throughput::Elements(COLLECTION_BATCH_SIZE as u64));
+	group.bench_function("hdel_8_fields", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:hash:delete:{next_delete_key}"));
+				next_delete_key += 1;
+				for field in &delete_fields {
+					bench.run(
+						bench
+							.storage
+							.hset(key.clone(), field.clone(), value.clone()),
+						"failed to seed hash field",
+					);
+				}
+				key
+			},
+			|key| {
+				bench.run(
+					bench
+						.storage
+						.hdel(black_box(key), black_box(delete_fields.as_slice())),
+					"hdel should remove seeded fields",
+				)
+			},
+			BatchSize::SmallInput,
+		)
+	});
 	group.finish();
 
 	bench.close();
@@ -138,6 +191,11 @@ fn bench_list_lrange(c: &mut Criterion) {
 		bench.storage.rpush(key.clone(), elements),
 		"failed to seed list",
 	);
+	let batch_elements: Vec<_> = (0..COLLECTION_BATCH_SIZE)
+		.map(|i| Bytes::from(format!("batch-item:{i}")))
+		.collect();
+	let mut next_push_key = 0;
+	let mut next_pop_key = 0;
 	let mut group = c.benchmark_group("storage_list");
 
 	group.throughput(Throughput::Elements(64));
@@ -148,6 +206,45 @@ fn bench_list_lrange(c: &mut Criterion) {
 				"lrange should succeed",
 			)
 		})
+	});
+	group.throughput(Throughput::Elements(COLLECTION_BATCH_SIZE as u64));
+	group.bench_function("rpush_new_key_8_items", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:list:push:{next_push_key}"));
+				next_push_key += 1;
+				(key, batch_elements.clone())
+			},
+			|(key, elements)| {
+				bench.run(
+					bench.storage.rpush(black_box(key), black_box(elements)),
+					"rpush should create a new list key",
+				)
+			},
+			BatchSize::SmallInput,
+		)
+	});
+	group.bench_function("lpop_8_items", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:list:pop:{next_pop_key}"));
+				next_pop_key += 1;
+				bench.run(
+					bench.storage.rpush(key.clone(), batch_elements.clone()),
+					"failed to seed list for lpop",
+				);
+				key
+			},
+			|key| {
+				bench.run(
+					bench
+						.storage
+						.lpop(black_box(key), black_box(Some(COLLECTION_BATCH_SIZE))),
+					"lpop should remove seeded items",
+				)
+			},
+			BatchSize::SmallInput,
+		)
 	});
 	group.finish();
 
@@ -164,6 +261,11 @@ fn bench_set_smembers(c: &mut Criterion) {
 		bench.storage.sadd(key.clone(), members),
 		"failed to seed set",
 	);
+	let batch_members: Vec<_> = (0..COLLECTION_BATCH_SIZE)
+		.map(|i| Bytes::from(format!("batch-member:{i}")))
+		.collect();
+	let mut next_add_key = 0;
+	let mut next_remove_key = 0;
 	let mut group = c.benchmark_group("storage_set");
 
 	group.throughput(Throughput::Elements(256));
@@ -175,6 +277,43 @@ fn bench_set_smembers(c: &mut Criterion) {
 			)
 		})
 	});
+	group.throughput(Throughput::Elements(COLLECTION_BATCH_SIZE as u64));
+	group.bench_function("sadd_new_key_8_members", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:set:add:{next_add_key}"));
+				next_add_key += 1;
+				(key, batch_members.clone())
+			},
+			|(key, members)| {
+				bench.run(
+					bench.storage.sadd(black_box(key), black_box(members)),
+					"sadd should create a new set key",
+				)
+			},
+			BatchSize::SmallInput,
+		)
+	});
+	group.bench_function("srem_8_members", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:set:remove:{next_remove_key}"));
+				next_remove_key += 1;
+				bench.run(
+					bench.storage.sadd(key.clone(), batch_members.clone()),
+					"failed to seed set for srem",
+				);
+				(key, batch_members.clone())
+			},
+			|(key, members)| {
+				bench.run(
+					bench.storage.srem(black_box(key), black_box(members)),
+					"srem should remove seeded members",
+				)
+			},
+			BatchSize::SmallInput,
+		)
+	});
 	group.finish();
 
 	bench.close();
@@ -184,6 +323,15 @@ fn bench_zset_zadd(c: &mut Criterion) {
 	let bench = BenchStore::open("zset_zadd");
 	let key = Bytes::from("bench:zset");
 	let mut next_member = 0;
+	let batch_elements: Vec<_> = (0..COLLECTION_BATCH_SIZE)
+		.map(|i| (i as f64, Bytes::from(format!("batch-member:{i}"))))
+		.collect();
+	let batch_members: Vec<_> = batch_elements
+		.iter()
+		.map(|(_, member)| member.clone())
+		.collect();
+	let mut next_add_key = 0;
+	let mut next_remove_key = 0;
 	let mut group = c.benchmark_group("storage_zset");
 
 	group.throughput(Throughput::Elements(1));
@@ -199,6 +347,43 @@ fn bench_zset_zadd(c: &mut Criterion) {
 				"zadd should succeed",
 			);
 		})
+	});
+	group.throughput(Throughput::Elements(COLLECTION_BATCH_SIZE as u64));
+	group.bench_function("zadd_new_key_8_members", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:zset:add:{next_add_key}"));
+				next_add_key += 1;
+				(key, batch_elements.clone())
+			},
+			|(key, elements)| {
+				bench.run(
+					bench.storage.zadd(black_box(key), black_box(elements)),
+					"zadd should create a new sorted-set key",
+				)
+			},
+			BatchSize::SmallInput,
+		)
+	});
+	group.bench_function("zrem_8_members", |b| {
+		b.iter_batched(
+			|| {
+				let key = Bytes::from(format!("bench:zset:remove:{next_remove_key}"));
+				next_remove_key += 1;
+				bench.run(
+					bench.storage.zadd(key.clone(), batch_elements.clone()),
+					"failed to seed sorted set for zrem",
+				);
+				(key, batch_members.clone())
+			},
+			|(key, members)| {
+				bench.run(
+					bench.storage.zrem(black_box(key), black_box(members)),
+					"zrem should remove seeded members",
+				)
+			},
+			BatchSize::SmallInput,
+		)
 	});
 	group.finish();
 

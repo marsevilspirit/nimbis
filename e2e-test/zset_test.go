@@ -25,7 +25,7 @@ var _ = Describe("ZSet Commands", func() {
 
 	It("should ZADD and ZRANGE", func() {
 		key := "zset_test_key"
-		rdb.Del(ctx, key)
+		util.Del(ctx, rdb, util.ZSetType, key)
 
 		count, err := rdb.ZAdd(ctx, key, redis.Z{Score: 1.0, Member: "one"}).Result()
 		Expect(err).NotTo(HaveOccurred())
@@ -58,7 +58,7 @@ var _ = Describe("ZSet Commands", func() {
 
 	It("should ZSCORE", func() {
 		key := "zset_score_key"
-		rdb.Del(ctx, key)
+		util.Del(ctx, rdb, util.ZSetType, key)
 		rdb.ZAdd(ctx, key, redis.Z{Score: 1.5, Member: "one"})
 
 		score, err := rdb.ZScore(ctx, key, "one").Result()
@@ -71,7 +71,7 @@ var _ = Describe("ZSet Commands", func() {
 
 	It("should ZREM and ZCARD", func() {
 		key := "zset_rem_key"
-		rdb.Del(ctx, key)
+		util.Del(ctx, rdb, util.ZSetType, key)
 		rdb.ZAdd(ctx, key, redis.Z{Score: 1.0, Member: "one"}, redis.Z{Score: 2.0, Member: "two"})
 
 		card, err := rdb.ZCard(ctx, key).Result()

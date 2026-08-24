@@ -14,10 +14,12 @@ All errors include a unique error code for identification and logging:
 | E0002 | DecoderError | Invalid type code |
 | E0003 | DecoderError | Invalid data length |
 | E1000 | StorageError | Database operation failed |
-| E1001 | StorageError | WRONGTYPE operation against wrong data type |
 | E1002 | StorageError | Failed to decode data |
 | E1003 | StorageError | I/O operation failed |
 | E1004 | StorageError | Data inconsistency detected |
+| E1005 | StorageError | Invalid object-store configuration |
+| E1006 | StorageError | Encoded key exceeds the storage limit |
+| E1007 | StorageError | Expiration timestamp exceeds the supported range |
 
 ### Detailed Error Codes
 
@@ -56,12 +58,6 @@ pub enum StorageError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    /// Type checking error - operation against wrong data type
-    WrongType {
-        expected: Option<DataType>,
-        actual: DataType,
-    },
-
     /// Encoding/Decoding error
     DecodeError {
         source: DecoderError,
@@ -74,6 +70,15 @@ pub enum StorageError {
 
     /// Data inconsistency detected
     DataInconsistency { message: String },
+
+    /// Object-store URL or options are invalid
+    ObjectStoreConfig { message: String },
+
+    /// Complete encoded key is too long for SlateDB
+    InvalidKeyLength { length: usize, max: usize },
+
+    /// Absolute expiration exceeds Nimbis's supported logical deadline
+    InvalidExpiration { timestamp: u64, max: u64 },
 }
 ```
 
@@ -102,15 +107,17 @@ fn get_value(key: &[u8]) -> Result<Option<Value>, StorageError> {
 }
 ```
 
-### Type Checking with WrongType Errors
+### Validating storage boundaries
 
 ```rust
-// When expecting a specific type
-StorageError::wrong_type(DataType::String, actual_type)
-
-// When expected type is not applicable
-StorageError::wrong_type_simple(actual_type)
+storage
+    .expire(DataType::Hash, Bytes::from("key"), expire_time)
+    .await?;
 ```
+
+Nimbis selects a typed database before entering the storage layer, so a
+same-name key in another type is not a `WRONGTYPE` condition. Malformed rows in
+a typed database are reported as decode or data-consistency errors instead.
 
 ### Propagating Errors with ?
 
