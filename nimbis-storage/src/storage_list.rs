@@ -305,11 +305,8 @@ mod tests {
 	use crate::top_level_key::TopLevelKey;
 	use crate::typed_db::metadata_put_options;
 
-	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
-		db.metrics()
-			.lookup(name)
-			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
-			.get()
+	fn metric<V>(db: &crate::typed_db::TypedDb<V>, name: &'static str) -> i64 {
+		db.metric(name)
 	}
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
@@ -400,9 +397,9 @@ mod tests {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("atomic_list_layout");
 		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
-		let before_list_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_list_ops = metric(storage.list_db.raw(), "db/write_ops");
-		let before_string_batches = metric(storage.string_db.raw(), "db/write_batch_count");
+		let before_list_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_list_ops = metric(&storage.list_db, "slatedb.db.write_ops");
+		let before_string_batches = metric(&storage.string_db, "slatedb.db.write_batch_count");
 
 		let len = storage
 			.rpush(
@@ -413,15 +410,15 @@ mod tests {
 			.unwrap();
 		assert_eq!(len, 2);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_list_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_list_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_list_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_list_ops,
 			3
 		);
 		assert_eq!(
-			metric(storage.string_db.raw(), "db/write_batch_count") - before_string_batches,
+			metric(&storage.string_db, "slatedb.db.write_batch_count") - before_string_batches,
 			0
 		);
 
@@ -474,32 +471,32 @@ mod tests {
 			.await
 			.unwrap();
 
-		let before_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.list_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
 		let popped = storage.lpop(key.clone(), Some(2)).await.unwrap();
 		assert_eq!(popped, vec![Bytes::from("dup"), Bytes::from("dup")]);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_ops,
 			3
 		);
 		assert_eq!(storage.llen(key.clone()).await.unwrap(), 1);
 
-		let before_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.list_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
 		assert_eq!(
 			storage.rpop(key.clone(), None).await.unwrap(),
 			vec![Bytes::from("tail")]
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_ops,
 			2
 		);
 		assert!(
@@ -519,16 +516,16 @@ mod tests {
 	async fn test_empty_push_and_zero_count_pop_do_not_write() {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("list_zero_write");
-		let before_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.list_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
 		assert_eq!(storage.rpush(key.clone(), Vec::new()).await.unwrap(), 0);
 		assert!(storage.lpop(key.clone(), Some(0)).await.unwrap().is_empty());
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 
@@ -536,16 +533,16 @@ mod tests {
 			.rpush(key.clone(), vec![Bytes::from("value")])
 			.await
 			.unwrap();
-		let before_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.list_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
 		assert_eq!(storage.lpush(key.clone(), Vec::new()).await.unwrap(), 1);
 		assert!(storage.rpop(key, Some(0)).await.unwrap().is_empty());
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 
@@ -581,16 +578,16 @@ mod tests {
 			.unwrap();
 		storage.list_db.raw().delete(missing_key).await.unwrap();
 
-		let before_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.list_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
 		let err = storage.lpop(key.clone(), Some(2)).await.unwrap_err();
 		assert!(matches!(err, StorageError::DataInconsistency { .. }));
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 
@@ -614,9 +611,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_list_push_checked_arithmetic_fails_before_write() {
 		let (storage, path) = get_storage().await;
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 		let put_opts = PutOptions::default();
 
 		let head_key = Bytes::from("list_head_underflow");
@@ -653,8 +648,8 @@ mod tests {
 			.await
 			.unwrap();
 
-		let before_batches = metric(storage.list_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.list_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
 		assert!(
 			storage
 				.lpush(head_key, vec![Bytes::from("value")])
@@ -668,11 +663,11 @@ mod tests {
 				.is_err()
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
 		assert_eq!(
-			metric(storage.list_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.list_db, "slatedb.db.write_ops") - before_ops,
 			0
 		);
 
@@ -694,9 +689,7 @@ mod tests {
 		meta.expire_time =
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_add(60_000);
 		let put_opts = metadata_put_options(&meta).unwrap();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 		storage
 			.list_db
 			.raw()

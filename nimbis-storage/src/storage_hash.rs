@@ -256,11 +256,8 @@ mod tests {
 	use crate::top_level_key::MAX_ENCODED_KEY_LEN;
 	use crate::top_level_key::MAX_USER_KEY_LEN;
 
-	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
-		db.metrics()
-			.lookup(name)
-			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
-			.get()
+	fn metric<V>(db: &crate::typed_db::TypedDb<V>, name: &'static str) -> i64 {
+		db.metric(name)
 	}
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
@@ -603,8 +600,8 @@ mod tests {
 	async fn test_hset_many_uses_one_hash_write_batch() {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("single_hash_batch");
-		let before_batches = metric(storage.hash_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.hash_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.hash_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.hash_db, "slatedb.db.write_ops");
 
 		let added = storage
 			.hset_many(
@@ -619,16 +616,16 @@ mod tests {
 		assert_eq!(added, 2);
 
 		assert_eq!(
-			metric(storage.hash_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.hash_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.hash_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.hash_db, "slatedb.db.write_ops") - before_ops,
 			3
 		);
 
-		let before_batches = metric(storage.hash_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.hash_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.hash_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.hash_db, "slatedb.db.write_ops");
 		assert_eq!(
 			storage
 				.hset(key.clone(), Bytes::from("f1"), Bytes::from("v3"))
@@ -637,11 +634,11 @@ mod tests {
 			0
 		);
 		assert_eq!(
-			metric(storage.hash_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.hash_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
 		assert_eq!(
-			metric(storage.hash_db.raw(), "db/write_ops") - before_ops,
+			metric(&storage.hash_db, "slatedb.db.write_ops") - before_ops,
 			2
 		);
 

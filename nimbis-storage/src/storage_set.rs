@@ -207,11 +207,8 @@ mod tests {
 	use crate::string::meta::SetMetaValue;
 	use crate::typed_db::metadata_put_options;
 
-	fn metric(db: &slatedb::Db, name: &'static str) -> i64 {
-		db.metrics()
-			.lookup(name)
-			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
-			.get()
+	fn metric<V>(db: &crate::typed_db::TypedDb<V>, name: &'static str) -> i64 {
+		db.metric(name)
 	}
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
@@ -308,8 +305,8 @@ mod tests {
 		let key = Bytes::from("single_set_batch");
 		let m1 = Bytes::from("m1");
 		let m2 = Bytes::from("m2");
-		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.set_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.set_db, "slatedb.db.write_ops");
 
 		let added = storage
 			.sadd(key.clone(), vec![m1.clone(), m1.clone(), m2.clone()])
@@ -317,23 +314,29 @@ mod tests {
 			.unwrap();
 		assert_eq!(added, 2);
 		assert_eq!(
-			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.set_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 3);
+		assert_eq!(
+			metric(&storage.set_db, "slatedb.db.write_ops") - before_ops,
+			3
+		);
 
-		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.set_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.set_db, "slatedb.db.write_ops");
 		let added = storage
 			.sadd(key, vec![m1.clone(), m1, m2.clone(), m2])
 			.await
 			.unwrap();
 		assert_eq!(added, 0);
 		assert_eq!(
-			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.set_db, "slatedb.db.write_batch_count") - before_batches,
 			0
 		);
-		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 0);
+		assert_eq!(
+			metric(&storage.set_db, "slatedb.db.write_ops") - before_ops,
+			0
+		);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -391,32 +394,38 @@ mod tests {
 			.await
 			.unwrap();
 
-		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.set_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.set_db, "slatedb.db.write_ops");
 		let removed = storage
 			.srem(key.clone(), vec![m1.clone(), m1, m2.clone(), m2])
 			.await
 			.unwrap();
 		assert_eq!(removed, 2);
 		assert_eq!(
-			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.set_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 3);
+		assert_eq!(
+			metric(&storage.set_db, "slatedb.db.write_ops") - before_ops,
+			3
+		);
 		assert_eq!(storage.scard(key.clone()).await.unwrap(), 1);
 
-		let before_batches = metric(storage.set_db.raw(), "db/write_batch_count");
-		let before_ops = metric(storage.set_db.raw(), "db/write_ops");
+		let before_batches = metric(&storage.set_db, "slatedb.db.write_batch_count");
+		let before_ops = metric(&storage.set_db, "slatedb.db.write_ops");
 		let removed = storage
 			.srem(key.clone(), vec![m3.clone(), m3])
 			.await
 			.unwrap();
 		assert_eq!(removed, 1);
 		assert_eq!(
-			metric(storage.set_db.raw(), "db/write_batch_count") - before_batches,
+			metric(&storage.set_db, "slatedb.db.write_batch_count") - before_batches,
 			1
 		);
-		assert_eq!(metric(storage.set_db.raw(), "db/write_ops") - before_ops, 2);
+		assert_eq!(
+			metric(&storage.set_db, "slatedb.db.write_ops") - before_ops,
+			2
+		);
 		assert!(
 			storage
 				.set_db
@@ -444,9 +453,7 @@ mod tests {
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_add(60_000);
 		meta.expire_time = expire_time;
 		let put_opts = metadata_put_options(&meta).unwrap();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 		storage
 			.set_db
 			.raw()

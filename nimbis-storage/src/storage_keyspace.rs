@@ -48,9 +48,7 @@ impl<'a> TypedNamespace<'a> {
 			self.data_type,
 		)?;
 		if normalized.is_expired() {
-			let write_options = WriteOptions {
-				await_durable: false,
-			};
+			let write_options = WriteOptions::default();
 			self.db
 				.delete_with_options(encoded_key, &write_options)
 				.await?;
@@ -89,9 +87,7 @@ impl Storage {
 		}
 
 		if !batch.is_empty() {
-			let write_options = WriteOptions {
-				await_durable: false,
-			};
+			let write_options = WriteOptions::default();
 			namespace
 				.db
 				.write_with_options(batch, &write_options)
@@ -114,9 +110,7 @@ impl Storage {
 			return Ok(false);
 		};
 		let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
-		let write_options = WriteOptions {
-			await_durable: false,
-		};
+		let write_options = WriteOptions::default();
 		if expire_time > 0 && expire_time <= now {
 			namespace
 				.db

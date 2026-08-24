@@ -22,6 +22,7 @@ url = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 rstest = { workspace = true }
+slatedb-common = { workspace = true }
 tokio = { workspace = true }
 ulid = { workspace = true }
 

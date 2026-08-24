@@ -1865,6 +1865,7 @@ dependencies = [
  "nimbis-macros",
  "rstest",
  "slatedb",
+ "slatedb-common",
  "thiserror 2.0.18",
  "tokio",
  "ulid 3.0.0",

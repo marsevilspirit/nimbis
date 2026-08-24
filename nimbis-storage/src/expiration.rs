@@ -7,9 +7,9 @@ const SLATEDB_CLOCK_HEADROOM_MS: u64 = 86_400_000;
 
 /// Latest supported logical deadline, one day before year 10000.
 ///
-/// SlateDB derives an absolute deadline by adding `ExpireAfter` to a signed
-/// millisecond clock at a later instant. The explicit headroom absorbs that
-/// second clock read without allowing its resulting row deadline past the
+/// SlateDB derives an absolute deadline by adding `ExpireAfterMillis` to a
+/// signed millisecond clock at a later instant. The explicit headroom absorbs
+/// that second clock read without allowing its resulting row deadline past the
 /// practical timestamp ceiling.
 pub(crate) const MAX_EXPIRATION_TIMESTAMP_MS: u64 =
 	MAX_ROW_EXPIRATION_TIMESTAMP_MS - SLATEDB_CLOCK_HEADROOM_MS;
@@ -46,7 +46,7 @@ pub(crate) fn ttl_for_expiration(timestamp: u64) -> Result<Ttl, StorageError> {
 	}
 	validate_expiration(timestamp)?;
 	let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
-	Ok(Ttl::ExpireAfter(timestamp.saturating_sub(now)))
+	Ok(Ttl::ExpireAfterMillis(timestamp.saturating_sub(now)))
 }
 
 pub(crate) fn is_expired(timestamp: Option<i64>) -> bool {
@@ -83,10 +83,10 @@ mod tests {
 	#[test]
 	fn converts_zero_and_expired_deadlines_without_overflow() {
 		assert_eq!(ttl_for_expiration(0).unwrap(), Ttl::NoExpiry);
-		assert_eq!(ttl_for_expiration(1).unwrap(), Ttl::ExpireAfter(0));
+		assert_eq!(ttl_for_expiration(1).unwrap(), Ttl::ExpireAfterMillis(0));
 		assert!(matches!(
 			ttl_for_expiration(MAX_EXPIRATION_TIMESTAMP_MS).unwrap(),
-			Ttl::ExpireAfter(duration) if duration > 0
+			Ttl::ExpireAfterMillis(duration) if duration > 0
 		));
 	}
 }

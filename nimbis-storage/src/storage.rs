@@ -13,6 +13,8 @@ use slatedb::object_store::ObjectStoreScheme;
 use slatedb::object_store::local::LocalFileSystem;
 use slatedb::object_store::parse_url_opts;
 use slatedb::object_store::path::Path as ObjectStorePath;
+#[cfg(test)]
+use slatedb_common::metrics::DefaultMetricsRecorder;
 
 use crate::compaction_filter::CollectionCompactionFilterSupplier;
 use crate::data_type::DataType;
@@ -41,16 +43,22 @@ pub struct Storage {
 }
 
 struct StorageDbs {
-	string: Arc<Db>,
-	hash: Arc<Db>,
-	list: Arc<Db>,
-	set: Arc<Db>,
-	zset: Arc<Db>,
+	string: OpenedDb,
+	hash: OpenedDb,
+	list: OpenedDb,
+	set: OpenedDb,
+	zset: OpenedDb,
+}
+
+struct OpenedDb {
+	db: Arc<Db>,
+	#[cfg(test)]
+	metrics: Arc<DefaultMetricsRecorder>,
 }
 
 fn shard_path(base_path: ObjectStorePath, shard_id: Option<usize>) -> ObjectStorePath {
 	match shard_id {
-		Some(id) => base_path.child(format!("shard-{}", id)),
+		Some(id) => base_path.join(format!("shard-{}", id)),
 		None => base_path,
 	}
 }
@@ -126,11 +134,31 @@ where
 impl Storage {
 	fn from_dbs(dbs: StorageDbs) -> Self {
 		Self {
-			string_db: TypedDb::new(dbs.string),
-			hash_db: TypedDb::new(dbs.hash),
-			list_db: TypedDb::new(dbs.list),
-			set_db: TypedDb::new(dbs.set),
-			zset_db: TypedDb::new(dbs.zset),
+			string_db: TypedDb::new(
+				dbs.string.db,
+				#[cfg(test)]
+				dbs.string.metrics,
+			),
+			hash_db: TypedDb::new(
+				dbs.hash.db,
+				#[cfg(test)]
+				dbs.hash.metrics,
+			),
+			list_db: TypedDb::new(
+				dbs.list.db,
+				#[cfg(test)]
+				dbs.list.metrics,
+			),
+			set_db: TypedDb::new(
+				dbs.set.db,
+				#[cfg(test)]
+				dbs.set.metrics,
+			),
+			zset_db: TypedDb::new(
+				dbs.zset.db,
+				#[cfg(test)]
+				dbs.zset.metrics,
+			),
 			locks: Arc::new(StorageLocks::new()),
 		}
 	}
@@ -190,7 +218,7 @@ impl Storage {
 		object_store: Arc<dyn ObjectStore>,
 		root_path: ObjectStorePath,
 	) -> Result<Self, StorageError> {
-		let child_path = |name: &'static str| root_path.child(name);
+		let child_path = |name: &'static str| root_path.clone().join(name);
 
 		let marker = child_path(".nimbis");
 
@@ -201,12 +229,17 @@ impl Storage {
 		// SlateDB's built-in TTL mechanism handles expiration during compaction.
 		let string_db = {
 			let db_path = child_path("string");
-			let db = Db::builder(db_path, object_store.clone())
-				.with_db_cache(cache.clone())
-				.build()
-				.await
-				.map_err(StorageError::from)?;
-			Arc::new(db)
+			#[cfg(test)]
+			let metrics = Arc::new(DefaultMetricsRecorder::new());
+			let builder = Db::builder(db_path, object_store.clone()).with_db_cache(cache.clone());
+			#[cfg(test)]
+			let builder = builder.with_metrics_recorder(metrics.clone());
+			let db = builder.build().await.map_err(StorageError::from)?;
+			OpenedDb {
+				db: Arc::new(db),
+				#[cfg(test)]
+				metrics,
+			}
 		};
 
 		// Open every collection DB with a local, I/O-free compaction filter. Metadata
@@ -217,17 +250,23 @@ impl Storage {
 			let cache = cache.clone();
 			let db_path = child_path(name);
 			async move {
+				#[cfg(test)]
+				let metrics = Arc::new(DefaultMetricsRecorder::new());
 				let filter_supplier = Arc::new(CollectionCompactionFilterSupplier::new(data_type));
 				let compactor_builder =
 					slatedb::CompactorBuilder::new(db_path.clone(), store.clone())
 						.with_compaction_filter_supplier(filter_supplier);
-				let db = Db::builder(db_path, store)
+				let builder = Db::builder(db_path, store)
 					.with_db_cache(cache)
-					.with_compactor_builder(compactor_builder)
-					.build()
-					.await
-					.map_err(StorageError::from)?;
-				Ok::<Arc<Db>, StorageError>(Arc::new(db))
+					.with_compactor_builder(compactor_builder);
+				#[cfg(test)]
+				let builder = builder.with_metrics_recorder(metrics.clone());
+				let db = builder.build().await.map_err(StorageError::from)?;
+				Ok::<OpenedDb, StorageError>(OpenedDb {
+					db: Arc::new(db),
+					#[cfg(test)]
+					metrics,
+				})
 			}
 		};
 
@@ -258,6 +297,17 @@ impl Storage {
 			DataType::List => self.list_db.raw(),
 			DataType::Set => self.set_db.raw(),
 			DataType::ZSet => self.zset_db.raw(),
+		}
+	}
+
+	#[cfg(test)]
+	pub(crate) fn metric_for_type(&self, data_type: DataType, name: &'static str) -> i64 {
+		match data_type {
+			DataType::String => self.string_db.metric(name),
+			DataType::Hash => self.hash_db.metric(name),
+			DataType::List => self.list_db.metric(name),
+			DataType::Set => self.set_db.metric(name),
+			DataType::ZSet => self.zset_db.metric(name),
 		}
 	}
 
@@ -304,11 +354,8 @@ impl Storage {
 		async fn clear_db(
 			db: &slatedb::Db,
 		) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-			let scan_range = ..;
-			let mut stream = db.scan::<bytes::Bytes, _>(scan_range).await?;
-			let write_opts = slatedb::config::WriteOptions {
-				await_durable: false,
-			};
+			let mut stream = db.scan(..).await?;
+			let write_opts = slatedb::config::WriteOptions::default();
 			while let Some(kv) = stream.next().await? {
 				db.delete_with_options(kv.key, &write_opts).await?;
 			}
@@ -456,9 +503,7 @@ mod tests {
 				.unwrap();
 			let mut meta = T::decode(&source_row.value).unwrap();
 			meta.resolve_pending_generation(source_row.seq);
-			let write_opts = WriteOptions {
-				await_durable: false,
-			};
+			let write_opts = WriteOptions::default();
 			let put_opts = metadata_put_options(&meta).unwrap();
 			string_db
 				.put_with_options(encoded_key.clone(), meta.encode(), &put_opts, &write_opts)
@@ -740,11 +785,9 @@ mod tests {
 		let encoded_key = TopLevelKey::new(key.clone()).unwrap().encode();
 		let encoded_value = StringValue::new("value").encode();
 		let put_opts = PutOptions {
-			ttl: Ttl::ExpireAfter(120_000),
+			ttl: Ttl::ExpireAfterMillis(120_000),
 		};
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 
 		storage
 			.hash_db
@@ -862,9 +905,7 @@ mod tests {
 		let storage = Storage::open(&path, None).await.unwrap();
 		let count = MIGRATION_SCAN_CHUNK_SIZE + 1;
 		let put_opts = PutOptions::default();
-		let write_opts = WriteOptions {
-			await_durable: false,
-		};
+		let write_opts = WriteOptions::default();
 		for index in 0..count {
 			let key = Bytes::from(format!("chunked-string-{index:04}"));
 			storage
@@ -923,17 +964,17 @@ mod tests {
 		val.expire_time =
 			(chrono::Utc::now().timestamp_millis().max(0) as u64).saturating_sub(1000);
 		let opts = crate::typed_db::metadata_put_options(&val).unwrap();
-		assert_eq!(opts.ttl, Ttl::ExpireAfter(0));
+		assert_eq!(opts.ttl, Ttl::ExpireAfterMillis(0));
 
 		// Case 3: Future expiration
 		let future = chrono::Utc::now().timestamp_millis().max(0) as u64 + 10000;
 		val.expire_time = future;
 		let opts = crate::typed_db::metadata_put_options(&val).unwrap();
-		if let Ttl::ExpireAfter(millis) = opts.ttl {
+		if let Ttl::ExpireAfterMillis(millis) = opts.ttl {
 			assert!(millis > 0);
 			assert!(millis <= 10000);
 		} else {
-			panic!("Expected ExpireAfter, got {:?}", opts.ttl);
+			panic!("Expected ExpireAfterMillis, got {:?}", opts.ttl);
 		}
 	}
 }
