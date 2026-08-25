@@ -147,6 +147,8 @@ Built-in Redis tests enabled for Nimbis:
 - `sadd`
 - `hset`
 - `zadd`
+- `lrange` (runs Redis's `LRANGE_100`, `LRANGE_300`, `LRANGE_500`, and
+  `LRANGE_600` cases after their built-in `LPUSH` setup)
 
 Built-in Redis tests skipped because Nimbis does not currently implement the
 commands:
@@ -155,16 +157,12 @@ commands:
 - `zpopmin`
 - `xadd`
 
-Redis `LRANGE` built-ins are skipped from the Nimbis benchmark because
-`redis-benchmark -t lrange` expands into the larger `LRANGE_300`,
-`LRANGE_500`, and `LRANGE_600` cases. The `full` profile covers Nimbis
-`LRANGE` with a direct custom command instead.
+To focus on the large list-range cases against a running release server, use:
 
-- `lrange`
-- `lrange_100`
-- `lrange_300`
-- `lrange_500`
-- `lrange_600`
+```bash
+redis-benchmark -h 127.0.0.1 -p 6379 -n 10000 -c 50 -d 128 -P 1 \
+  -t lrange_300,lrange_500,lrange_600
+```
 
 ## Custom Command Coverage
 
@@ -178,7 +176,7 @@ Covered command groups:
   `EXISTS STRING key [key ...]`, `EXPIRE STRING key seconds`, and
   `TTL STRING key`
 - Hash: `HDEL`, `HGET`, `HLEN`, `HMGET`, `HGETALL`
-- List: `LLEN`, `LRANGE`
+- List: `LLEN`
 - Set: `SMEMBERS`, `SISMEMBER`, `SREM`, `SCARD`
 - Sorted set: `ZRANGE`, `ZSCORE`, `ZREM`, `ZCARD`
 - Control smoke: `HELLO 2`, `CONFIG GET *`, `CLIENT ID`

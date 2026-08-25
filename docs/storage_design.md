@@ -126,6 +126,10 @@ contains the value; for a collection it contains the collection metadata below.
 - ZSet score index key: `[meta_key_prefix] ['S'] [score (u64 encoded)] [member]`
 
 ZSet score encoding uses bit transforms so lexicographic key order matches numeric order.
+List sequence numbers use big-endian encoding for the same reason: a logical
+`LRANGE` maps to one inclusive key interval. After loading metadata, the read
+path scans that bounded interval once and filters entries against the current
+collection version.
 
 ## Version + Compaction Strategy
 
