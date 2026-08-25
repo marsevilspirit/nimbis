@@ -30,6 +30,14 @@ impl ListElementKey {
 		top_level_key.with_suffix(&suffix)
 	}
 
+	pub(crate) fn user_key(&self) -> &Bytes {
+		&self.user_key
+	}
+
+	pub(crate) fn seq(&self) -> u64 {
+		self.seq
+	}
+
 	pub(crate) fn decode(encoded: &[u8]) -> Result<Self, DecoderError> {
 		let (user_key, mut suffix) = TopLevelKey::decode_prefix(encoded)?;
 		if suffix.len() != 8 {

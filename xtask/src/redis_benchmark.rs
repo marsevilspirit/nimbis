@@ -13,7 +13,7 @@ use clap::ValueEnum;
 
 use crate::write_stdout_line;
 
-const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd";
+const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd,lrange";
 pub(crate) const COMPARISON_PROFILE_COMMANDS: &[&str] = &[
 	"GET", "HGET", "HSET", "LPOP", "LPUSH", "SADD", "SET", "SREM", "ZADD", "ZREM",
 ];
@@ -421,7 +421,6 @@ fn run_custom_suite<R: Runner>(config: &Config, runner: &R) -> Result<(), String
 		),
 		("hgetall", &["HGETALL", "bench:hash"]),
 		("llen", &["LLEN", "bench:list"]),
-		("lrange", &["LRANGE", "bench:list", "0", "-1"]),
 		("smembers", &["SMEMBERS", "bench:set:a"]),
 		("sismember", &["SISMEMBER", "bench:set:a", "a"]),
 		("srem", &["SREM", "bench:set:srem", "member:__rand_int__"]),
@@ -963,10 +962,10 @@ mod tests {
 		let labels = runner.streamed_labels();
 		assert!(labels.contains(&"builtin_supported".to_string()));
 		assert!(labels.contains(&"del_multi_key".to_string()));
-		assert!(labels.contains(&"lrange".to_string()));
+		assert!(!labels.contains(&"lrange".to_string()));
 		assert!(labels.contains(&"hello_2".to_string()));
 		assert!(labels.contains(&"client_id".to_string()));
-		assert_eq!(labels.len(), 25);
+		assert_eq!(labels.len(), 24);
 		assert_eq!(
 			runner.streamed_commands(),
 			benchmarked_command_set(BENCHMARKED_FULL_PROFILE_COMMANDS)
@@ -1016,6 +1015,11 @@ mod tests {
 		);
 
 		let streamed_calls = runner.streaming_calls.borrow();
+		assert!(streamed_calls.iter().any(|call| {
+			call.args.windows(2).any(|window| {
+				window[0] == "-t" && window[1].split(',').any(|test| test == "lrange")
+			})
+		}));
 		assert!(streamed_calls.iter().any(|call| args_end_with(
 			&call.args,
 			&[
@@ -1050,6 +1054,7 @@ mod tests {
 				.any(|call| args_end_with(&call.args, &["TTL", "STRING", "bench:string:ttl"]))
 		);
 		assert!(config.output_dir.join("builtin_supported.txt").exists());
+		assert!(!config.output_dir.join("lrange.txt").exists());
 		assert!(config.output_dir.join("client_id.txt").exists());
 	}
 
@@ -1075,6 +1080,11 @@ mod tests {
 			runner.streamed_commands(),
 			benchmarked_command_set(COMPARISON_PROFILE_COMMANDS)
 		);
+		assert!(runner.streaming_calls.borrow().iter().all(|call| {
+			call.args.windows(2).all(|window| {
+				window[0] != "-t" || !window[1].split(',').any(|test| test == "lrange")
+			})
+		}));
 		let setup_calls = runner.status_commands("/bin/echo");
 		assert!(
 			setup_calls

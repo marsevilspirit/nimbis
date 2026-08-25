@@ -13,6 +13,8 @@ use slatedb::config::WriteOptions;
 use slatedb_common::metrics::DefaultMetricsRecorder;
 #[cfg(test)]
 use slatedb_common::metrics::lookup_metric;
+#[cfg(test)]
+use slatedb_common::metrics::lookup_metric_with_labels;
 
 use crate::error::StorageError;
 use crate::expiration::ttl_for_expiration;
@@ -66,6 +68,12 @@ impl<V> TypedDb<V> {
 	pub(crate) fn metric(&self, name: &'static str) -> i64 {
 		lookup_metric(&self.metrics, name)
 			.unwrap_or_else(|| panic!("missing SlateDB metric {name}"))
+	}
+
+	#[cfg(test)]
+	pub(crate) fn metric_with_labels(&self, name: &'static str, labels: &[(&str, &str)]) -> i64 {
+		lookup_metric_with_labels(&self.metrics, name, labels)
+			.unwrap_or_else(|| panic!("missing SlateDB metric {name} with labels {labels:?}"))
 	}
 }
 

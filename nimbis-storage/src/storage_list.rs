@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use futures::future;
 use log::warn;
 use nimbis_macros::storage_lock;
 use slatedb::WriteBatch;
@@ -262,33 +261,33 @@ impl Storage {
 		let start_seq = meta_val.head + start_idx as u64;
 		let stop_seq = meta_val.head + stop_idx as u64;
 
-		// We use parallel GETs to fetch elements since we know the exact sequence
-		// numbers. Ranges are contiguous, so we can iterate from start_seq to
-		// stop_seq. TODO: Consider using scan for potentially better performance on
-		// large ranges, though simple GETs are sufficient given the sequence number
-		// design.
+		let start_key = ListElementKey::new(key.clone(), start_seq).encode()?;
+		let stop_key = ListElementKey::new(key.clone(), stop_seq).encode()?;
+		let mut stream = self.list_db.scan_entries(start_key..=stop_key).await?;
 
-		let futures: Vec<_> = (start_seq..=stop_seq)
-			.map(|seq| {
-				let element_key = ListElementKey::new(key.clone(), seq);
-				async move { self.list_db.get_entry(element_key.encode()?).await }
-			})
-			.collect();
-
-		let found_results = future::try_join_all(futures).await?;
-
-		for res in found_results {
-			if let Some(kv) = res
-				&& kv.seq >= meta_val.version
+		while let Some(kv) = stream.next().await? {
+			let Ok(element_key) = ListElementKey::decode(&kv.key) else {
+				warn!("Malformed list element key in range for key {key:?}");
+				continue;
+			};
+			if element_key.user_key() != &key
+				|| !(start_seq..=stop_seq).contains(&element_key.seq())
+				|| kv.seq < meta_val.version
 			{
-				results.push(kv.value);
-			} else {
-				// Should not happen if consistency is maintained
 				warn!(
-					"List element missing for key {:?} at sequence. Potential data inconsistency.",
-					key
+					"Stale or unexpected list element for key {key:?} at sequence {}",
+					element_key.seq()
 				);
+				continue;
 			}
+			results.push(kv.value);
+		}
+
+		if results.len() != count {
+			warn!(
+				"List range for key {key:?} expected {count} elements, found {}. Potential data inconsistency.",
+				results.len()
+			);
 		}
 
 		Ok(results)
@@ -307,6 +306,10 @@ mod tests {
 
 	fn metric<V>(db: &crate::typed_db::TypedDb<V>, name: &'static str) -> i64 {
 		db.metric(name)
+	}
+
+	fn request_metric<V>(db: &crate::typed_db::TypedDb<V>, operation: &'static str) -> i64 {
+		db.metric_with_labels("slatedb.db.request_count", &[("op", operation)])
 	}
 
 	async fn get_storage() -> (Storage, std::path::PathBuf) {
@@ -388,6 +391,29 @@ mod tests {
 		let part = storage.lrange(key.clone(), 0, 1).await.unwrap();
 		assert_eq!(part.len(), 2);
 		assert_eq!(part[1], Bytes::from("2"));
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
+	#[tokio::test]
+	async fn test_lrange_large_ranges_use_one_scan_each() {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("large_list_range");
+		let elements: Vec<_> = (0..600)
+			.map(|index| Bytes::from(format!("value:{index:03}")))
+			.collect();
+		storage.rpush(key.clone(), elements.clone()).await.unwrap();
+		storage.list_db.raw().flush().await.unwrap();
+
+		let gets_before = request_metric(&storage.list_db, "get");
+		let scans_before = request_metric(&storage.list_db, "scan");
+		for count in [300, 500, 600] {
+			let range = storage.lrange(key.clone(), 0, count - 1).await.unwrap();
+			assert_eq!(range, elements[..count as usize]);
+		}
+
+		assert_eq!(request_metric(&storage.list_db, "get") - gets_before, 3);
+		assert_eq!(request_metric(&storage.list_db, "scan") - scans_before, 3);
 
 		let _ = std::fs::remove_dir_all(path);
 	}
