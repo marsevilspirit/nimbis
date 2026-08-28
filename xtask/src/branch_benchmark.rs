@@ -224,12 +224,12 @@ struct BenchmarkTarget {
 }
 
 #[derive(Clone, Debug)]
-struct Cancellation {
+pub(crate) struct Cancellation {
 	requested: Arc<AtomicBool>,
 }
 
 impl Cancellation {
-	fn install() -> Result<Self, String> {
+	pub(crate) fn install() -> Result<Self, String> {
 		let cancellation = Self::new();
 		let signal_cancellation = cancellation.clone();
 		ctrlc::set_handler(move || signal_cancellation.request())
@@ -247,7 +247,7 @@ impl Cancellation {
 		self.requested.store(true, Ordering::SeqCst);
 	}
 
-	fn check(&self) -> Result<(), String> {
+	pub(crate) fn check(&self) -> Result<(), String> {
 		if self.requested.load(Ordering::SeqCst) {
 			Err("Benchmark comparison interrupted".into())
 		} else {
@@ -593,6 +593,9 @@ fn run_benchmark_pass(
 			force_quiet: true,
 			output_dir: Some(suites_dir.display().to_string()),
 			seed_requests: Some(config.seed_requests),
+			command: None,
+			seed: None,
+			settle_millis: None,
 			redis_benchmark: Some(config.redis_benchmark.clone()),
 			redis_cli: Some(config.redis_cli.clone()),
 			extra_args: Vec::new(),
@@ -722,13 +725,13 @@ fn combine_suite_outputs(suites_dir: &Path, output_path: &Path) -> Result<(), St
 	Ok(())
 }
 
-struct ServerProcess {
+pub(crate) struct ServerProcess {
 	child: Option<Child>,
 	log_path: PathBuf,
 }
 
 impl ServerProcess {
-	fn start(
+	pub(crate) fn start(
 		binary: &Path,
 		runtime_dir: &Path,
 		log_path: &Path,
@@ -764,7 +767,7 @@ impl ServerProcess {
 		})
 	}
 
-	fn wait_until_ready(
+	pub(crate) fn wait_until_ready(
 		&mut self,
 		redis_cli: &str,
 		host: &str,
@@ -852,7 +855,7 @@ impl ServerProcess {
 		Ok(())
 	}
 
-	fn stop(&mut self) -> Result<(), String> {
+	pub(crate) fn stop(&mut self) -> Result<(), String> {
 		let Some(child) = self.child.as_mut() else {
 			return Ok(());
 		};
@@ -916,7 +919,7 @@ fn create_run_dir(output_parent: &Path) -> Result<PathBuf, String> {
 		})
 }
 
-fn pick_available_port() -> Result<u16, String> {
+pub(crate) fn pick_available_port() -> Result<u16, String> {
 	let listener = TcpListener::bind(("127.0.0.1", 0))
 		.map_err(|error| format!("Failed to select an available port: {error}"))?;
 	listener
@@ -925,7 +928,7 @@ fn pick_available_port() -> Result<u16, String> {
 		.map_err(|error| format!("Failed to inspect selected port: {error}"))
 }
 
-fn ensure_port_available(port: u16) -> Result<(), String> {
+pub(crate) fn ensure_port_available(port: u16) -> Result<(), String> {
 	TcpListener::bind(("127.0.0.1", port))
 		.map(|_| ())
 		.map_err(|error| format!("Port {port} is not available on 127.0.0.1: {error}"))

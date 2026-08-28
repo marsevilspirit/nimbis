@@ -9,8 +9,8 @@ use crate::write_stdout;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BenchmarkResult {
-	rps: f64,
-	p50_msec: Option<f64>,
+	pub(crate) rps: f64,
+	pub(crate) p50_msec: Option<f64>,
 }
 
 type BenchmarkMap = HashMap<String, BenchmarkResult>;

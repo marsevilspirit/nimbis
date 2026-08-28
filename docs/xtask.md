@@ -59,8 +59,7 @@ cargo xtask compare-benchmarks \
   --baseline-pipeline <NAME=PATH>
 ```
 
-The benchmark workflow uses this command to generate the pull request benchmark
-report. Reports include both throughput and p50 latency when the input uses
+Reports include both throughput and p50 latency when the input uses
 `redis-benchmark` quiet output with latency data.
 
 Optional `--main-label`, `--pr-label`, and `--pipeline-depth` arguments customize
@@ -81,6 +80,51 @@ cargo xtask redis-benchmark-compare --base main --head HEAD
 
 The command does not switch the current worktree. `HEAD` refers to its committed
 state, so uncommitted changes are not included.
+
+### `benchmark-ci-shard`
+
+Runs one pull request benchmark shard against already-built Main and PR binaries.
+The command accepts a comma-separated command subset and runs each command and
+pipeline mode sequentially. Each comparison is a four-pass balanced block:
+odd replicas use `ABBA`, even replicas use `BAAB`, and every pass starts a fresh
+Nimbis process and local object store. Main and PR receive the same deterministic
+Redis 8 random seed for a given command, payload size, pipeline depth, and
+replica.
+
+```bash
+xtask benchmark-ci-shard \
+  --main-binary <main-nimbis> \
+  --pr-binary <pr-nimbis> \
+  --commands get,set \
+  --data-size 512 \
+  --replica 1 \
+  --redis-benchmark <redis-8-benchmark> \
+  --output-dir <artifact-directory>
+```
+
+This command is intended for CI orchestration. Raw pass output, server logs,
+deterministic seeds, and a machine-readable `result.json` are retained in the
+shard artifact.
+
+### `benchmark-ci-report`
+
+Validates and aggregates all downloaded CI shard artifacts into one Markdown
+report. By default it requires every comparison command at 512 and 1024 bytes,
+with three independent runner replicas per cell. When a failed-only workflow
+rerun leaves artifacts from multiple attempts, the newest attempt for each shard
+is selected. The aggregator also verifies the declared ABBA/BAAB pass sequence,
+deterministic seed, exact cell set, and recomputed metrics before reporting.
+
+```bash
+xtask benchmark-ci-report \
+  --input-dir <downloaded-artifacts> \
+  --output benchmark_report.md \
+  --expected-replicas 3
+```
+
+The report is a screening result, not a statistical pass/fail gate. It reports
+the median paired effect, median absolute deviation, effect range, and the
+largest duplicate spread.
 
 ## Requirements
 

@@ -4403,6 +4403,8 @@ dependencies = [
  "clap",
  "ctrlc",
  "regex",
+ "serde",
+ "serde_json",
  "tempfile",
  "toml_edit 0.25.4+spec-1.1.0",
  "walkdir",

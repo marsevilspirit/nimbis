@@ -79,6 +79,53 @@ The temporary source clone and object stores are removed after the command
 finishes. Pressing Ctrl-C requests a graceful stop so those temporary resources
 and any running child server are cleaned up before exit.
 
+## Pull Request Benchmark CI
+
+Pull request CI compares only the Main and PR Nimbis binaries. Redis, PikiwiDB,
+and Kvrocks are not mixed into this noisy change-detection path; cross-database
+comparisons should be run as a separate benchmark with separately controlled
+environments.
+
+The CI matrix has five independent command shards (`GET/SET`, `HGET/HSET`,
+`LPOP/LPUSH`, `SADD/SREM`, and `ZADD/ZREM`), two payload sizes, and three runner
+replicas. Different shards run in parallel. Within one shard, commands, pipeline
+modes, and Main/PR passes remain sequential so competing servers never share a
+runner at the same time.
+
+The isolated command workloads make `D` real for every cell: HGET fixtures use
+`D`-byte values, and SADD/SREM/ZADD/ZREM use `D`-byte random members. The other
+commands use Redis's built-in payload generation.
+
+Each command/configuration cell uses a balanced four-pass block. Odd replicas
+run `Main, PR, PR, Main` (`ABBA`), while even replicas run `PR, Main, Main, PR`
+(`BAAB`). Every pass gets a fresh Nimbis process and object store, and both
+branches receive the same deterministic random seed from the pinned Redis 8.0.0
+benchmark client. This makes the reported value a same-runner relative effect
+instead of a comparison of unrelated absolute measurements.
+
+The aggregate report contains:
+
+- `P=1` throughput effects with a 5% screening materiality line
+- pipelined throughput effects with an 8% screening materiality line
+- same-branch duplicate instability lines of 10% and 16%, respectively
+- `P=1` p50 latency as informational evidence
+- per-cell median effect, median absolute deviation, range, and duplicate spread
+
+A `candidate regression` requires every replica to cross the materiality line in
+the same direction without crossing either instability line. It requests a
+confirmation run; it does not fail CI as a statistical gate. Pipelined p50
+remains in the raw JSON but is omitted from the comment because Redis reports
+batch/first-read latency rather than independent per-request latency in that
+mode. One aggregate comment is updated only after all required shard artifacts
+validate successfully. Raw output, seeds, logs, binary hashes, runner metadata,
+and tool versions remain downloadable.
+
+The initial 10%/16% duplicate limits and cross-runner dispersion rule are
+conservative screening heuristics. They must be calibrated with repeated A/A
+blocks before any benchmark status is promoted to a required CI gate. A mixed
+result is reported as inconclusive; observations inside the screening lines do
+not establish performance equivalence.
+
 ## Configuration
 
 The xtask is configured with environment variables or equivalent CLI flags.
@@ -117,6 +164,16 @@ The same values can be passed as CLI flags:
 
 ```bash
 cargo xtask redis-benchmark --n 10000 --c 100 --p 16 --threads 4
+```
+
+The comparison profile can also isolate one command. `--seed` requires a Redis
+8 or newer benchmark client, accepts Redis 8's integer range up to `2147483647`,
+and makes the random-key stream deterministic; `--settle-millis` controls the
+pause between fixture setup and measurement.
+
+```bash
+cargo xtask redis-benchmark --profile comparison --command get \
+  --seed 277000 --settle-millis 1000
 ```
 
 Extra arguments for `redis-benchmark` can be passed after `--` and are forwarded
