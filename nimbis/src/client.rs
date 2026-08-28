@@ -191,7 +191,7 @@ impl ClientConnection {
 		let span_context = SpanContext::random().sampled(is_sampled);
 		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[
-				("cmd", parsed_cmd.name().to_owned()),
+				("cmd", parsed_cmd.name().to_uppercase()),
 				("client_id", self.ctx.client_id.to_string()),
 			]
 		});
