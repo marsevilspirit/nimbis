@@ -7,7 +7,13 @@ use regex::Regex;
 
 use crate::write_stdout;
 
-type BenchmarkMap = HashMap<String, f64>;
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BenchmarkResult {
+	rps: f64,
+	p50_msec: Option<f64>,
+}
+
+type BenchmarkMap = HashMap<String, BenchmarkResult>;
 type NamedBenchmarkMap = (String, BenchmarkMap);
 
 #[derive(ClapArgs, Debug)]
@@ -69,6 +75,14 @@ pub fn build_report(args: &Args) -> Result<String, String> {
 		&args.main_label,
 		&args.pr_label,
 	);
+	push_latency_table(
+		&mut report,
+		&main_map,
+		&pr_map,
+		&baselines,
+		&args.main_label,
+		&args.pr_label,
+	);
 	report.push('\n');
 	report.push_str("---\n\n");
 
@@ -85,6 +99,14 @@ pub fn build_report(args: &Args) -> Result<String, String> {
 			"### Pipeline Benchmark Comparison (-P {}) ⚡",
 			args.pipeline_depth
 		),
+		&main_pipeline_map,
+		&pr_pipeline_map,
+		&baseline_pipelines,
+		&args.main_label,
+		&args.pr_label,
+	);
+	push_latency_table(
+		&mut report,
 		&main_pipeline_map,
 		&pr_pipeline_map,
 		&baseline_pipelines,
@@ -158,8 +180,8 @@ fn push_comparison_table(
 	}
 
 	for cmd in commands {
-		let main_rps = main_map.get(cmd).copied().unwrap_or(0.0);
-		let pr_rps = pr_map.get(cmd).copied().unwrap_or(0.0);
+		let main_rps = main_map.get(cmd).map(|result| result.rps).unwrap_or(0.0);
+		let pr_rps = pr_map.get(cmd).map(|result| result.rps).unwrap_or(0.0);
 
 		let pr_diff_percent = if main_rps > 0.0 {
 			((pr_rps - main_rps) / main_rps) * 100.0
@@ -188,13 +210,19 @@ fn push_comparison_table(
 			format!("{main_rps:.2}"),
 		];
 		for (_, baseline_map) in baselines {
-			let baseline_rps = baseline_map.get(cmd).copied().unwrap_or(0.0);
+			let baseline_rps = baseline_map
+				.get(cmd)
+				.map(|result| result.rps)
+				.unwrap_or(0.0);
 			row.push(format!("{baseline_rps:.2}"));
 		}
 		row.push(vs_main_cell);
 
 		for (_, baseline_map) in baselines {
-			let baseline_rps = baseline_map.get(cmd).copied().unwrap_or(0.0);
+			let baseline_rps = baseline_map
+				.get(cmd)
+				.map(|result| result.rps)
+				.unwrap_or(0.0);
 			let baseline_diff_percent = if baseline_rps > 0.0 {
 				((pr_rps - baseline_rps) / baseline_rps) * 100.0
 			} else if pr_rps > 0.0 {
@@ -218,6 +246,102 @@ fn push_comparison_table(
 
 		report.push_str(&format!("| {} |\n", row.join(" | ")));
 	}
+}
+
+fn push_latency_table(
+	report: &mut String,
+	main_map: &BenchmarkMap,
+	pr_map: &BenchmarkMap,
+	baselines: &[NamedBenchmarkMap],
+	main_label: &str,
+	pr_label: &str,
+) {
+	let has_latency = main_map
+		.values()
+		.chain(pr_map.values())
+		.chain(baselines.iter().flat_map(|(_, map)| map.values()))
+		.any(|result| result.p50_msec.is_some());
+	if !has_latency {
+		return;
+	}
+
+	report.push_str("\n#### p50 Latency (ms, lower is better)\n\n");
+	let mut headers = vec![
+		"Command".to_string(),
+		format!("{} p50", sanitize_markdown_table_text(pr_label)),
+		format!("{} p50", sanitize_markdown_table_text(main_label)),
+	];
+	for (name, _) in baselines {
+		headers.push(format!("{} p50", sanitize_markdown_table_text(name)));
+	}
+	headers.push(format!("vs {}", sanitize_markdown_table_text(main_label)));
+	for (name, _) in baselines {
+		headers.push(format!("vs {}", sanitize_markdown_table_text(name)));
+	}
+	report.push_str(&format!("| {} |\n", headers.join(" | ")));
+	report.push_str(&format!("|{}|\n", vec!["---"; headers.len()].join("|")));
+
+	let mut commands: BTreeSet<_> = main_map.keys().collect();
+	commands.extend(pr_map.keys());
+	for (_, baseline_map) in baselines {
+		commands.extend(baseline_map.keys());
+	}
+
+	for cmd in commands {
+		let main_p50 = main_map.get(cmd).and_then(|result| result.p50_msec);
+		let pr_p50 = pr_map.get(cmd).and_then(|result| result.p50_msec);
+		let mut row = vec![
+			cmd.to_string(),
+			format_latency(pr_p50),
+			format_latency(main_p50),
+		];
+		for (_, baseline_map) in baselines {
+			row.push(format_latency(
+				baseline_map.get(cmd).and_then(|result| result.p50_msec),
+			));
+		}
+		row.push(format_latency_difference(pr_p50, main_p50, false));
+		for (_, baseline_map) in baselines {
+			row.push(format_latency_difference(
+				pr_p50,
+				baseline_map.get(cmd).and_then(|result| result.p50_msec),
+				true,
+			));
+		}
+
+		report.push_str(&format!("| {} |\n", row.join(" | ")));
+	}
+}
+
+fn format_latency(latency: Option<f64>) -> String {
+	latency
+		.map(|latency| format!("{latency:.3}"))
+		.unwrap_or_else(|| "-".to_string())
+}
+
+fn format_latency_difference(
+	candidate: Option<f64>,
+	reference: Option<f64>,
+	trophy: bool,
+) -> String {
+	let (Some(candidate), Some(reference)) = (candidate, reference) else {
+		return "-".to_string();
+	};
+	if reference <= 0.0 {
+		return "-".to_string();
+	}
+
+	let difference = ((candidate - reference) / reference) * 100.0;
+	let icon = if trophy && difference < 0.0 {
+		"🏆 "
+	} else if difference < -5.0 {
+		"✅ "
+	} else if difference > 5.0 {
+		"⚠️ "
+	} else {
+		""
+	};
+	format!("{}{:+.2}%", icon, difference)
 }
 
 fn validate_comparison_maps(
@@ -287,17 +411,23 @@ fn parse_named_path(value: &str, benchmark_type: &str) -> Result<(String, String
 	Ok((trimmed_name.to_string(), trimmed_path.to_string()))
 }
 
-pub(crate) fn parse_benchmark(content: &str) -> HashMap<String, f64> {
+pub(crate) fn parse_benchmark(content: &str) -> HashMap<String, BenchmarkResult> {
 	let mut map = HashMap::new();
-	let re = Regex::new(r"^([[:alnum:]_-]+)\b.*?:\s+(\d+(?:\.\d+)?)\s+requests per second(?:,|$)")
-		.unwrap();
+	let rps_re =
+		Regex::new(r"^([[:alnum:]_-]+)\b.*?:\s+(\d+(?:\.\d+)?)\s+requests per second(?:,|$)")
+			.unwrap();
+	let p50_re = Regex::new(r"(?:^|,\s*)p50=(\d+(?:\.\d+)?)\s+msec(?:,|$)").unwrap();
 
 	for line in content.split(['\n', '\r']).map(str::trim) {
-		if let Some(caps) = re.captures(line) {
+		if let Some(caps) = rps_re.captures(line) {
 			let cmd = caps.get(1).unwrap().as_str();
 			let rps_str = caps.get(2).unwrap().as_str();
 			if let Ok(rps) = rps_str.parse::<f64>() {
-				map.insert(cmd.to_string(), rps);
+				let p50_msec = p50_re
+					.captures(line)
+					.and_then(|captures| captures.get(1))
+					.and_then(|value| value.as_str().parse::<f64>().ok());
+				map.insert(cmd.to_string(), BenchmarkResult { rps, p50_msec });
 			}
 		}
 	}
@@ -318,12 +448,28 @@ mod tests {
 		let pr_pipeline = dir.path().join("pr_pipeline.txt");
 		let baseline_pipeline = dir.path().join("redis_pipeline.txt");
 
-		std::fs::write(&main, "SET: 100.00 requests per second\n").unwrap();
-		std::fs::write(&pr, "SET: 110.00 requests per second\n").unwrap();
-		std::fs::write(&baseline, "SET: 90.00 requests per second\n").unwrap();
-		std::fs::write(&main_pipeline, "GET: 200.00 requests per second\n").unwrap();
-		std::fs::write(&pr_pipeline, "GET: 190.00 requests per second\n").unwrap();
-		std::fs::write(&baseline_pipeline, "GET: 180.00 requests per second\n").unwrap();
+		std::fs::write(&main, "SET: 100.00 requests per second, p50=0.100 msec\n").unwrap();
+		std::fs::write(&pr, "SET: 110.00 requests per second, p50=0.080 msec\n").unwrap();
+		std::fs::write(
+			&baseline,
+			"SET: 90.00 requests per second, p50=0.120 msec\n",
+		)
+		.unwrap();
+		std::fs::write(
+			&main_pipeline,
+			"GET: 200.00 requests per second, p50=0.200 msec\n",
+		)
+		.unwrap();
+		std::fs::write(
+			&pr_pipeline,
+			"GET: 190.00 requests per second, p50=0.300 msec\n",
+		)
+		.unwrap();
+		std::fs::write(
+			&baseline_pipeline,
+			"GET: 180.00 requests per second, p50=0.250 msec\n",
+		)
+		.unwrap();
 
 		let args = Args {
 			main: main.display().to_string(),
@@ -342,7 +488,10 @@ mod tests {
 		assert!(report.contains("### Benchmark Comparison 🚀"));
 		assert!(report.contains("### Pipeline Benchmark Comparison (-P 50) ⚡"));
 		assert!(report.contains("| SET | 110.00 | 100.00 | 90.00 | ✅ +10.00% | 🏆 +22.22% |"));
+		assert!(report.contains("#### p50 Latency (ms, lower is better)"));
+		assert!(report.contains("| SET | 0.080 | 0.100 | 0.120 | ✅ -20.00% | 🏆 -33.33% |"));
 		assert!(report.contains("| GET | 190.00 | 200.00 | 180.00 | -5.00% | 🏆 +5.56% |"));
+		assert!(report.contains("| GET | 0.300 | 0.200 | 0.250 | ⚠️ +50.00% | ⚠️ +20.00% |"));
 	}
 
 	#[test]
@@ -373,6 +522,7 @@ mod tests {
 		assert!(report.contains("feature\\|fast RPS"));
 		assert!(report.contains("main RPS"));
 		assert!(report.contains("Pipeline Benchmark Comparison (-P 16)"));
+		assert!(!report.contains("p50 Latency"));
 	}
 
 	#[test]
@@ -400,9 +550,25 @@ mod tests {
 	fn parse_benchmark_uses_command_token_for_custom_commands() {
 		let content = "HGET bench:hash field1: 123.45 requests per second, p50=0.095 msec\n";
 		let parsed = parse_benchmark(content);
+		let result = parsed.get("HGET").unwrap();
 
-		assert_eq!(parsed.get("HGET"), Some(&123.45));
+		assert_eq!(result.rps, 123.45);
+		assert_eq!(result.p50_msec, Some(0.095));
 		assert!(!parsed.contains_key("field1"));
+	}
+
+	#[test]
+	fn parse_benchmark_keeps_rps_when_latency_is_missing_or_invalid() {
+		let content = concat!(
+			"SET: 100.00 requests per second\n",
+			"GET: 90.00 requests per second, p50=unavailable msec\n",
+		);
+		let parsed = parse_benchmark(content);
+
+		assert_eq!(parsed.get("SET").unwrap().rps, 100.0);
+		assert_eq!(parsed.get("SET").unwrap().p50_msec, None);
+		assert_eq!(parsed.get("GET").unwrap().rps, 90.0);
+		assert_eq!(parsed.get("GET").unwrap().p50_msec, None);
 	}
 
 	#[test]
@@ -416,8 +582,10 @@ mod tests {
 
 		let parsed = parse_benchmark(content);
 
-		assert_eq!(parsed.get("SET"), Some(&10000.0));
-		assert_eq!(parsed.get("GET"), Some(&9000.0));
+		assert_eq!(parsed.get("SET").unwrap().rps, 10000.0);
+		assert_eq!(parsed.get("SET").unwrap().p50_msec, Some(0.063));
+		assert_eq!(parsed.get("GET").unwrap().rps, 9000.0);
+		assert_eq!(parsed.get("GET").unwrap().p50_msec, Some(0.039));
 		assert_eq!(parsed.len(), 2);
 	}
 }
