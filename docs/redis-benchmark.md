@@ -108,6 +108,8 @@ The aggregate report contains:
 - `P=1` throughput effects with a ±5% screening materiality band
 - pipelined throughput effects with a ±8% screening materiality band
 - same-branch duplicate instability lines of 10% and 16%, respectively
+- cross-runner effect-range width instability lines of 10 and 16 percentage
+  points, respectively
 - `P=1` p50 latency as informational evidence
 - per-cell median effect, median absolute deviation, range, and duplicate spread
 
@@ -121,7 +123,11 @@ mode. One aggregate comment is updated only after all required shard artifacts
 validate successfully. Raw output, seeds, logs, binary hashes, runner metadata,
 and tool versions remain downloadable.
 
-The initial 10%/16% duplicate limits and cross-runner dispersion rule are
+The same-branch duplicate-spread veto triggers when the spread exceeds 10% for
+`P=1` or 16% for the pipelined measurement. The cross-runner dispersion veto
+triggers when the effect range width exceeds twice the materiality boundary:
+10 percentage points for `P=1` and 16 for the pipelined measurement. Both
+quality vetoes are evaluated before materiality classification. These are
 conservative screening heuristics. They must be calibrated with repeated A/A
 blocks before any benchmark status is promoted to a required CI gate. A mixed
 result is reported as inconclusive; observations inside the screening lines do

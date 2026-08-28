@@ -1086,8 +1086,9 @@ fn push_rps_table(
 	materiality_percent: f64,
 	duplicate_spread_limit_percent: f64,
 ) {
+	let effect_range_limit_pp = 2.0 * materiality_percent;
 	report.push_str(&format!(
-		"## P={pipeline_depth} RPS paired effects\n\nScreening materiality band: `±{materiality_percent:.0}%`; every stable replica below `-{materiality_percent:.0}%` is a candidate regression, and every stable replica above `+{materiality_percent:.0}%` is a candidate improvement. Same-branch duplicate instability line: `{duplicate_spread_limit_percent:.0}%`.\n\n"
+		"## P={pipeline_depth} RPS paired effects\n\nQuality vetoes, evaluated before materiality: same-branch duplicate spread `>{duplicate_spread_limit_percent:.0}%`, or cross-runner effect range width `>{effect_range_limit_pp:.0} pp`; either yields `noisy`. Screening materiality band: `±{materiality_percent:.0}%`; every stable replica below `-{materiality_percent:.0}%` is a candidate regression, and every stable replica above `+{materiality_percent:.0}%` is a candidate improvement.\n\n"
 	));
 	report.push_str(
 		"| Command | Bytes | Blocks | Median Δ | MAD | Range | Max duplicate spread | Screening |\n\
@@ -1470,6 +1471,7 @@ mod tests {
 		let report = build_report(&shards, 3, &[512, 1024]).unwrap();
 		assert!(report.contains("Replicas per cell: `3` independent runners"));
 		assert!(report.contains("## P=1 RPS paired effects"));
+		assert!(report.contains("cross-runner effect range width `>10 pp`"));
 		assert!(report.contains("Screening materiality band: `±5%`"));
 		assert!(report.contains("above `+5%` is a candidate improvement"));
 		assert!(report.contains("## P=50 RPS paired effects"));
