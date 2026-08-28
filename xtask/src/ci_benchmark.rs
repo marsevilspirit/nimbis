@@ -1069,7 +1069,7 @@ fn build_report(
 	push_p1_latency_table(&mut report, &groups);
 	report.push_str(
 		"## Interpretation\n\n\
-`candidate regression` means every stable screening replica crossed the materiality line in the same direction. It is a trigger for confirmation, not a failing gate. `no material signal` means every observed effect stayed inside the screening lines; it does not establish equivalence. `mixed/inconclusive` means only some replicas crossed a line. `noisy` means a same-branch duplicate spread crossed its instability line or the cross-runner block effects were too dispersed for a useful conclusion. The initial instability lines are conservative heuristics and require A/A null calibration before any result can become a gate. Pipeline p50 remains in raw JSON but is intentionally omitted here because Redis 8 records pipelined batch/first-read latency rather than independent per-request latency.\n\n\
+`candidate regression` means every stable screening replica fell below the negative materiality boundary; `candidate improvement` means every stable replica rose above the positive boundary. Both are triggers for confirmation, not failing or passing gates. `no material signal` means every observed effect stayed inside the inclusive materiality band; it does not establish equivalence. `mixed/inconclusive` means only some replicas crossed either boundary. `noisy` means a same-branch duplicate spread crossed its instability line or the cross-runner block effects were too dispersed for a useful conclusion. The initial materiality bands and instability lines are conservative heuristics and require A/A null calibration before any result can become a gate. Pipeline p50 remains in raw JSON but is intentionally omitted here because Redis 8 records pipelined batch/first-read latency rather than independent per-request latency.\n\n\
 Raw pass output, deterministic seeds, server logs, and duplicate measurements are retained in the workflow artifacts.\n",
 	);
 	Ok(report)
@@ -1087,7 +1087,7 @@ fn push_rps_table(
 	duplicate_spread_limit_percent: f64,
 ) {
 	report.push_str(&format!(
-		"## P={pipeline_depth} RPS paired effects\n\nMateriality line for screening: `-{materiality_percent:.0}%`. Same-branch duplicate instability line: `{duplicate_spread_limit_percent:.0}%`.\n\n"
+		"## P={pipeline_depth} RPS paired effects\n\nScreening materiality band: `±{materiality_percent:.0}%`; every stable replica below `-{materiality_percent:.0}%` is a candidate regression, and every stable replica above `+{materiality_percent:.0}%` is a candidate improvement. Same-branch duplicate instability line: `{duplicate_spread_limit_percent:.0}%`.\n\n"
 	));
 	report.push_str(
 		"| Command | Bytes | Blocks | Median Δ | MAD | Range | Max duplicate spread | Screening |\n\
@@ -1470,6 +1470,8 @@ mod tests {
 		let report = build_report(&shards, 3, &[512, 1024]).unwrap();
 		assert!(report.contains("Replicas per cell: `3` independent runners"));
 		assert!(report.contains("## P=1 RPS paired effects"));
+		assert!(report.contains("Screening materiality band: `±5%`"));
+		assert!(report.contains("above `+5%` is a candidate improvement"));
 		assert!(report.contains("## P=50 RPS paired effects"));
 		assert!(report.contains("| GET | 512 | 3 |"));
 		assert!(report.contains("| ZREM | 1024 | 3 |"));

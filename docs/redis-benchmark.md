@@ -105,16 +105,17 @@ instead of a comparison of unrelated absolute measurements.
 
 The aggregate report contains:
 
-- `P=1` throughput effects with a 5% screening materiality line
-- pipelined throughput effects with an 8% screening materiality line
+- `P=1` throughput effects with a ±5% screening materiality band
+- pipelined throughput effects with a ±8% screening materiality band
 - same-branch duplicate instability lines of 10% and 16%, respectively
 - `P=1` p50 latency as informational evidence
 - per-cell median effect, median absolute deviation, range, and duplicate spread
 
-A `candidate regression` requires every replica to cross the materiality line in
-the same direction without crossing either instability line. It requests a
-confirmation run; it does not fail CI as a statistical gate. Pipelined p50
-remains in the raw JSON but is omitted from the comment because Redis reports
+A `candidate regression` requires every stable replica to fall below the
+negative materiality boundary; a `candidate improvement` requires every stable
+replica to rise above the positive boundary. Either status requests a
+confirmation run; neither is a statistical CI gate. Pipelined p50 remains in
+the raw JSON but is omitted from the comment because Redis reports
 batch/first-read latency rather than independent per-request latency in that
 mode. One aggregate comment is updated only after all required shard artifacts
 validate successfully. Raw output, seeds, logs, binary hashes, runner metadata,
