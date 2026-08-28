@@ -520,7 +520,7 @@ jobs:
           const body = [
             marker,
             `Workflow run: [${{ github.run_id }}](${runUrl})`,
-            `Measured base/head: \`${expectedBaseSha}\` / \`${expectedHeadSha}\``,
+            `Source PR base/head: \`${expectedBaseSha}\` / \`${expectedHeadSha}\``,
             '',
             report,
           ].join('\n');
