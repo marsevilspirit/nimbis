@@ -64,8 +64,14 @@ pub trait Cmd: Send + Sync {
 
 /// Parsed command structure (renamed from Cmd to avoid conflict)
 pub struct ParsedCmd {
-	pub name: String,
+	name: Bytes,
 	pub args: Vec<Bytes>,
+}
+
+impl ParsedCmd {
+	pub fn name(&self) -> &str {
+		std::str::from_utf8(&self.name).expect("command name was validated while parsing")
+	}
 }
 
 impl TryFrom<RespValue> for ParsedCmd {
@@ -80,10 +86,8 @@ impl TryFrom<RespValue> for ParsedCmd {
 		}
 
 		// First element is the command name
-		let cmd_name = args[0]
-			.as_str()
-			.ok_or("Invalid command type")?
-			.to_uppercase();
+		let cmd_name = args[0].as_bytes().ok_or("Invalid command type")?;
+		std::str::from_utf8(cmd_name).map_err(|_| "Invalid command type")?;
 
 		// Remaining elements are arguments
 		let cmd_args: Result<Vec<Bytes>, _> = args[1..]
@@ -92,9 +96,32 @@ impl TryFrom<RespValue> for ParsedCmd {
 			.collect();
 
 		Ok(ParsedCmd {
-			name: cmd_name,
+			name: cmd_name.clone(),
 			args: cmd_args?,
 		})
+	}
+}
+
+#[cfg(test)]
+mod parsed_cmd_tests {
+	use super::*;
+
+	#[test]
+	fn preserves_command_name_case() {
+		let value = RespValue::array([RespValue::bulk_string("pInG")]);
+
+		let parsed = ParsedCmd::try_from(value).unwrap();
+
+		assert_eq!(parsed.name(), "pInG");
+	}
+
+	#[test]
+	fn rejects_non_utf8_command_name() {
+		let value = RespValue::array([RespValue::bulk_string(Bytes::from_static(b"\xff"))]);
+
+		let error = ParsedCmd::try_from(value).err().unwrap();
+
+		assert_eq!(error, "Invalid command type");
 	}
 }
 

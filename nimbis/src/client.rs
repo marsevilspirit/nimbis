@@ -191,7 +191,7 @@ impl ClientConnection {
 		let span_context = SpanContext::random().sampled(is_sampled);
 		let root_span = Span::root(fastrace::func_path!(), span_context).with_properties(|| {
 			[
-				("cmd", parsed_cmd.name.clone()),
+				("cmd", parsed_cmd.name().to_uppercase()),
 				("client_id", self.ctx.client_id.to_string()),
 			]
 		});
@@ -203,10 +203,10 @@ impl ClientConnection {
 
 	#[trace]
 	async fn execute_command_inner(&self, parsed_cmd: ParsedCmd) -> RespValue {
-		let Some(cmd) = self.cmd_table.get_cmd(&parsed_cmd.name) else {
+		let Some(cmd) = self.cmd_table.get_cmd(parsed_cmd.name()) else {
 			return RespValue::error(format!(
 				"ERR unknown command '{}'",
-				parsed_cmd.name.to_lowercase()
+				parsed_cmd.name().to_lowercase()
 			));
 		};
 

@@ -31,6 +31,10 @@ fn test_raw_command_helpers() {
 		client.execute(&["PING"]),
 		RespValue::SimpleString("PONG".into())
 	);
+	assert_eq!(
+		client.execute(&["pInG"]),
+		RespValue::SimpleString("PONG".into())
+	);
 
 	assert_eq!(
 		resp_error(client.execute(&["NO_SUCH_CMD"])),

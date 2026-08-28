@@ -39,6 +39,8 @@ use super::ZRangeCmd;
 use super::ZRemCmd;
 use super::ZScoreCmd;
 
+const COMMAND_NAME_STACK_CAPACITY: usize = 32;
+
 pub struct CmdTable {
 	inner: HashMap<&'static str, Arc<dyn Cmd>>,
 }
@@ -100,6 +102,44 @@ impl CmdTable {
 	}
 
 	pub fn get_cmd(&self, name: &str) -> Option<&Arc<dyn Cmd>> {
-		self.inner.get(name)
+		if let Some(cmd) = self.inner.get(name) {
+			return Some(cmd);
+		}
+
+		if name.len() <= COMMAND_NAME_STACK_CAPACITY {
+			let mut uppercase = [0; COMMAND_NAME_STACK_CAPACITY];
+			uppercase[..name.len()].copy_from_slice(name.as_bytes());
+			uppercase[..name.len()].make_ascii_uppercase();
+			let uppercase = std::str::from_utf8(&uppercase[..name.len()])
+				.expect("ASCII uppercasing preserves UTF-8");
+			return self.inner.get(uppercase);
+		}
+
+		self.inner.iter().find_map(|(registered_name, cmd)| {
+			registered_name.eq_ignore_ascii_case(name).then_some(cmd)
+		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn command_lookup_is_case_insensitive() {
+		let table = CmdTable::new();
+
+		for name in ["PING", "ping", "pInG"] {
+			let cmd = table.get_cmd(name).unwrap();
+			assert_eq!(cmd.meta().name, "PING");
+		}
+	}
+
+	#[test]
+	fn long_unknown_command_is_not_found() {
+		let table = CmdTable::new();
+		let name = "x".repeat(COMMAND_NAME_STACK_CAPACITY + 1);
+
+		assert!(table.get_cmd(&name).is_none());
 	}
 }
