@@ -23,7 +23,7 @@ use crate::write_stdout_line;
 const SCHEMA_VERSION: u32 = 1;
 const DEFAULT_REQUESTS: u64 = 200_000;
 const DEFAULT_CLIENTS: u64 = 100;
-const DEFAULT_RANDOM_KEYSPACE: u64 = 100_000;
+const DEFAULT_RANDOM_KEYSPACE: u64 = redis_benchmark::MAX_REDIS_RANDOM_SEED;
 const DEFAULT_PIPELINE_DEPTH: u64 = 50;
 const DEFAULT_STARTUP_TIMEOUT_SECONDS: u64 = 30;
 const DEFAULT_SETTLE_MILLIS: u64 = 1_000;
@@ -302,6 +302,7 @@ fn validate_shard_args(args: &ShardArgs) -> Result<(), String> {
 		("replica", args.replica),
 		("run attempt", args.run_attempt),
 		("requests", args.requests),
+		("seed requests", args.seed_requests.unwrap_or(args.requests)),
 		("clients", args.clients),
 		("random keyspace", args.random_keyspace),
 		("pipeline depth", args.pipeline_depth),
@@ -1382,6 +1383,43 @@ mod tests {
 			}
 		}
 		assert_eq!(ci_seeds.len(), 120);
+	}
+
+	#[test]
+	fn shard_args_reject_zero_seed_requests() {
+		let directory = tempdir().unwrap();
+		let main_binary = directory.path().join("main");
+		let pr_binary = directory.path().join("pr");
+		fs::write(&main_binary, []).unwrap();
+		fs::write(&pr_binary, []).unwrap();
+		let args = ShardArgs {
+			main_binary,
+			pr_binary,
+			commands: vec![ComparisonCommand::Get],
+			data_size: 512,
+			replica: 1,
+			run_attempt: 1,
+			requests: 1,
+			clients: 1,
+			random_keyspace: DEFAULT_RANDOM_KEYSPACE,
+			pipeline_depth: 50,
+			threads: None,
+			runtime_threads: None,
+			seed_requests: Some(0),
+			seed_base: 1,
+			settle_millis: 0,
+			startup_timeout_seconds: 1,
+			redis_benchmark: "redis-benchmark".into(),
+			redis_cli: "redis-cli".into(),
+			main_label: "main".into(),
+			pr_label: "pr".into(),
+			output_dir: directory.path().join("output"),
+		};
+
+		assert_eq!(
+			validate_shard_args(&args).unwrap_err(),
+			"seed requests must be greater than zero"
+		);
 	}
 
 	#[test]

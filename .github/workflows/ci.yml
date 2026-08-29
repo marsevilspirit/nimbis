@@ -390,7 +390,7 @@ jobs:
           --pr-label '${{ github.sha }}' \
           --requests 200000 \
           --clients 100 \
-          --random-keyspace 100000 \
+          --random-keyspace 2147483647 \
           --pipeline-depth 50 \
           --redis-benchmark "$GITHUB_WORKSPACE/artifacts/redis/redis-benchmark" \
           --redis-cli "$GITHUB_WORKSPACE/artifacts/redis/redis-cli" \
@@ -405,10 +405,220 @@ jobs:
         if-no-files-found: error
         retention-days: 30
 
+  benchmark_context:
+    name: Cross-database benchmark context (${{ matrix.data_size }} bytes)
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: [build_release, build_main_release, build_redis_benchmark]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        data_size: [512, 1024]
+    env:
+      REDIS_VERSION: "8.0.0"
+      PIKIWIDB_VERSION: "v3.5.7-alpha"
+      KVROCKS_VERSION: "2.16.0"
+
+    steps:
+    - name: Download Main release binary
+      uses: actions/download-artifact@v8
+      with:
+        name: nimbis-release-main-ubuntu-latest
+        path: artifacts/main
+
+    - name: Download PR release binaries
+      uses: actions/download-artifact@v8
+      with:
+        name: nimbis-release-ubuntu-latest
+        path: artifacts/pr
+
+    - name: Download Redis 8.0.0 benchmark client
+      uses: actions/download-artifact@v8
+      with:
+        name: redis-benchmark-8.0.0
+        path: artifacts/redis
+
+    - name: Make benchmark binaries executable
+      run: |
+        chmod +x artifacts/main/nimbis
+        chmod +x artifacts/pr/nimbis
+        chmod +x artifacts/pr/xtask
+        chmod +x artifacts/redis/redis-benchmark
+        chmod +x artifacts/redis/redis-cli
+
+    - name: Generate cross-database context
+      run: |
+        set -o pipefail
+        context_root="$GITHUB_WORKSPACE/benchmark-context"
+        context_runtime="$RUNNER_TEMP/nimbis-context-${{ matrix.data_size }}"
+        context_xtask="$GITHUB_WORKSPACE/artifacts/pr/xtask"
+        context_benchmark="$GITHUB_WORKSPACE/artifacts/redis/redis-benchmark"
+        context_cli="$GITHUB_WORKSPACE/artifacts/redis/redis-cli"
+        context_pid=""
+        context_container=""
+        mkdir -p "$context_root" "$context_runtime"
+
+        cleanup_server() {
+          if [[ -n "$context_pid" ]]; then
+            kill "$context_pid" >/dev/null 2>&1 || true
+            wait "$context_pid" >/dev/null 2>&1 || true
+            context_pid=""
+          fi
+          if [[ -n "$context_container" ]]; then
+            docker rm -f "$context_container" >/dev/null 2>&1 || true
+            context_container=""
+          fi
+        }
+        trap cleanup_server EXIT
+
+        wait_until_ready() {
+          for _ in {1..60}; do
+            if "$context_cli" -h 127.0.0.1 -p 6379 --raw PING 2>/dev/null | grep -qx PONG; then
+              return 0
+            fi
+            if [[ -n "$context_pid" ]] && ! kill -0 "$context_pid" 2>/dev/null; then
+              break
+            fi
+            if [[ -n "$context_container" ]] &&
+              ! docker inspect --format '{{.State.Running}}' "$context_container" 2>/dev/null | grep -qx true; then
+              break
+            fi
+            sleep 1
+          done
+          if [[ -n "$context_container" ]]; then
+            docker logs "$context_container" || true
+          fi
+          return 1
+        }
+
+        start_nimbis() {
+          local slug="$1"
+          local binary="$2"
+          local runtime="$context_runtime/$slug"
+          cleanup_server
+          mkdir -p "$runtime"
+          (
+            cd "$runtime"
+            exec env \
+              NIMBIS_OBJECT_STORE_URL=file:nimbis_store \
+              NIMBIS_TRACE_ENABLED=false \
+              "$binary" \
+              --host 127.0.0.1 \
+              --port 6379 \
+              --log-level error,nimbis::server=info
+          ) > "$context_root/$slug.log" 2>&1 &
+          context_pid=$!
+          wait_until_ready
+        }
+
+        start_container() {
+          local slug="$1"
+          local image="$2"
+          local container_port="$3"
+          shift 3
+          cleanup_server
+          context_container="nimbis-context-${{ github.run_id }}-${{ matrix.data_size }}-$slug"
+          docker run -d \
+            --name "$context_container" \
+            -p "6379:$container_port" \
+            "$image" "$@"
+          wait_until_ready
+        }
+
+        benchmark_server() {
+          local slug="$1"
+          for pipeline in 1 50; do
+            local output="$context_root/$slug-p$pipeline.txt"
+            : > "$output"
+            for command in get set hget hset lpush lpop sadd srem zadd zrem; do
+              "$context_xtask" redis-benchmark \
+                --profile comparison \
+                --command "$command" \
+                --n 200000 \
+                --c 100 \
+                --d ${{ matrix.data_size }} \
+                --p "$pipeline" \
+                --r 2147483647 \
+                --seed-n 200000 \
+                --seed 279000 \
+                --settle-millis 1000 \
+                --redis-benchmark "$context_benchmark" \
+                --redis-cli "$context_cli" \
+                --output-dir "$context_root/raw/$slug-p$pipeline-$command" \
+                >> "$output"
+            done
+          done
+          sed -E 's/, p50=[^,]+ msec//' \
+            "$context_root/$slug-p50.txt" \
+            > "$context_root/$slug-p50-report.txt"
+        }
+
+        start_nimbis \
+          nimbis-main \
+          "$GITHUB_WORKSPACE/artifacts/main/nimbis"
+        benchmark_server main
+
+        start_nimbis \
+          nimbis-feature \
+          "$GITHUB_WORKSPACE/artifacts/pr/nimbis"
+        benchmark_server feature
+
+        start_container redis "redis:$REDIS_VERSION" 6379
+        benchmark_server redis
+
+        start_container pikiwidb "pikadb/pika:$PIKIWIDB_VERSION" 9221
+        benchmark_server pikiwidb
+
+        start_container \
+          kvrocks \
+          "apache/kvrocks:$KVROCKS_VERSION" \
+          6666 \
+          --bind 0.0.0.0
+        benchmark_server kvrocks
+        cleanup_server
+
+        {
+          echo "# Cross-database benchmark context (${{ matrix.data_size }} byte payload)"
+          echo
+          echo "> Informational single-runner snapshot. Use the paired screening below for feature-vs-main regression decisions."
+          echo
+          echo "- Workload: \`N=200000\`, \`C=100\`, \`R=2147483647\`, \`seed=279000\`"
+          echo "- Servers: Nimbis Feature, Nimbis Main, Redis $REDIS_VERSION, PikiwiDB $PIKIWIDB_VERSION, Kvrocks v$KVROCKS_VERSION"
+          echo "- RPS: higher is better; P=1 p50: lower is better; P=50 p50 is intentionally omitted"
+          echo
+          "$context_xtask" compare-benchmarks \
+            --main "$context_root/main-p1.txt" \
+            --pr "$context_root/feature-p1.txt" \
+            --baseline "Redis $REDIS_VERSION=$context_root/redis-p1.txt" \
+            --baseline "PikiwiDB $PIKIWIDB_VERSION=$context_root/pikiwidb-p1.txt" \
+            --baseline "Kvrocks v$KVROCKS_VERSION=$context_root/kvrocks-p1.txt" \
+            --main-pipeline "$context_root/main-p50-report.txt" \
+            --pr-pipeline "$context_root/feature-p50-report.txt" \
+            --baseline-pipeline "Redis $REDIS_VERSION=$context_root/redis-p50-report.txt" \
+            --baseline-pipeline "PikiwiDB $PIKIWIDB_VERSION=$context_root/pikiwidb-p50-report.txt" \
+            --baseline-pipeline "Kvrocks v$KVROCKS_VERSION=$context_root/kvrocks-p50-report.txt" \
+            --main-label "Nimbis Main" \
+            --pr-label "Nimbis Feature" \
+            --pipeline-depth 50
+        } > "$context_root/benchmark_context_${{ matrix.data_size }}.md"
+
+    - name: Add cross-database context to job summary
+      run: cat benchmark-context/benchmark_context_${{ matrix.data_size }}.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload cross-database context
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: benchmark-context-${{ matrix.data_size }}
+        path: benchmark-context
+        if-no-files-found: error
+        retention-days: 30
+
   benchmark_aggregate:
     name: Aggregate Benchmark Results
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [build_release, benchmark]
+    needs: [build_release, benchmark, benchmark_context]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -430,14 +640,30 @@ jobs:
         path: benchmark-input
         merge-multiple: false
 
+    - name: Download cross-database context
+      uses: actions/download-artifact@v8
+      with:
+        pattern: benchmark-context-*
+        path: benchmark-context
+        merge-multiple: false
+
     - name: Generate aggregate benchmark report
       id: report
       continue-on-error: true
       run: |
         ./artifacts/pr/xtask benchmark-ci-report \
           --input-dir benchmark-input \
-          --output benchmark_report.md \
+          --output paired_report.md \
           --expected-replicas 3
+        {
+          cat benchmark-context/benchmark-context-512/benchmark_context_512.md
+          echo
+          cat benchmark-context/benchmark-context-1024/benchmark_context_1024.md
+          echo
+          echo "---"
+          echo
+          cat paired_report.md
+        } > benchmark_report.md
 
     - name: Add benchmark report to job summary
       if: ${{ always() }}
@@ -459,13 +685,20 @@ jobs:
         name: benchmark-results-${{ github.run_id }}
         path: |
           benchmark-input
+          benchmark-context
+          paired_report.md
           benchmark_report.md
         if-no-files-found: error
         retention-days: 30
         overwrite: true
 
     - name: Fail incomplete benchmark aggregation
-      if: ${{ needs.benchmark.result != 'success' || steps.report.outcome != 'success' }}
+      if: >-
+        ${{
+          needs.benchmark.result != 'success' ||
+          needs.benchmark_context.result != 'success' ||
+          steps.report.outcome != 'success'
+        }}
       run: exit 1
 
   benchmark_publish:
@@ -474,6 +707,7 @@ jobs:
       ${{
         github.event_name == 'pull_request' &&
         needs.benchmark_aggregate.result == 'success' &&
+        github.actor != 'dependabot[bot]' &&
         github.event.pull_request.head.repo.full_name == github.repository
       }}
     needs: benchmark_aggregate

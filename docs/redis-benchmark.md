@@ -63,11 +63,12 @@ accepted only after the child reports that it owns the port and answers a real
 are not part of `HEAD`.
 
 Defaults match one 512-byte pull request benchmark slot (`N=200000`, `C=100`,
-`D=512`, and `R=100000`). Existing environment variables and command options can
-be used for a smaller local run:
+`D=512`, and `R=2147483647`). The large random space keeps seeded SREM/ZREM
+measurements on the successful-removal path. Existing environment variables and
+command options can be used for a smaller local run:
 
 ```bash
-N=1000 C=10 D=128 R=1000 SEED_N=1000 \
+N=1000 C=10 D=128 R=2147483647 SEED_N=1000 \
   just redis-bench-compare main feature/my-change --pipeline-depth 16
 ```
 
@@ -81,10 +82,15 @@ and any running child server are cleaned up before exit.
 
 ## Pull Request Benchmark CI
 
-Pull request CI compares only the Main and PR Nimbis binaries. Redis, PikiwiDB,
-and Kvrocks are not mixed into this noisy change-detection path; cross-database
-comparisons should be run as a separate benchmark with separately controlled
-environments.
+Pull request CI publishes two separate views in one comment. A single-runner
+context snapshot shows absolute RPS and relative gaps for Nimbis Feature, Nimbis
+Main, Redis 8.0.0, PikiwiDB v3.5.7-alpha, and Kvrocks v2.16.0. It reports `P=1`
+RPS and p50 plus `P=50` RPS at 512 and 1024 bytes. The versions are pinned, the
+servers run sequentially, and the snapshot is informational rather than a gate.
+
+The paired Main/Feature screening remains separate from that cross-database
+snapshot. Redis, PikiwiDB, and Kvrocks are not mixed into its change-detection
+decision.
 
 The CI matrix has five independent command shards (`GET/SET`, `HGET/HSET`,
 `LPOP/LPUSH`, `SADD/SREM`, and `ZADD/ZREM`), two payload sizes, and three runner
@@ -94,7 +100,9 @@ runner at the same time.
 
 The isolated command workloads make `D` real for every cell: HGET fixtures use
 `D`-byte values, and SADD/SREM/ZADD/ZREM use `D`-byte random members. The other
-commands use Redis's built-in payload generation.
+commands use Redis's built-in payload generation. CI uses Redis 8's maximum
+random space so repeated random members do not turn a material share of the
+SREM/ZREM workload into misses.
 
 Each command/configuration cell uses a balanced four-pass block. Odd replicas
 run `Main, PR, PR, Main` (`ABBA`), while even replicas run `PR, Main, Main, PR`
@@ -103,7 +111,7 @@ branches receive the same deterministic random seed from the pinned Redis 8.0.0
 benchmark client. This makes the reported value a same-runner relative effect
 instead of a comparison of unrelated absolute measurements.
 
-The aggregate report contains:
+After the cross-database context tables, the aggregate screening report contains:
 
 - `P=1` throughput effects with a ±5% screening materiality band
 - pipelined throughput effects with a ±8% screening materiality band

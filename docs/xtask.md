@@ -60,7 +60,8 @@ cargo xtask compare-benchmarks \
 ```
 
 Reports include both throughput and p50 latency when the input uses
-`redis-benchmark` quiet output with latency data.
+`redis-benchmark` quiet output with latency data. Main, PR, and every named
+baseline must contain the same command set.
 
 Optional `--main-label`, `--pr-label`, and `--pipeline-depth` arguments customize
 the report columns and pipeline heading. Their defaults preserve the CI report's

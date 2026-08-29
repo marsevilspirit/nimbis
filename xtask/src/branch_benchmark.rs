@@ -29,7 +29,7 @@ use crate::write_stdout_line;
 const DEFAULT_REQUESTS: u64 = 200_000;
 const DEFAULT_CLIENTS: u64 = 100;
 const DEFAULT_DATA_SIZE: u64 = 512;
-const DEFAULT_RANDOM_KEYSPACE: u64 = 100_000;
+const DEFAULT_RANDOM_KEYSPACE: u64 = redis_benchmark::MAX_REDIS_RANDOM_SEED;
 const DEFAULT_PIPELINE_DEPTH: u64 = 50;
 const DEFAULT_STARTUP_TIMEOUT_SECONDS: u64 = 15;
 
@@ -55,7 +55,7 @@ pub struct Args {
 	#[arg(long = "d")]
 	pub data_size: Option<u64>,
 
-	/// Random key space. Defaults to R or 100000.
+	/// Random key space. Defaults to R or 2147483647.
 	#[arg(long = "r")]
 	pub random_keyspace: Option<u64>,
 
@@ -1057,7 +1057,10 @@ mod tests {
 		assert_eq!(config.requests, 200_000);
 		assert_eq!(config.clients, 100);
 		assert_eq!(config.data_size, 512);
-		assert_eq!(config.random_keyspace, 100_000);
+		assert_eq!(
+			config.random_keyspace,
+			redis_benchmark::MAX_REDIS_RANDOM_SEED
+		);
 		assert_eq!(config.pipeline_depth, 50);
 	}
 

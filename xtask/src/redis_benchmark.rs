@@ -216,6 +216,9 @@ impl Config {
 		if config.command.is_some() && config.profile != Profile::Comparison {
 			return Err("--command requires --profile comparison".into());
 		}
+		if config.seed_requests == 0 {
+			return Err("--seed-n must be greater than zero".into());
+		}
 		if config.seed.is_some_and(|seed| seed > MAX_REDIS_RANDOM_SEED) {
 			return Err(format!(
 				"--seed must not exceed {MAX_REDIS_RANDOM_SEED} for Redis 8 compatibility"
@@ -1178,6 +1181,18 @@ mod tests {
 		assert_eq!(config.seed, Some(42));
 		assert_eq!(config.settle_millis, 1_000);
 		assert_eq!(ComparisonCommand::Srem.as_str(), "SREM");
+	}
+
+	#[test]
+	fn config_rejects_zero_seed_requests() {
+		let args = Args {
+			seed_requests: Some(0),
+			..Args::default()
+		};
+
+		let error = Config::from_args(&args, Path::new("/repo")).unwrap_err();
+
+		assert_eq!(error, "--seed-n must be greater than zero");
 	}
 
 	#[test]
