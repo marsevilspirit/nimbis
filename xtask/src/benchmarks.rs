@@ -299,7 +299,9 @@ fn push_latency_table(
 		return;
 	}
 
-	report.push_str("\n#### p50 Latency (ms, lower is better)\n\n");
+	report.push_str(
+		"\n#### p50 Latency (ms; lower raw values and positive comparisons are better)\n\n",
+	);
 	let mut headers = vec![
 		"Command".to_string(),
 		format!("{} p50", sanitize_markdown_table_text(pr_label)),
@@ -365,12 +367,12 @@ fn format_latency_difference(
 		return "-".to_string();
 	}
 
-	let difference = ((candidate - reference) / reference) * 100.0;
-	let icon = if trophy && difference < 0.0 {
+	let difference = ((reference - candidate) / reference) * 100.0;
+	let icon = if trophy && difference > 0.0 {
 		"🏆 "
-	} else if difference < -5.0 {
-		"✅ "
 	} else if difference > 5.0 {
+		"✅ "
+	} else if difference < -5.0 {
 		"⚠️ "
 	} else {
 		""
@@ -558,9 +560,11 @@ mod tests {
 		assert!(report.contains(
 			"| GET | 190.00 | 200.00 | 180.00 | 170.00 | 160.00 | -5.00% | 🏆 +5.56% | 🏆 +11.76% | 🏆 +18.75% |"
 		));
-		assert!(report.contains("#### p50 Latency (ms, lower is better)"));
 		assert!(report.contains(
-			"| SET | 0.080 | 0.100 | 0.040 | 0.160 | 0.100 | ✅ -20.00% | ⚠️ +100.00% | 🏆 -50.00% | 🏆 -20.00% |"
+			"#### p50 Latency (ms; lower raw values and positive comparisons are better)"
+		));
+		assert!(report.contains(
+			"| SET | 0.080 | 0.100 | 0.040 | 0.160 | 0.100 | ✅ +20.00% | ⚠️ -100.00% | 🏆 +50.00% | 🏆 +20.00% |"
 		));
 	}
 
