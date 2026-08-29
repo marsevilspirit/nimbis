@@ -1124,8 +1124,8 @@ fn push_p1_latency_table(
 ) {
 	report.push_str(
 		"## P=1 p50 latency (informational)\n\n\
-Latency remains descriptive while p95/p99 collection and null calibration are added.\n\n\
-| Command | Bytes | p50 Blocks | Median Δ | Median PR-Main Δ | MAD | Range |\n\
+Latency remains descriptive while p95/p99 collection and null calibration are added. Positive improvements mean lower candidate latency.\n\n\
+| Command | Bytes | p50 Blocks | Median improvement | Median Main-PR Δ | MAD | Improvement range |\n\
 |---|---:|---:|---:|---:|---:|---:|\n",
 	);
 	for ((command, data_size, depth), replicas) in groups {
@@ -1149,11 +1149,11 @@ Latency remains descriptive while p95/p99 collection and null calibration are ad
 			"| {command} | {data_size} | {}/{} | {:+.2}% | {:+.3} ms | {:.2} pp | {:+.2}%..{:+.2}% |\n",
 			effects.len(),
 			replicas.len(),
-			summary.median_delta,
-			summary.median_absolute_delta,
+			-summary.median_delta,
+			-summary.median_absolute_delta,
 			summary.mad,
-			summary.min_delta,
-			summary.max_delta,
+			-summary.max_delta,
+			-summary.min_delta,
 		));
 	}
 	report.push('\n');
@@ -1515,6 +1515,9 @@ mod tests {
 		assert!(report.contains("## P=50 RPS paired effects"));
 		assert!(report.contains("| GET | 512 | 3 |"));
 		assert!(report.contains("| ZREM | 1024 | 3 |"));
+		assert!(
+			report.contains("| GET | 512 | 3/3 | -1.00% | -0.010 ms | 0.00 pp | -1.00%..-1.00% |")
+		);
 	}
 
 	#[test]
