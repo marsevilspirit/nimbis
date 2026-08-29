@@ -594,7 +594,7 @@ fn run_benchmark_pass(
 			output_dir: Some(suites_dir.display().to_string()),
 			seed_requests: Some(config.seed_requests),
 			command: None,
-			seed: None,
+			seed: Some(redis_benchmark::DEFAULT_COMPARISON_SEED),
 			settle_millis: None,
 			redis_benchmark: Some(config.redis_benchmark.clone()),
 			redis_cli: Some(config.redis_cli.clone()),
@@ -648,7 +648,7 @@ fn build_full_report(
 		"# Nimbis Redis Benchmark Branch Comparison\n\n\
 - Base: `{}` (`{}`)\n\
 - Head: `{}` (`{}`)\n\
-- Workload: `N={}`, `C={}`, `D={}`, `R={}`, `SEED_N={}`\n\
+- Workload: `N={}`, `C={}`, `D={}`, `R={}`, `SEED_N={}`, `seed={}`\n\
 - Profiles: `P=1` and `P={}`\n\
 - Threads: redis-benchmark `{}`, Nimbis runtime `{}`\n\
 - Execution: sequential runs with isolated local file stores\n\n\
@@ -662,6 +662,7 @@ fn build_full_report(
 		config.data_size,
 		config.random_keyspace,
 		config.seed_requests,
+		redis_benchmark::DEFAULT_COMPARISON_SEED,
 		config.pipeline_depth,
 		optional_value(config.threads, "default"),
 		optional_value(config.runtime_threads, "auto"),
@@ -1165,7 +1166,7 @@ mod tests {
 
 		assert!(report.contains("Base: `main` (`aaaaaaaaaaaaaaaa`)"));
 		assert!(report.contains("Head: `feature/perf` (`bbbbbbbbbbbbbbbb`)"));
-		assert!(report.contains("`N=100`, `C=2`, `D=16`, `R=10`, `SEED_N=20`"));
+		assert!(report.contains("`N=100`, `C=2`, `D=16`, `R=10`, `SEED_N=20`, `seed=279000`"));
 		assert!(report.contains("Profiles: `P=1` and `P=50`"));
 		assert!(report.contains("redis-benchmark `3`, Nimbis runtime `4`"));
 	}

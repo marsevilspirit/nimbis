@@ -18,6 +18,7 @@ use crate::write_stdout_line;
 const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd,lrange";
 const RANDOM_TOKEN: &str = "__rand_int__";
 pub(crate) const MAX_REDIS_RANDOM_SEED: u64 = i32::MAX as u64;
+pub(crate) const DEFAULT_COMPARISON_SEED: u64 = 279_000;
 pub(crate) const COMPARISON_PROFILE_COMMANDS: &[&str] = &[
 	"GET", "HGET", "HSET", "LPOP", "LPUSH", "SADD", "SET", "SREM", "ZADD", "ZREM",
 ];
@@ -77,7 +78,8 @@ pub struct Args {
 	#[arg(long, value_enum)]
 	pub command: Option<ComparisonCommand>,
 
-	/// Deterministic redis-benchmark random seed (Redis 8 or newer).
+	/// Deterministic redis-benchmark random seed (Redis 8 or newer). Defaults
+	/// to 279000 for the comparison profile.
 	#[arg(long)]
 	pub seed: Option<u64>,
 
@@ -202,7 +204,9 @@ impl Config {
 			output_dir,
 			seed_requests: option_or_env_u64(args.seed_requests, "SEED_N", requests)?,
 			command: args.command,
-			seed: args.seed,
+			seed: args.seed.or_else(|| {
+				(args.profile == Profile::Comparison).then_some(DEFAULT_COMPARISON_SEED)
+			}),
 			settle_millis: args.settle_millis.unwrap_or(0),
 			redis_benchmark: option_or_env_string(
 				args.redis_benchmark.as_deref(),
@@ -1044,7 +1048,7 @@ mod tests {
 			output_dir,
 			seed_requests: 7,
 			command: None,
-			seed: None,
+			seed: (profile == Profile::Comparison).then_some(DEFAULT_COMPARISON_SEED),
 			settle_millis: 0,
 			redis_benchmark: "/bin/echo".into(),
 			redis_cli: "/bin/echo".into(),
@@ -1151,6 +1155,7 @@ mod tests {
 		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
 
 		assert_eq!(config.profile, Profile::Comparison);
+		assert_eq!(config.seed, Some(DEFAULT_COMPARISON_SEED));
 	}
 
 	#[test]
@@ -1486,10 +1491,19 @@ mod tests {
 			benchmarked_command_set(COMPARISON_PROFILE_COMMANDS)
 		);
 		assert!(runner.streaming_calls.borrow().iter().all(|call| {
-			call.args.windows(2).all(|window| {
-				window[0] != "-t" || !window[1].split(',').any(|test| test == "lrange")
-			})
+			args_contain_pair(&call.args, "--seed", "279000")
+				&& call.args.windows(2).all(|window| {
+					window[0] != "-t" || !window[1].split(',').any(|test| test == "lrange")
+				})
 		}));
+		assert!(
+			runner
+				.status_calls
+				.borrow()
+				.iter()
+				.filter(|call| call.args.iter().any(|arg| arg == "-n"))
+				.all(|call| args_contain_pair(&call.args, "--seed", "279000"))
+		);
 		let setup_calls = runner.status_commands("/bin/echo");
 		assert!(
 			setup_calls

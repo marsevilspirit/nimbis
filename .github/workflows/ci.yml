@@ -614,6 +614,7 @@ jobs:
         path: benchmark-context
         if-no-files-found: error
         retention-days: 30
+        overwrite: true
 
   benchmark_aggregate:
     name: Aggregate Benchmark Results

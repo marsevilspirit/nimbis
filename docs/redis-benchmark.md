@@ -63,9 +63,10 @@ accepted only after the child reports that it owns the port and answers a real
 are not part of `HEAD`.
 
 Defaults match one 512-byte pull request benchmark slot (`N=200000`, `C=100`,
-`D=512`, and `R=2147483647`). The large random space keeps seeded SREM/ZREM
-measurements on the successful-removal path. Existing environment variables and
-command options can be used for a smaller local run:
+`D=512`, and `R=2147483647`). A Redis 8 or newer benchmark client uses the same
+deterministic seed (`279000`) for fixture setup and measurement; the large random
+space then keeps SREM/ZREM on the successful-removal path. Existing environment
+variables and command options can be used for a smaller local run:
 
 ```bash
 N=1000 C=10 D=128 R=2147483647 SEED_N=1000 \
@@ -181,10 +182,10 @@ The same values can be passed as CLI flags:
 cargo xtask redis-benchmark --n 10000 --c 100 --p 16 --threads 4
 ```
 
-The comparison profile can also isolate one command. `--seed` requires a Redis
-8 or newer benchmark client, accepts Redis 8's integer range up to `2147483647`,
-and makes the random-key stream deterministic; `--settle-millis` controls the
-pause between fixture setup and measurement.
+The comparison profile can also isolate one command. It requires a Redis 8 or
+newer benchmark client and defaults to deterministic seed `279000`; `--seed`
+accepts Redis 8's integer range up to `2147483647` and overrides that default.
+`--settle-millis` controls the pause between fixture setup and measurement.
 
 ```bash
 cargo xtask redis-benchmark --profile comparison --command get \
