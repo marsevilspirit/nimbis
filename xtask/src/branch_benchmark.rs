@@ -29,7 +29,7 @@ use crate::write_stdout_line;
 const DEFAULT_REQUESTS: u64 = 200_000;
 const DEFAULT_CLIENTS: u64 = 100;
 const DEFAULT_DATA_SIZE: u64 = 512;
-const DEFAULT_RANDOM_KEYSPACE: u64 = 100_000;
+const DEFAULT_RANDOM_KEYSPACE: u64 = redis_benchmark::MAX_REDIS_RANDOM_SEED;
 const DEFAULT_PIPELINE_DEPTH: u64 = 50;
 const DEFAULT_STARTUP_TIMEOUT_SECONDS: u64 = 15;
 
@@ -55,7 +55,7 @@ pub struct Args {
 	#[arg(long = "d")]
 	pub data_size: Option<u64>,
 
-	/// Random key space. Defaults to R or 100000.
+	/// Random key space. Defaults to R or 2147483647.
 	#[arg(long = "r")]
 	pub random_keyspace: Option<u64>,
 
@@ -224,12 +224,12 @@ struct BenchmarkTarget {
 }
 
 #[derive(Clone, Debug)]
-struct Cancellation {
+pub(crate) struct Cancellation {
 	requested: Arc<AtomicBool>,
 }
 
 impl Cancellation {
-	fn install() -> Result<Self, String> {
+	pub(crate) fn install() -> Result<Self, String> {
 		let cancellation = Self::new();
 		let signal_cancellation = cancellation.clone();
 		ctrlc::set_handler(move || signal_cancellation.request())
@@ -247,7 +247,7 @@ impl Cancellation {
 		self.requested.store(true, Ordering::SeqCst);
 	}
 
-	fn check(&self) -> Result<(), String> {
+	pub(crate) fn check(&self) -> Result<(), String> {
 		if self.requested.load(Ordering::SeqCst) {
 			Err("Benchmark comparison interrupted".into())
 		} else {
@@ -593,6 +593,9 @@ fn run_benchmark_pass(
 			force_quiet: true,
 			output_dir: Some(suites_dir.display().to_string()),
 			seed_requests: Some(config.seed_requests),
+			command: None,
+			seed: Some(redis_benchmark::DEFAULT_COMPARISON_SEED),
+			settle_millis: None,
 			redis_benchmark: Some(config.redis_benchmark.clone()),
 			redis_cli: Some(config.redis_cli.clone()),
 			extra_args: Vec::new(),
@@ -645,7 +648,7 @@ fn build_full_report(
 		"# Nimbis Redis Benchmark Branch Comparison\n\n\
 - Base: `{}` (`{}`)\n\
 - Head: `{}` (`{}`)\n\
-- Workload: `N={}`, `C={}`, `D={}`, `R={}`, `SEED_N={}`\n\
+- Workload: `N={}`, `C={}`, `D={}`, `R={}`, `SEED_N={}`, `seed={}`\n\
 - Profiles: `P=1` and `P={}`\n\
 - Threads: redis-benchmark `{}`, Nimbis runtime `{}`\n\
 - Execution: sequential runs with isolated local file stores\n\n\
@@ -659,6 +662,7 @@ fn build_full_report(
 		config.data_size,
 		config.random_keyspace,
 		config.seed_requests,
+		redis_benchmark::DEFAULT_COMPARISON_SEED,
 		config.pipeline_depth,
 		optional_value(config.threads, "default"),
 		optional_value(config.runtime_threads, "auto"),
@@ -722,13 +726,13 @@ fn combine_suite_outputs(suites_dir: &Path, output_path: &Path) -> Result<(), St
 	Ok(())
 }
 
-struct ServerProcess {
+pub(crate) struct ServerProcess {
 	child: Option<Child>,
 	log_path: PathBuf,
 }
 
 impl ServerProcess {
-	fn start(
+	pub(crate) fn start(
 		binary: &Path,
 		runtime_dir: &Path,
 		log_path: &Path,
@@ -764,7 +768,7 @@ impl ServerProcess {
 		})
 	}
 
-	fn wait_until_ready(
+	pub(crate) fn wait_until_ready(
 		&mut self,
 		redis_cli: &str,
 		host: &str,
@@ -852,7 +856,7 @@ impl ServerProcess {
 		Ok(())
 	}
 
-	fn stop(&mut self) -> Result<(), String> {
+	pub(crate) fn stop(&mut self) -> Result<(), String> {
 		let Some(child) = self.child.as_mut() else {
 			return Ok(());
 		};
@@ -916,7 +920,7 @@ fn create_run_dir(output_parent: &Path) -> Result<PathBuf, String> {
 		})
 }
 
-fn pick_available_port() -> Result<u16, String> {
+pub(crate) fn pick_available_port() -> Result<u16, String> {
 	let listener = TcpListener::bind(("127.0.0.1", 0))
 		.map_err(|error| format!("Failed to select an available port: {error}"))?;
 	listener
@@ -925,7 +929,7 @@ fn pick_available_port() -> Result<u16, String> {
 		.map_err(|error| format!("Failed to inspect selected port: {error}"))
 }
 
-fn ensure_port_available(port: u16) -> Result<(), String> {
+pub(crate) fn ensure_port_available(port: u16) -> Result<(), String> {
 	TcpListener::bind(("127.0.0.1", port))
 		.map(|_| ())
 		.map_err(|error| format!("Port {port} is not available on 127.0.0.1: {error}"))
@@ -1054,7 +1058,10 @@ mod tests {
 		assert_eq!(config.requests, 200_000);
 		assert_eq!(config.clients, 100);
 		assert_eq!(config.data_size, 512);
-		assert_eq!(config.random_keyspace, 100_000);
+		assert_eq!(
+			config.random_keyspace,
+			redis_benchmark::MAX_REDIS_RANDOM_SEED
+		);
 		assert_eq!(config.pipeline_depth, 50);
 	}
 
@@ -1159,7 +1166,7 @@ mod tests {
 
 		assert!(report.contains("Base: `main` (`aaaaaaaaaaaaaaaa`)"));
 		assert!(report.contains("Head: `feature/perf` (`bbbbbbbbbbbbbbbb`)"));
-		assert!(report.contains("`N=100`, `C=2`, `D=16`, `R=10`, `SEED_N=20`"));
+		assert!(report.contains("`N=100`, `C=2`, `D=16`, `R=10`, `SEED_N=20`, `seed=279000`"));
 		assert!(report.contains("Profiles: `P=1` and `P=50`"));
 		assert!(report.contains("redis-benchmark `3`, Nimbis runtime `4`"));
 	}

@@ -7,6 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
+use std::thread;
+use std::time::Duration;
 
 use clap::Args as ClapArgs;
 use clap::ValueEnum;
@@ -14,6 +16,9 @@ use clap::ValueEnum;
 use crate::write_stdout_line;
 
 const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd,lrange";
+const RANDOM_TOKEN: &str = "__rand_int__";
+pub(crate) const MAX_REDIS_RANDOM_SEED: u64 = i32::MAX as u64;
+pub(crate) const DEFAULT_COMPARISON_SEED: u64 = 279_000;
 pub(crate) const COMPARISON_PROFILE_COMMANDS: &[&str] = &[
 	"GET", "HGET", "HSET", "LPOP", "LPUSH", "SADD", "SET", "SREM", "ZADD", "ZREM",
 ];
@@ -69,6 +74,19 @@ pub struct Args {
 	#[arg(long = "seed-n")]
 	pub seed_requests: Option<u64>,
 
+	/// Comparison-profile command to benchmark in isolation.
+	#[arg(long, value_enum)]
+	pub command: Option<ComparisonCommand>,
+
+	/// Deterministic redis-benchmark random seed (Redis 8 or newer). Defaults
+	/// to 279000 for the comparison profile.
+	#[arg(long)]
+	pub seed: Option<u64>,
+
+	/// Milliseconds to wait after seeding fixtures before measurement.
+	#[arg(long, default_value = "0")]
+	pub settle_millis: Option<u64>,
+
 	/// Override redis-benchmark binary name/path.
 	#[arg(long)]
 	pub redis_benchmark: Option<String>,
@@ -95,6 +113,52 @@ pub enum Profile {
 	Comparison,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ComparisonCommand {
+	Get,
+	Set,
+	Hget,
+	Hset,
+	Lpush,
+	Lpop,
+	Sadd,
+	Srem,
+	Zadd,
+	Zrem,
+}
+
+impl ComparisonCommand {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Get => "GET",
+			Self::Set => "SET",
+			Self::Hget => "HGET",
+			Self::Hset => "HSET",
+			Self::Lpush => "LPUSH",
+			Self::Lpop => "LPOP",
+			Self::Sadd => "SADD",
+			Self::Srem => "SREM",
+			Self::Zadd => "ZADD",
+			Self::Zrem => "ZREM",
+		}
+	}
+
+	fn label(self) -> &'static str {
+		match self {
+			Self::Get => "get",
+			Self::Set => "set",
+			Self::Hget => "hget",
+			Self::Hset => "hset",
+			Self::Lpush => "lpush",
+			Self::Lpop => "lpop",
+			Self::Sadd => "sadd",
+			Self::Srem => "srem",
+			Self::Zadd => "zadd",
+			Self::Zrem => "zrem",
+		}
+	}
+}
+
 #[derive(Debug)]
 struct Config {
 	host: String,
@@ -108,6 +172,9 @@ struct Config {
 	csv: bool,
 	output_dir: PathBuf,
 	seed_requests: u64,
+	command: Option<ComparisonCommand>,
+	seed: Option<u64>,
+	settle_millis: u64,
 	redis_benchmark: String,
 	redis_cli: String,
 	extra_args: Vec<String>,
@@ -124,7 +191,7 @@ impl Config {
 		);
 		let output_dir = resolve_output_dir(workspace_root, &output_dir);
 
-		Ok(Self {
+		let config = Self {
 			host: option_or_env_string(args.host.as_deref(), "HOST", "127.0.0.1"),
 			port: option_or_env_u16(args.port, "PORT", 6379)?,
 			requests,
@@ -136,6 +203,11 @@ impl Config {
 			csv: !args.force_quiet && (args.csv || env_bool("CSV")),
 			output_dir,
 			seed_requests: option_or_env_u64(args.seed_requests, "SEED_N", requests)?,
+			command: args.command,
+			seed: args.seed.or_else(|| {
+				(args.profile == Profile::Comparison).then_some(DEFAULT_COMPARISON_SEED)
+			}),
+			settle_millis: args.settle_millis.unwrap_or(0),
 			redis_benchmark: option_or_env_string(
 				args.redis_benchmark.as_deref(),
 				"REDIS_BENCHMARK",
@@ -144,7 +216,19 @@ impl Config {
 			redis_cli: option_or_env_string(args.redis_cli.as_deref(), "REDIS_CLI", "redis-cli"),
 			extra_args: args.extra_args.clone(),
 			profile: args.profile,
-		})
+		};
+		if config.command.is_some() && config.profile != Profile::Comparison {
+			return Err("--command requires --profile comparison".into());
+		}
+		if config.seed_requests == 0 {
+			return Err("--seed-n must be greater than zero".into());
+		}
+		if config.seed.is_some_and(|seed| seed > MAX_REDIS_RANDOM_SEED) {
+			return Err(format!(
+				"--seed must not exceed {MAX_REDIS_RANDOM_SEED} for Redis 8 compatibility"
+			));
+		}
+		Ok(config)
 	}
 
 	fn benchmark_base_args(&self) -> Vec<String> {
@@ -164,6 +248,10 @@ impl Config {
 			"-P".to_string(),
 			self.pipeline.to_string(),
 		];
+		if let Some(seed) = self.seed {
+			args.push("--seed".to_string());
+			args.push(seed.to_string());
+		}
 
 		if let Some(threads) = self.threads {
 			args.push("--threads".to_string());
@@ -222,15 +310,22 @@ fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 	write_stdout_line("")?;
 
 	redis_cli(config, runner, &["FLUSHDB"])?;
-	seed_fixed_data(config, runner)?;
-	seed_random_data(config, runner)?;
-	match config.profile {
-		Profile::Full => {
-			run_builtin_suite(config, runner)?;
-			run_custom_suite(config, runner)?;
-			run_control_smoke_suite(config, runner)?;
+	if let Some(command) = config.command {
+		seed_comparison_command(config, runner, command)?;
+		settle_after_seed(config);
+		run_comparison_command(config, runner, command)?;
+	} else {
+		seed_fixed_data(config, runner)?;
+		seed_random_data(config, runner)?;
+		settle_after_seed(config);
+		match config.profile {
+			Profile::Full => {
+				run_builtin_suite(config, runner)?;
+				run_custom_suite(config, runner)?;
+				run_control_smoke_suite(config, runner)?;
+			}
+			Profile::Comparison => run_comparison_suite(config, runner)?,
 		}
-		Profile::Comparison => run_comparison_suite(config, runner)?,
 	}
 
 	write_stdout_line("")?;
@@ -239,6 +334,101 @@ fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 		config.output_dir.display()
 	))?;
 	Ok(())
+}
+
+fn seed_comparison_command<R: Runner>(
+	config: &Config,
+	runner: &R,
+	command: ComparisonCommand,
+) -> Result<(), String> {
+	match command {
+		ComparisonCommand::Get => seed_benchmark(config, runner, &["-t", "set"]),
+		ComparisonCommand::Hget => {
+			let value = fixed_payload(config.data_size)?;
+			redis_cli(config, runner, &["HSET", "bench:hash", "field1", &value])
+		}
+		ComparisonCommand::Lpop => seed_benchmark(config, runner, &["-t", "lpush"]),
+		ComparisonCommand::Srem => {
+			let member = random_payload(config.data_size)?;
+			seed_benchmark(config, runner, &["SADD", "bench:set:srem", &member])
+		}
+		ComparisonCommand::Zrem => {
+			let member = random_payload(config.data_size)?;
+			seed_benchmark(config, runner, &["ZADD", "bench:zset:zrem", "1", &member])
+		}
+		ComparisonCommand::Set
+		| ComparisonCommand::Hset
+		| ComparisonCommand::Lpush
+		| ComparisonCommand::Sadd
+		| ComparisonCommand::Zadd => Ok(()),
+	}
+}
+
+fn run_comparison_command<R: Runner>(
+	config: &Config,
+	runner: &R,
+	command: ComparisonCommand,
+) -> Result<(), String> {
+	let label = command.label();
+	match command {
+		ComparisonCommand::Get
+		| ComparisonCommand::Set
+		| ComparisonCommand::Hset
+		| ComparisonCommand::Lpush
+		| ComparisonCommand::Lpop => run_benchmark(config, runner, label, &["-t", label]),
+		ComparisonCommand::Hget => {
+			run_benchmark(config, runner, label, &["HGET", "bench:hash", "field1"])
+		}
+		ComparisonCommand::Sadd => {
+			let member = random_payload(config.data_size)?;
+			run_benchmark(config, runner, label, &["SADD", "bench:set:sadd", &member])
+		}
+		ComparisonCommand::Srem => {
+			let member = random_payload(config.data_size)?;
+			run_benchmark(config, runner, label, &["SREM", "bench:set:srem", &member])
+		}
+		ComparisonCommand::Zadd => {
+			let member = random_payload(config.data_size)?;
+			run_benchmark(
+				config,
+				runner,
+				label,
+				&["ZADD", "bench:zset:zadd", RANDOM_TOKEN, &member],
+			)
+		}
+		ComparisonCommand::Zrem => {
+			let member = random_payload(config.data_size)?;
+			run_benchmark(config, runner, label, &["ZREM", "bench:zset:zrem", &member])
+		}
+	}
+}
+
+fn fixed_payload(data_size: u64) -> Result<String, String> {
+	let data_size = usize::try_from(data_size)
+		.map_err(|_| format!("data size {data_size} does not fit in memory"))?;
+	Ok("x".repeat(data_size))
+}
+
+fn random_payload(data_size: u64) -> Result<String, String> {
+	let data_size = usize::try_from(data_size)
+		.map_err(|_| format!("data size {data_size} does not fit in memory"))?;
+	if data_size < RANDOM_TOKEN.len() {
+		return Err(format!(
+			"data size must be at least {} for random member workloads",
+			RANDOM_TOKEN.len()
+		));
+	}
+	Ok(format!(
+		"{}{}",
+		"x".repeat(data_size - RANDOM_TOKEN.len()),
+		RANDOM_TOKEN
+	))
+}
+
+fn settle_after_seed(config: &Config) {
+	if config.settle_millis > 0 {
+		thread::sleep(Duration::from_millis(config.settle_millis));
+	}
 }
 
 fn seed_fixed_data<R: Runner>(config: &Config, runner: &R) -> Result<(), String> {
@@ -475,6 +665,10 @@ fn seed_benchmark<R: Runner>(
 		"-P".to_string(),
 		config.pipeline.to_string(),
 	];
+	if let Some(seed) = config.seed {
+		args.push("--seed".to_string());
+		args.push(seed.to_string());
+	}
 	args.extend(config.extra_args.clone());
 	args.extend(command_args.iter().map(|arg| (*arg).to_string()));
 	runner.run_status(&config.redis_benchmark, &args)
@@ -504,6 +698,7 @@ fn redis_cli<R: Runner>(config: &Config, runner: &R, command_args: &[&str]) -> R
 		config.host.clone(),
 		"-p".to_string(),
 		config.port.to_string(),
+		"-e".to_string(),
 	];
 	args.extend(command_args.iter().map(|arg| (*arg).to_string()));
 	runner.run_status(&config.redis_cli, &args)
@@ -808,6 +1003,11 @@ mod tests {
 				.eq(suffix.iter().copied())
 	}
 
+	fn args_contain_pair(args: &[String], option: &str, value: &str) -> bool {
+		args.windows(2)
+			.any(|window| window[0] == option && window[1] == value)
+	}
+
 	impl Runner for FakeRunner {
 		fn run_status(&self, program: &str, args: &[String]) -> Result<(), String> {
 			self.status_calls.borrow_mut().push(RecordedCall {
@@ -847,6 +1047,9 @@ mod tests {
 			csv: false,
 			output_dir,
 			seed_requests: 7,
+			command: None,
+			seed: (profile == Profile::Comparison).then_some(DEFAULT_COMPARISON_SEED),
+			settle_millis: 0,
 			redis_benchmark: "/bin/echo".into(),
 			redis_cli: "/bin/echo".into(),
 			extra_args: vec!["--cluster".into()],
@@ -866,6 +1069,9 @@ mod tests {
 		assert_eq!(config.data_size, 128);
 		assert_eq!(config.pipeline, 1);
 		assert_eq!(config.random_keyspace, 100000);
+		assert_eq!(config.command, None);
+		assert_eq!(config.seed, None);
+		assert_eq!(config.settle_millis, 0);
 		assert_eq!(config.output_dir, Path::new("/repo/target/redis-benchmark"));
 		assert_eq!(config.output_ext(), "txt");
 	}
@@ -949,6 +1155,210 @@ mod tests {
 		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
 
 		assert_eq!(config.profile, Profile::Comparison);
+		assert_eq!(config.seed, Some(DEFAULT_COMPARISON_SEED));
+	}
+
+	#[test]
+	fn full_profile_rejects_command_filter() {
+		let args = Args {
+			command: Some(ComparisonCommand::Get),
+			..Args::default()
+		};
+
+		let error = Config::from_args(&args, Path::new("/repo")).unwrap_err();
+
+		assert_eq!(error, "--command requires --profile comparison");
+	}
+
+	#[test]
+	fn config_keeps_seed_and_settle_millis() {
+		let args = Args {
+			profile: Profile::Comparison,
+			command: Some(ComparisonCommand::Srem),
+			seed: Some(42),
+			settle_millis: Some(1_000),
+			..Args::default()
+		};
+
+		let config = Config::from_args(&args, Path::new("/repo")).unwrap();
+
+		assert_eq!(config.command, Some(ComparisonCommand::Srem));
+		assert_eq!(config.seed, Some(42));
+		assert_eq!(config.settle_millis, 1_000);
+		assert_eq!(ComparisonCommand::Srem.as_str(), "SREM");
+	}
+
+	#[test]
+	fn config_rejects_zero_seed_requests() {
+		let args = Args {
+			seed_requests: Some(0),
+			..Args::default()
+		};
+
+		let error = Config::from_args(&args, Path::new("/repo")).unwrap_err();
+
+		assert_eq!(error, "--seed-n must be greater than zero");
+	}
+
+	#[test]
+	fn config_rejects_seed_above_redis_8_integer_range() {
+		let args = Args {
+			seed: Some(MAX_REDIS_RANDOM_SEED + 1),
+			..Args::default()
+		};
+
+		let error = Config::from_args(&args, Path::new("/repo")).unwrap_err();
+
+		assert!(error.contains(&MAX_REDIS_RANDOM_SEED.to_string()));
+	}
+
+	#[test]
+	fn comparison_command_fixtures_are_isolated() {
+		let tempdir = tempdir().unwrap();
+		let mut config = test_config(tempdir.path().join("fixtures"), Profile::Comparison);
+		config.seed = Some(42);
+
+		let cases: &[(ComparisonCommand, &[&str])] = &[
+			(ComparisonCommand::Get, &["-t", "set"]),
+			(
+				ComparisonCommand::Hget,
+				&["HSET", "bench:hash", "field1", "xxxxxxxxxxxxxxxx"],
+			),
+			(ComparisonCommand::Lpop, &["-t", "lpush"]),
+			(
+				ComparisonCommand::Srem,
+				&["SADD", "bench:set:srem", "xxxx__rand_int__"],
+			),
+			(
+				ComparisonCommand::Zrem,
+				&["ZADD", "bench:zset:zrem", "1", "xxxx__rand_int__"],
+			),
+		];
+		for (command, expected_suffix) in cases {
+			let runner = FakeRunner::default();
+
+			seed_comparison_command(&config, &runner, *command).unwrap();
+
+			let calls = runner.status_calls.borrow();
+			assert_eq!(calls.len(), 1, "fixture for {}", command.as_str());
+			assert!(args_end_with(&calls[0].args, expected_suffix));
+			if *command != ComparisonCommand::Hget {
+				assert!(args_contain_pair(&calls[0].args, "--seed", "42"));
+			}
+		}
+
+		for command in [
+			ComparisonCommand::Set,
+			ComparisonCommand::Hset,
+			ComparisonCommand::Lpush,
+			ComparisonCommand::Sadd,
+			ComparisonCommand::Zadd,
+		] {
+			let runner = FakeRunner::default();
+
+			seed_comparison_command(&config, &runner, command).unwrap();
+
+			assert!(
+				runner.status_calls.borrow().is_empty(),
+				"write fixture for {} must stay empty",
+				command.as_str()
+			);
+		}
+	}
+
+	#[test]
+	fn comparison_command_measurements_are_filtered() {
+		let tempdir = tempdir().unwrap();
+		let config = test_config(tempdir.path().to_path_buf(), Profile::Comparison);
+		for command in [
+			ComparisonCommand::Get,
+			ComparisonCommand::Set,
+			ComparisonCommand::Hget,
+			ComparisonCommand::Hset,
+			ComparisonCommand::Lpush,
+			ComparisonCommand::Lpop,
+			ComparisonCommand::Sadd,
+			ComparisonCommand::Srem,
+			ComparisonCommand::Zadd,
+			ComparisonCommand::Zrem,
+		] {
+			let runner = FakeRunner::default();
+
+			run_comparison_command(&config, &runner, command).unwrap();
+
+			assert_eq!(runner.streamed_labels(), vec![command.label()]);
+			assert_eq!(
+				runner.streamed_commands(),
+				benchmarked_command_set(&[command.as_str()])
+			);
+			if matches!(
+				command,
+				ComparisonCommand::Sadd
+					| ComparisonCommand::Srem
+					| ComparisonCommand::Zadd
+					| ComparisonCommand::Zrem
+			) {
+				let calls = runner.streaming_calls.borrow();
+				let member = calls[0].args.last().unwrap();
+				assert_eq!(member.len(), config.data_size as usize);
+				assert!(member.ends_with(RANDOM_TOKEN));
+			}
+		}
+	}
+
+	#[test]
+	fn comparison_payloads_match_the_configured_data_size() {
+		assert_eq!(fixed_payload(16).unwrap(), "xxxxxxxxxxxxxxxx");
+		assert_eq!(random_payload(16).unwrap(), "xxxx__rand_int__");
+		assert!(random_payload(11).is_err());
+	}
+
+	#[test]
+	fn redis_cli_setup_fails_on_server_errors() {
+		let tempdir = tempdir().unwrap();
+		let config = test_config(tempdir.path().to_path_buf(), Profile::Comparison);
+		let runner = FakeRunner::default();
+
+		redis_cli(&config, &runner, &["PING"]).unwrap();
+
+		let calls = runner.status_calls.borrow();
+		assert_eq!(calls.len(), 1);
+		assert!(calls[0].args.iter().any(|arg| arg == "-e"));
+		assert!(args_end_with(&calls[0].args, &["PING"]));
+	}
+
+	#[test]
+	fn selected_comparison_command_only_runs_that_command_with_seed() {
+		let tempdir = tempdir().unwrap();
+		let mut config = test_config(tempdir.path().join("redis-benchmark"), Profile::Comparison);
+		config.command = Some(ComparisonCommand::Get);
+		config.seed = Some(42);
+		let runner = FakeRunner::default();
+
+		run_with_runner(&config, &runner).unwrap();
+
+		assert_eq!(runner.streamed_labels(), vec!["get"]);
+		assert_eq!(
+			runner.streamed_commands(),
+			benchmarked_command_set(&["GET"])
+		);
+		let streaming_calls = runner.streaming_calls.borrow();
+		assert_eq!(streaming_calls.len(), 1);
+		assert!(args_contain_pair(&streaming_calls[0].args, "--seed", "42"));
+
+		let setup_calls = runner.status_calls.borrow();
+		let setup = setup_calls
+			.iter()
+			.find(|call| args_end_with(&call.args, &["-t", "set"]))
+			.expect("GET fixture should be seeded with SET");
+		assert!(args_contain_pair(&setup.args, "--seed", "42"));
+		assert!(!setup_calls.iter().any(|call| {
+			call.args
+				.iter()
+				.any(|arg| arg == "bench:string:a:__rand_int__")
+		}));
+		assert!(config.output_dir.join("get.txt").exists());
+		assert!(!config.output_dir.join("builtin_comparison.txt").exists());
 	}
 
 	#[test]
@@ -1081,10 +1491,19 @@ mod tests {
 			benchmarked_command_set(COMPARISON_PROFILE_COMMANDS)
 		);
 		assert!(runner.streaming_calls.borrow().iter().all(|call| {
-			call.args.windows(2).all(|window| {
-				window[0] != "-t" || !window[1].split(',').any(|test| test == "lrange")
-			})
+			args_contain_pair(&call.args, "--seed", "279000")
+				&& call.args.windows(2).all(|window| {
+					window[0] != "-t" || !window[1].split(',').any(|test| test == "lrange")
+				})
 		}));
+		assert!(
+			runner
+				.status_calls
+				.borrow()
+				.iter()
+				.filter(|call| call.args.iter().any(|arg| arg == "-n"))
+				.all(|call| args_contain_pair(&call.args, "--seed", "279000"))
+		);
 		let setup_calls = runner.status_commands("/bin/echo");
 		assert!(
 			setup_calls

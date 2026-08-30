@@ -9,8 +9,8 @@ use crate::write_stdout;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BenchmarkResult {
-	rps: f64,
-	p50_msec: Option<f64>,
+	pub(crate) rps: f64,
+	pub(crate) p50_msec: Option<f64>,
 }
 
 type BenchmarkMap = HashMap<String, BenchmarkResult>;
@@ -139,11 +139,45 @@ fn read_and_parse_benchmarks(
 			let (name, path) = parse_named_path(entry, benchmark_type)?;
 			let content = fs::read_to_string(&path)
 				.map_err(|_| format!("Failed to read {name} {benchmark_type} benchmark file"))?;
-			Ok((name, parse_benchmark(&content)))
+			let map = parse_benchmark(&content);
+			validate_baseline_map(&main_map, &map, &name, benchmark_type)?;
+			Ok((name, map))
 		})
 		.collect::<Result<_, String>>()?;
 
 	Ok((main_map, pr_map, baselines))
+}
+
+fn validate_baseline_map(
+	main_map: &BenchmarkMap,
+	baseline_map: &BenchmarkMap,
+	name: &str,
+	benchmark_type: &str,
+) -> Result<(), String> {
+	let type_label = if benchmark_type.is_empty() {
+		"standard"
+	} else {
+		benchmark_type
+	};
+	let expected = main_map.keys().collect::<BTreeSet<_>>();
+	let actual = baseline_map.keys().collect::<BTreeSet<_>>();
+	if expected == actual {
+		return Ok(());
+	}
+
+	let missing = expected
+		.difference(&actual)
+		.map(|command| command.as_str())
+		.collect::<Vec<_>>();
+	let unexpected = actual
+		.difference(&expected)
+		.map(|command| command.as_str())
+		.collect::<Vec<_>>();
+	Err(format!(
+		"Mismatched {type_label} baseline '{name}' commands; missing: [{}]; unexpected: [{}]",
+		missing.join(", "),
+		unexpected.join(", ")
+	))
 }
 
 fn push_comparison_table(
@@ -265,7 +299,9 @@ fn push_latency_table(
 		return;
 	}
 
-	report.push_str("\n#### p50 Latency (ms, lower is better)\n\n");
+	report.push_str(
+		"\n#### p50 Latency (ms; lower raw values and positive comparisons are better)\n\n",
+	);
 	let mut headers = vec![
 		"Command".to_string(),
 		format!("{} p50", sanitize_markdown_table_text(pr_label)),
@@ -331,12 +367,12 @@ fn format_latency_difference(
 		return "-".to_string();
 	}
 
-	let difference = ((candidate - reference) / reference) * 100.0;
-	let icon = if trophy && difference < 0.0 {
+	let difference = ((reference - candidate) / reference) * 100.0;
+	let icon = if trophy && difference > 0.0 {
 		"🏆 "
-	} else if difference < -5.0 {
-		"✅ "
 	} else if difference > 5.0 {
+		"✅ "
+	} else if difference < -5.0 {
 		"⚠️ "
 	} else {
 		""
@@ -443,16 +479,26 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let main = dir.path().join("main.txt");
 		let pr = dir.path().join("pr.txt");
-		let baseline = dir.path().join("redis.txt");
+		let redis = dir.path().join("redis.txt");
+		let pikiwidb = dir.path().join("pikiwidb.txt");
+		let kvrocks = dir.path().join("kvrocks.txt");
 		let main_pipeline = dir.path().join("main_pipeline.txt");
 		let pr_pipeline = dir.path().join("pr_pipeline.txt");
-		let baseline_pipeline = dir.path().join("redis_pipeline.txt");
+		let redis_pipeline = dir.path().join("redis_pipeline.txt");
+		let pikiwidb_pipeline = dir.path().join("pikiwidb_pipeline.txt");
+		let kvrocks_pipeline = dir.path().join("kvrocks_pipeline.txt");
 
 		std::fs::write(&main, "SET: 100.00 requests per second, p50=0.100 msec\n").unwrap();
 		std::fs::write(&pr, "SET: 110.00 requests per second, p50=0.080 msec\n").unwrap();
+		std::fs::write(&redis, "SET: 220.00 requests per second, p50=0.040 msec\n").unwrap();
 		std::fs::write(
-			&baseline,
-			"SET: 90.00 requests per second, p50=0.120 msec\n",
+			&pikiwidb,
+			"SET: 55.00 requests per second, p50=0.160 msec\n",
+		)
+		.unwrap();
+		std::fs::write(
+			&kvrocks,
+			"SET: 137.50 requests per second, p50=0.100 msec\n",
 		)
 		.unwrap();
 		std::fs::write(
@@ -466,18 +512,36 @@ mod tests {
 		)
 		.unwrap();
 		std::fs::write(
-			&baseline_pipeline,
+			&redis_pipeline,
 			"GET: 180.00 requests per second, p50=0.250 msec\n",
+		)
+		.unwrap();
+		std::fs::write(
+			&pikiwidb_pipeline,
+			"GET: 170.00 requests per second, p50=0.350 msec\n",
+		)
+		.unwrap();
+		std::fs::write(
+			&kvrocks_pipeline,
+			"GET: 160.00 requests per second, p50=0.400 msec\n",
 		)
 		.unwrap();
 
 		let args = Args {
 			main: main.display().to_string(),
 			pr: pr.display().to_string(),
-			baselines: vec![format!("Redis={}", baseline.display())],
+			baselines: vec![
+				format!("Redis={}", redis.display()),
+				format!("PikiwiDB={}", pikiwidb.display()),
+				format!("Kvrocks={}", kvrocks.display()),
+			],
 			main_pipeline: main_pipeline.display().to_string(),
 			pr_pipeline: pr_pipeline.display().to_string(),
-			baseline_pipelines: vec![format!("Redis={}", baseline_pipeline.display())],
+			baseline_pipelines: vec![
+				format!("Redis={}", redis_pipeline.display()),
+				format!("PikiwiDB={}", pikiwidb_pipeline.display()),
+				format!("Kvrocks={}", kvrocks_pipeline.display()),
+			],
 			main_label: "Main".into(),
 			pr_label: "PR".into(),
 			pipeline_depth: 50,
@@ -487,11 +551,34 @@ mod tests {
 
 		assert!(report.contains("### Benchmark Comparison 🚀"));
 		assert!(report.contains("### Pipeline Benchmark Comparison (-P 50) ⚡"));
-		assert!(report.contains("| SET | 110.00 | 100.00 | 90.00 | ✅ +10.00% | 🏆 +22.22% |"));
-		assert!(report.contains("#### p50 Latency (ms, lower is better)"));
-		assert!(report.contains("| SET | 0.080 | 0.100 | 0.120 | ✅ -20.00% | 🏆 -33.33% |"));
-		assert!(report.contains("| GET | 190.00 | 200.00 | 180.00 | -5.00% | 🏆 +5.56% |"));
-		assert!(report.contains("| GET | 0.300 | 0.200 | 0.250 | ⚠️ +50.00% | ⚠️ +20.00% |"));
+		assert!(report.contains(
+			"| Command | PR RPS | Main RPS | Redis RPS | PikiwiDB RPS | Kvrocks RPS | vs Main | vs Redis | vs PikiwiDB | vs Kvrocks |"
+		));
+		assert!(report.contains(
+			"| SET | 110.00 | 100.00 | 220.00 | 55.00 | 137.50 | ✅ +10.00% | -50.00% | 🏆 +100.00% | -20.00% |"
+		));
+		assert!(report.contains(
+			"| GET | 190.00 | 200.00 | 180.00 | 170.00 | 160.00 | -5.00% | 🏆 +5.56% | 🏆 +11.76% | 🏆 +18.75% |"
+		));
+		assert!(report.contains(
+			"#### p50 Latency (ms; lower raw values and positive comparisons are better)"
+		));
+		assert!(report.contains(
+			"| SET | 0.080 | 0.100 | 0.040 | 0.160 | 0.100 | ✅ +20.00% | ⚠️ -100.00% | 🏆 +50.00% | 🏆 +20.00% |"
+		));
+	}
+
+	#[test]
+	fn report_rejects_incomplete_baselines() {
+		let main = parse_benchmark("GET: 100.00 requests per second\n");
+		let baseline = parse_benchmark("SET: 100.00 requests per second\n");
+
+		let error = validate_baseline_map(&main, &baseline, "Redis", "").unwrap_err();
+
+		assert_eq!(
+			error,
+			"Mismatched standard baseline 'Redis' commands; missing: [GET]; unexpected: [SET]"
+		);
 	}
 
 	#[test]

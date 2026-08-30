@@ -5,6 +5,7 @@ use clap::Subcommand;
 use xtask::benchmarks;
 use xtask::branch_benchmark;
 use xtask::checks;
+use xtask::ci_benchmark;
 use xtask::redis_benchmark;
 use xtask::write_stderr_line;
 
@@ -25,6 +26,10 @@ enum Command {
 	CheckNumberedComments,
 	/// Compare benchmark outputs and print a Markdown report.
 	CompareBenchmarks(benchmarks::Args),
+	/// Run one command-sharded, paired benchmark block for CI.
+	BenchmarkCiShard(ci_benchmark::ShardArgs),
+	/// Aggregate command-sharded CI benchmark artifacts.
+	BenchmarkCiReport(ci_benchmark::ReportArgs),
 	/// Compare Redis benchmark results for two Git refs.
 	RedisBenchmarkCompare(branch_benchmark::Args),
 	/// Run redis-benchmark against a running Nimbis server.
@@ -47,6 +52,8 @@ fn main() {
 
 fn execute(command: Command, workspace_root: &Path) -> Result<(), String> {
 	match command {
+		Command::BenchmarkCiReport(args) => ci_benchmark::report(args),
+		Command::BenchmarkCiShard(args) => ci_benchmark::run_shard(args, workspace_root),
 		Command::CheckWorkspace => checks::check_workspace(workspace_root),
 		Command::CheckCodeFmt => checks::check_code_fmt(workspace_root),
 		Command::CheckNumberedComments => checks::check_numbered_comments(workspace_root),

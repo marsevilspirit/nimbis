@@ -1,6 +1,7 @@
 pub mod benchmarks;
 pub mod branch_benchmark;
 pub mod checks;
+pub mod ci_benchmark;
 pub mod redis_benchmark;
 
 use std::io::Write;

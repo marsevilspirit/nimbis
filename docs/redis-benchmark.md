@@ -63,11 +63,13 @@ accepted only after the child reports that it owns the port and answers a real
 are not part of `HEAD`.
 
 Defaults match one 512-byte pull request benchmark slot (`N=200000`, `C=100`,
-`D=512`, and `R=100000`). Existing environment variables and command options can
-be used for a smaller local run:
+`D=512`, and `R=2147483647`). A Redis 8 or newer benchmark client uses the same
+deterministic seed (`279000`) for fixture setup and measurement; the large random
+space then keeps SREM/ZREM on the successful-removal path. Existing environment
+variables and command options can be used for a smaller local run:
 
 ```bash
-N=1000 C=10 D=128 R=1000 SEED_N=1000 \
+N=1000 C=10 D=128 R=2147483647 SEED_N=1000 \
   just redis-bench-compare main feature/my-change --pipeline-depth 16
 ```
 
@@ -78,6 +80,67 @@ retained in that parent's `build-cache/` directory to speed up later comparisons
 The temporary source clone and object stores are removed after the command
 finishes. Pressing Ctrl-C requests a graceful stop so those temporary resources
 and any running child server are cleaned up before exit.
+
+## Pull Request Benchmark CI
+
+Pull request CI publishes two separate views in one comment. A single-runner
+context snapshot shows absolute RPS and relative gaps for Nimbis Feature, Nimbis
+Main, Redis 8.0.0, PikiwiDB v3.5.7-alpha, and Kvrocks v2.16.0. It reports `P=1`
+RPS and p50 plus `P=50` RPS at 512 and 1024 bytes. The versions are pinned, the
+servers run sequentially, and the snapshot is informational rather than a gate.
+
+The paired Main/Feature screening remains separate from that cross-database
+snapshot. Redis, PikiwiDB, and Kvrocks are not mixed into its change-detection
+decision.
+
+The CI matrix has five independent command shards (`GET/SET`, `HGET/HSET`,
+`LPOP/LPUSH`, `SADD/SREM`, and `ZADD/ZREM`), two payload sizes, and three runner
+replicas. Different shards run in parallel. Within one shard, commands, pipeline
+modes, and Main/PR passes remain sequential so competing servers never share a
+runner at the same time.
+
+The isolated command workloads make `D` real for every cell: HGET fixtures use
+`D`-byte values, and SADD/SREM/ZADD/ZREM use `D`-byte random members. The other
+commands use Redis's built-in payload generation. CI uses Redis 8's maximum
+random space so repeated random members do not turn a material share of the
+SREM/ZREM workload into misses.
+
+Each command/configuration cell uses a balanced four-pass block. Odd replicas
+run `Main, PR, PR, Main` (`ABBA`), while even replicas run `PR, Main, Main, PR`
+(`BAAB`). Every pass gets a fresh Nimbis process and object store, and both
+branches receive the same deterministic random seed from the pinned Redis 8.0.0
+benchmark client. This makes the reported value a same-runner relative effect
+instead of a comparison of unrelated absolute measurements.
+
+After the cross-database context tables, the aggregate screening report contains:
+
+- `P=1` throughput effects with a ±5% screening materiality band
+- pipelined throughput effects with a ±8% screening materiality band
+- same-branch duplicate instability lines of 10% and 16%, respectively
+- cross-runner effect-range width instability lines of 10 and 16 percentage
+  points, respectively
+- `P=1` p50 latency as informational evidence
+- per-cell median effect, median absolute deviation, range, and duplicate spread
+
+A `candidate regression` requires every stable replica to fall below the
+negative materiality boundary; a `candidate improvement` requires every stable
+replica to rise above the positive boundary. Either status requests a
+confirmation run; neither is a statistical CI gate. Pipelined p50 remains in
+the raw JSON but is omitted from the comment because Redis reports
+batch/first-read latency rather than independent per-request latency in that
+mode. One aggregate comment is updated only after all required shard artifacts
+validate successfully. Raw output, seeds, logs, binary hashes, runner metadata,
+and tool versions remain downloadable.
+
+The same-branch duplicate-spread veto triggers when the spread exceeds 10% for
+`P=1` or 16% for the pipelined measurement. The cross-runner dispersion veto
+triggers when the effect range width exceeds twice the materiality boundary:
+10 percentage points for `P=1` and 16 for the pipelined measurement. Both
+quality vetoes are evaluated before materiality classification. These are
+conservative screening heuristics. They must be calibrated with repeated A/A
+blocks before any benchmark status is promoted to a required CI gate. A mixed
+result is reported as inconclusive; observations inside the screening lines do
+not establish performance equivalence.
 
 ## Configuration
 
@@ -117,6 +180,16 @@ The same values can be passed as CLI flags:
 
 ```bash
 cargo xtask redis-benchmark --n 10000 --c 100 --p 16 --threads 4
+```
+
+The comparison profile can also isolate one command. It requires a Redis 8 or
+newer benchmark client and defaults to deterministic seed `279000`; `--seed`
+accepts Redis 8's integer range up to `2147483647` and overrides that default.
+`--settle-millis` controls the pause between fixture setup and measurement.
+
+```bash
+cargo xtask redis-benchmark --profile comparison --command get \
+  --seed 277000 --settle-millis 1000
 ```
 
 Extra arguments for `redis-benchmark` can be passed after `--` and are forwarded
