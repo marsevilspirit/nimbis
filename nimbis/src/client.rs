@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use bytes::BytesMut;
-use dashmap::DashMap;
 use fastrace::future::FutureExt;
 use fastrace::prelude::Span;
 use fastrace::prelude::SpanContext;
@@ -20,8 +22,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 use crate::cmd::CmdContext;
-use crate::cmd::CmdTable;
 use crate::cmd::ParsedCmd;
+use crate::cmd::execute;
 use crate::server_config;
 
 static NEXT_CLIENT_SESSION_ID: AtomicI64 = AtomicI64::new(1);
@@ -30,61 +32,48 @@ pub fn next_client_session_id() -> i64 {
 	NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ClientSession {
-	pub id: i64,
-	pub name: Option<Bytes>,
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ClientSessions {
-	sessions: Arc<DashMap<i64, ClientSession>>,
+	sessions: Mutex<BTreeMap<i64, Option<Bytes>>>,
 }
 
 impl ClientSessions {
 	pub fn new() -> Self {
-		Self {
-			sessions: Arc::new(DashMap::new()),
-		}
+		Self::default()
 	}
 
 	pub fn register(&self, client_id: i64) {
-		self.sessions
-			.entry(client_id)
-			.or_insert_with(|| ClientSession {
-				id: client_id,
-				name: None,
-			});
+		self.lock().entry(client_id).or_default();
 	}
 
 	pub fn unregister(&self, client_id: i64) {
-		self.sessions.remove(&client_id);
+		self.lock().remove(&client_id);
 	}
 
 	pub fn set_name(&self, client_id: i64, name: Bytes) -> bool {
-		if let Some(mut session) = self.sessions.get_mut(&client_id) {
-			session.name = Some(name);
-			return true;
-		}
-
-		false
+		let mut sessions = self.lock();
+		let Some(current_name) = sessions.get_mut(&client_id) else {
+			return false;
+		};
+		*current_name = Some(name);
+		true
 	}
 
 	pub fn get_name(&self, client_id: i64) -> Option<Bytes> {
-		self.sessions
-			.get(&client_id)
-			.and_then(|session| session.name.clone())
+		self.lock().get(&client_id).cloned().flatten()
 	}
 
 	pub fn list(&self) -> Vec<(i64, Option<Bytes>)> {
-		let mut entries = self
-			.sessions
+		self.lock()
 			.iter()
-			.map(|entry| (*entry.key(), entry.value().name.clone()))
-			.collect::<Vec<_>>();
+			.map(|(&client_id, name)| (client_id, name.clone()))
+			.collect()
+	}
 
-		entries.sort_by_key(|(client_id, _)| *client_id);
-		entries
+	fn lock(&self) -> MutexGuard<'_, BTreeMap<i64, Option<Bytes>>> {
+		self.sessions
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
 	}
 }
 
@@ -92,22 +81,15 @@ pub struct ClientConnection {
 	socket: TcpStream,
 	parser: RespParser,
 	storage: Arc<Storage>,
-	cmd_table: Arc<CmdTable>,
 	ctx: CmdContext,
 }
 
 impl ClientConnection {
-	pub fn new(
-		socket: TcpStream,
-		storage: Arc<Storage>,
-		cmd_table: Arc<CmdTable>,
-		ctx: CmdContext,
-	) -> Self {
+	pub fn new(socket: TcpStream, storage: Arc<Storage>, ctx: CmdContext) -> Self {
 		Self {
 			socket,
 			parser: RespParser::new(),
 			storage,
-			cmd_table,
 			ctx,
 		}
 	}
@@ -203,18 +185,19 @@ impl ClientConnection {
 
 	#[trace]
 	async fn execute_command_inner(&self, parsed_cmd: ParsedCmd) -> RespValue {
-		let Some(cmd) = self.cmd_table.get_cmd(parsed_cmd.name()) else {
-			return RespValue::error(format!(
+		execute(
+			parsed_cmd.name(),
+			&self.storage,
+			&parsed_cmd.args,
+			&self.ctx,
+		)
+		.await
+		.unwrap_or_else(|| {
+			RespValue::error(format!(
 				"ERR unknown command '{}'",
 				parsed_cmd.name().to_lowercase()
-			));
-		};
-
-		if let Err(err) = cmd.meta().validate_arity(parsed_cmd.args.len() + 1) {
-			return RespValue::error(err);
-		}
-
-		cmd.do_cmd(&self.storage, &parsed_cmd.args, &self.ctx).await
+			))
+		})
 	}
 }
 

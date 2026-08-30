@@ -7,19 +7,15 @@ use log::info;
 use nimbis_storage::Storage;
 use tokio::net::TcpListener;
 
-use crate::GCTX;
 use crate::client::ClientConnection;
 use crate::client::ClientSessions;
 use crate::client::next_client_session_id;
 use crate::cmd::CmdContext;
-use crate::cmd::CmdTable;
-use crate::context::init_global_context;
 use crate::server_config;
 
 pub struct Server {
 	storage: Arc<Storage>,
-	cmd_table: Arc<CmdTable>,
-	_client_sessions: Arc<ClientSessions>,
+	client_sessions: Arc<ClientSessions>,
 }
 
 impl Server {
@@ -27,8 +23,6 @@ impl Server {
 	#[trace]
 	pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
 		let client_sessions = Arc::new(ClientSessions::new());
-		init_global_context(client_sessions.clone());
-		let cmd_table = Arc::new(CmdTable::new());
 
 		let config = crate::config::SERVER_CONF.load();
 		let object_store_url = config.object_store_url.clone();
@@ -48,8 +42,7 @@ impl Server {
 
 		Ok(Self {
 			storage,
-			cmd_table,
-			_client_sessions: client_sessions,
+			client_sessions,
 		})
 	}
 
@@ -66,16 +59,19 @@ impl Server {
 					debug!("New client connected from {}", addr);
 
 					let storage = self.storage.clone();
-					let cmd_table = self.cmd_table.clone();
+					let client_sessions = self.client_sessions.clone();
 					tokio::spawn(async move {
 						let client_id = next_client_session_id();
-						let ctx = CmdContext { client_id };
-						let mut session = ClientConnection::new(socket, storage, cmd_table, ctx);
-						GCTX!(client_sessions).register(client_id);
+						let ctx = CmdContext {
+							client_id,
+							client_sessions: client_sessions.clone(),
+						};
+						let mut session = ClientConnection::new(socket, storage, ctx);
+						client_sessions.register(client_id);
 						if let Err(e) = session.run().await {
 							debug!("Client session error: {}", e);
 						}
-						GCTX!(client_sessions).unregister(client_id);
+						client_sessions.unregister(client_id);
 					});
 				}
 				Err(e) => {

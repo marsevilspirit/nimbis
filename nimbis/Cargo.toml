@@ -14,10 +14,8 @@ nimbis-storage = { workspace = true }
 nimbis-telemetry = { workspace = true }
 
 arc-swap = { workspace = true }
-async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
-dashmap = { workspace = true }
 fastrace = { workspace = true, features = ["enable"] }
 log = { workspace = true }
 num_cpus = { workspace = true }

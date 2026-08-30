@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/marsevilspirit/nimbis/e2e-test/util"
 	. "github.com/onsi/ginkgo/v2"
@@ -153,6 +154,22 @@ var _ = Describe("CLIENT Group Commands", func() {
 		for i := 1; i < len(entries); i++ {
 			Expect(entries[i-1].id).To(BeNumerically("<=", entries[i].id))
 		}
+	})
+
+	It("should remove disconnected clients from the list", func() {
+		other := util.NewClient()
+		Expect(other.Ping(ctx).Err()).To(Succeed())
+		id := mustClientID(ctx, other)
+		Expect(other.Close()).To(Succeed())
+
+		Eventually(func() bool {
+			result, err := rdb.Do(ctx, "CLIENT", "LIST").Result()
+			if err != nil {
+				return false
+			}
+			_, found := findClient(parseClientList(result), id)
+			return !found
+		}, 5*time.Second, 50*time.Millisecond).Should(BeTrue())
 	})
 
 	It("should reject unknown subcommand", func() {

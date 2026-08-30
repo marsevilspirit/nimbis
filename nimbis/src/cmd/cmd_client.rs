@@ -1,174 +1,68 @@
-use std::collections::HashMap;
-
-use async_trait::async_trait;
 use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
-use super::Cmd;
 use super::CmdContext;
-use super::CmdMeta;
-use crate::GCTX;
+use super::validate_arity;
 
-/// Client command implementation.
-pub struct ClientCmd {
-	meta: CmdMeta,
-	sub_cmds: HashMap<&'static str, Box<dyn Cmd>>,
-}
+pub(super) async fn execute(_storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
+	let subcommand = &args[0];
+	let (name, arity) = if subcommand.eq_ignore_ascii_case(b"ID") {
+		("ID", 1)
+	} else if subcommand.eq_ignore_ascii_case(b"SETNAME") {
+		("SETNAME", 2)
+	} else if subcommand.eq_ignore_ascii_case(b"GETNAME") {
+		("GETNAME", 1)
+	} else if subcommand.eq_ignore_ascii_case(b"LIST") {
+		("LIST", 1)
+	} else {
+		return RespValue::error(format!(
+			"ERR unknown CLIENT subcommand '{}'",
+			String::from_utf8_lossy(subcommand).to_uppercase()
+		));
+	};
 
-impl Default for ClientCmd {
-	fn default() -> Self {
-		let mut sub_cmds: HashMap<&'static str, Box<dyn Cmd>> = HashMap::new();
+	if let Err(error) = validate_arity(name, arity, args.len()) {
+		return RespValue::error(error);
+	}
 
-		sub_cmds.insert("ID", Box::new(ClientIdCmd::default()));
-		sub_cmds.insert("SETNAME", Box::new(ClientSetNameCmd::default()));
-		sub_cmds.insert("GETNAME", Box::new(ClientGetNameCmd::default()));
-		sub_cmds.insert("LIST", Box::new(ClientListCmd::default()));
-
-		Self {
-			meta: CmdMeta {
-				name: "CLIENT".to_string(),
-				arity: -2,
-			},
-			sub_cmds,
-		}
+	match name {
+		"ID" => RespValue::integer(ctx.client_id),
+		"SETNAME" => set_name(&args[1..], ctx),
+		"GETNAME" => get_name(ctx),
+		"LIST" => list(ctx),
+		_ => unreachable!("CLIENT metadata and dispatch must stay in sync"),
 	}
 }
 
-#[async_trait]
-impl Cmd for ClientCmd {
-	fn meta(&self) -> &CmdMeta {
-		&self.meta
-	}
-
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		let sub_cmd_name = String::from_utf8_lossy(&args[0]).to_uppercase();
-		match self.sub_cmds.get(sub_cmd_name.as_str()) {
-			Some(sub_cmd) => sub_cmd.execute(storage, &args[1..], ctx).await,
-			None => RespValue::error(format!("ERR unknown CLIENT subcommand '{}'", sub_cmd_name)),
-		}
+fn set_name(args: &[Bytes], ctx: &CmdContext) -> RespValue {
+	if ctx.client_sessions.set_name(ctx.client_id, args[0].clone()) {
+		RespValue::simple_string("OK")
+	} else {
+		RespValue::error("ERR client not found")
 	}
 }
 
-pub struct ClientIdCmd {
-	meta: CmdMeta,
-}
-
-impl Default for ClientIdCmd {
-	fn default() -> Self {
-		Self {
-			meta: CmdMeta {
-				name: "ID".to_string(),
-				arity: 1,
-			},
-		}
+fn get_name(ctx: &CmdContext) -> RespValue {
+	match ctx.client_sessions.get_name(ctx.client_id) {
+		Some(name) => RespValue::bulk_string(name),
+		None => RespValue::null(),
 	}
 }
 
-#[async_trait]
-impl Cmd for ClientIdCmd {
-	fn meta(&self) -> &CmdMeta {
-		&self.meta
-	}
+fn list(ctx: &CmdContext) -> RespValue {
+	let lines = ctx
+		.client_sessions
+		.list()
+		.into_iter()
+		.map(|(client_id, name)| {
+			let name = name
+				.map(|value| String::from_utf8_lossy(&value).into_owned())
+				.unwrap_or_default();
+			format!("id={} name={}", client_id, name)
+		})
+		.collect::<Vec<_>>()
+		.join("\n");
 
-	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		RespValue::integer(ctx.client_id)
-	}
-}
-
-pub struct ClientSetNameCmd {
-	meta: CmdMeta,
-}
-
-impl Default for ClientSetNameCmd {
-	fn default() -> Self {
-		Self {
-			meta: CmdMeta {
-				name: "SETNAME".to_string(),
-				arity: 2,
-			},
-		}
-	}
-}
-
-#[async_trait]
-impl Cmd for ClientSetNameCmd {
-	fn meta(&self) -> &CmdMeta {
-		&self.meta
-	}
-
-	async fn do_cmd(&self, _storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		if GCTX!(client_sessions).set_name(ctx.client_id, args[0].clone()) {
-			RespValue::simple_string("OK")
-		} else {
-			RespValue::error("ERR client not found")
-		}
-	}
-}
-
-pub struct ClientGetNameCmd {
-	meta: CmdMeta,
-}
-
-impl Default for ClientGetNameCmd {
-	fn default() -> Self {
-		Self {
-			meta: CmdMeta {
-				name: "GETNAME".to_string(),
-				arity: 1,
-			},
-		}
-	}
-}
-
-#[async_trait]
-impl Cmd for ClientGetNameCmd {
-	fn meta(&self) -> &CmdMeta {
-		&self.meta
-	}
-
-	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		match GCTX!(client_sessions).get_name(ctx.client_id) {
-			Some(name) => RespValue::bulk_string(name),
-			None => RespValue::null(),
-		}
-	}
-}
-
-pub struct ClientListCmd {
-	meta: CmdMeta,
-}
-
-impl Default for ClientListCmd {
-	fn default() -> Self {
-		Self {
-			meta: CmdMeta {
-				name: "LIST".to_string(),
-				arity: 1,
-			},
-		}
-	}
-}
-
-#[async_trait]
-impl Cmd for ClientListCmd {
-	fn meta(&self) -> &CmdMeta {
-		&self.meta
-	}
-
-	async fn do_cmd(&self, _storage: &Storage, _args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let lines = GCTX!(client_sessions)
-			.list()
-			.into_iter()
-			.map(|(client_id, name)| {
-				let name = name
-					.map(|v| String::from_utf8_lossy(&v).into_owned())
-					.unwrap_or_default();
-				format!("id={} name={}", client_id, name)
-			})
-			.collect::<Vec<_>>()
-			.join("\n");
-
-		RespValue::bulk_string(Bytes::from(lines))
-	}
+	RespValue::bulk_string(Bytes::from(lines))
 }

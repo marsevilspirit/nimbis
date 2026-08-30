@@ -1,68 +1,109 @@
-use async_trait::async_trait;
+use std::sync::Arc;
+
 use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
-/// Command metadata containing immutable information about a command
-#[derive(Debug, Clone, Default)]
-pub struct CmdMeta {
-	pub name: String,
-	pub arity: i16,
-}
+use crate::client::ClientSessions;
 
-#[derive(Debug, Clone, Copy, Default)]
+const COMMAND_NAME_STACK_CAPACITY: usize = 32;
+
+#[derive(Debug, Clone)]
 pub struct CmdContext {
 	pub client_id: i64,
+	pub client_sessions: Arc<ClientSessions>,
 }
 
-impl CmdMeta {
-	/// Validate argument count against arity
-	/// - Positive arity: requires exact match
-	/// - Negative arity: requires at least abs(arity) arguments
-	pub fn validate_arity(&self, arg_count: usize) -> Result<(), String> {
-		if self.arity > 0 {
-			// Positive: exact match required
-			if arg_count != self.arity as usize {
-				return Err(format!(
-					"ERR wrong number of arguments for '{}' command",
-					self.name.to_lowercase()
-				));
+pub async fn execute(
+	name: &str,
+	storage: &Storage,
+	args: &[Bytes],
+	ctx: &CmdContext,
+) -> Option<RespValue> {
+	let mut uppercase = [0; COMMAND_NAME_STACK_CAPACITY];
+	let name = normalize_command_name(name, &mut uppercase)?;
+	let arg_count = args.len() + 1;
+	macro_rules! command {
+		($name:literal, $arity:literal, $module:ident) => {{
+			if let Err(error) = validate_arity($name, $arity, arg_count) {
+				RespValue::error(error)
+			} else {
+				$module::execute(storage, args, ctx).await
 			}
-		} else if self.arity < 0 {
-			// Negative: minimum count allowed
-			let min_args = (-self.arity) as usize;
-			if arg_count < min_args {
-				return Err(format!(
-					"ERR wrong number of arguments for '{}' command",
-					self.name.to_lowercase()
-				));
-			}
-		}
-		// arity == 0 means any number of arguments is allowed
+		}};
+	}
+
+	Some(match name {
+		"APPEND" => command!("APPEND", 3, cmd_append),
+		"CLIENT" => command!("CLIENT", -2, cmd_client),
+		"CONFIG" => command!("CONFIG", -3, cmd_config),
+		"DECR" => command!("DECR", 2, cmd_decr),
+		"DEL" => command!("DEL", -3, cmd_del),
+		"EXISTS" => command!("EXISTS", -3, cmd_exists),
+		"EXPIRE" => command!("EXPIRE", 4, cmd_expire),
+		"FLUSHDB" => command!("FLUSHDB", 0, cmd_flushdb),
+		"GET" => command!("GET", 2, cmd_get),
+		"HDEL" => command!("HDEL", -3, cmd_hdel),
+		"HELLO" => command!("HELLO", -1, cmd_hello),
+		"HGET" => command!("HGET", 3, cmd_hget),
+		"HGETALL" => command!("HGETALL", 2, cmd_hgetall),
+		"HLEN" => command!("HLEN", 2, cmd_hlen),
+		"HMGET" => command!("HMGET", -3, cmd_hmget),
+		"HSET" => command!("HSET", -4, cmd_hset),
+		"INCR" => command!("INCR", 2, cmd_incr),
+		"LLEN" => command!("LLEN", 2, cmd_llen),
+		"LPOP" => command!("LPOP", -2, cmd_lpop),
+		"LPUSH" => command!("LPUSH", -3, cmd_lpush),
+		"LRANGE" => command!("LRANGE", 4, cmd_lrange),
+		"PING" => command!("PING", -1, cmd_ping),
+		"RPOP" => command!("RPOP", -2, cmd_rpop),
+		"RPUSH" => command!("RPUSH", -3, cmd_rpush),
+		"SADD" => command!("SADD", -3, cmd_sadd),
+		"SCARD" => command!("SCARD", 2, cmd_scard),
+		"SET" => command!("SET", 3, cmd_set),
+		"SISMEMBER" => command!("SISMEMBER", 3, cmd_sismember),
+		"SMEMBERS" => command!("SMEMBERS", 2, cmd_smembers),
+		"SREM" => command!("SREM", -3, cmd_srem),
+		"TTL" => command!("TTL", 3, cmd_ttl),
+		"ZADD" => command!("ZADD", -4, cmd_zadd),
+		"ZCARD" => command!("ZCARD", 2, cmd_zcard),
+		"ZRANGE" => command!("ZRANGE", -4, cmd_zrange),
+		"ZREM" => command!("ZREM", -3, cmd_zrem),
+		"ZSCORE" => command!("ZSCORE", 3, cmd_zscore),
+		_ => return None,
+	})
+}
+
+fn normalize_command_name<'a>(
+	name: &str,
+	uppercase: &'a mut [u8; COMMAND_NAME_STACK_CAPACITY],
+) -> Option<&'a str> {
+	if name.len() > COMMAND_NAME_STACK_CAPACITY {
+		return None;
+	}
+
+	uppercase[..name.len()].copy_from_slice(name.as_bytes());
+	uppercase[..name.len()].make_ascii_uppercase();
+	Some(std::str::from_utf8(&uppercase[..name.len()]).expect("ASCII uppercasing preserves UTF-8"))
+}
+
+fn validate_arity(name: &str, arity: i16, arg_count: usize) -> Result<(), String> {
+	let valid = match arity {
+		0 => true,
+		arity if arity > 0 => arg_count == arity as usize,
+		arity => arg_count >= (-arity) as usize,
+	};
+
+	if valid {
 		Ok(())
+	} else {
+		Err(format!(
+			"ERR wrong number of arguments for '{}' command",
+			name.to_lowercase()
+		))
 	}
 }
 
-/// Command trait - all commands must implement this
-#[allow(clippy::double_must_use)]
-#[async_trait]
-pub trait Cmd: Send + Sync {
-	/// Get command metadata
-	fn meta(&self) -> &CmdMeta;
-
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue;
-
-	/// Execute command with request context.
-	async fn execute(&self, storage: &Storage, args: &[Bytes], ctx: &CmdContext) -> RespValue {
-		if let Err(err) = self.meta().validate_arity(args.len() + 1) {
-			return RespValue::error(err);
-		}
-
-		self.do_cmd(storage, args, ctx).await
-	}
-}
-
-/// Parsed command structure (renamed from Cmd to avoid conflict)
 pub struct ParsedCmd {
 	name: Bytes,
 	pub args: Vec<Bytes>,
@@ -78,18 +119,15 @@ impl TryFrom<RespValue> for ParsedCmd {
 	type Error = String;
 
 	fn try_from(value: RespValue) -> Result<Self, Self::Error> {
-		// RespValue should be an array
 		let args = value.as_array().ok_or("Expected array")?;
 
 		if args.is_empty() {
 			return Err("Empty command".to_string());
 		}
 
-		// First element is the command name
 		let cmd_name = args[0].as_bytes().ok_or("Invalid command type")?;
 		std::str::from_utf8(cmd_name).map_err(|_| "Invalid command type")?;
 
-		// Remaining elements are arguments
 		let cmd_args: Result<Vec<Bytes>, _> = args[1..]
 			.iter()
 			.map(|v| v.as_bytes().cloned().ok_or("Invalid argument"))
@@ -99,29 +137,6 @@ impl TryFrom<RespValue> for ParsedCmd {
 			name: cmd_name.clone(),
 			args: cmd_args?,
 		})
-	}
-}
-
-#[cfg(test)]
-mod parsed_cmd_tests {
-	use super::*;
-
-	#[test]
-	fn preserves_command_name_case() {
-		let value = RespValue::array([RespValue::bulk_string("pInG")]);
-
-		let parsed = ParsedCmd::try_from(value).unwrap();
-
-		assert_eq!(parsed.name(), "pInG");
-	}
-
-	#[test]
-	fn rejects_non_utf8_command_name() {
-		let value = RespValue::array([RespValue::bulk_string(Bytes::from_static(b"\xff"))]);
-
-		let error = ParsedCmd::try_from(value).err().unwrap();
-
-		assert_eq!(error, "Invalid command type");
 	}
 }
 
@@ -161,44 +176,44 @@ mod cmd_zcard;
 mod cmd_zrange;
 mod cmd_zrem;
 mod cmd_zscore;
-mod table;
 mod typed_key_args;
 mod utils;
 
-pub use cmd_append::AppendCmd;
-pub use cmd_client::ClientCmd;
-pub use cmd_config::ConfigCmd;
-pub use cmd_decr::DecrCmd;
-pub use cmd_del::DelCmd;
-pub use cmd_exists::ExistsCmd;
-pub use cmd_expire::ExpireCmd;
-pub use cmd_flushdb::FlushDbCmd;
-pub use cmd_get::GetCmd;
-pub use cmd_hdel::HDelCmd;
-pub use cmd_hello::HelloCmd;
-pub use cmd_hget::HGetCmd;
-pub use cmd_hgetall::HGetAllCmd;
-pub use cmd_hlen::HLenCmd;
-pub use cmd_hmget::HMGetCmd;
-pub use cmd_hset::HSetCmd;
-pub use cmd_incr::IncrCmd;
-pub use cmd_llen::LLenCmd;
-pub use cmd_lpop::LPopCmd;
-pub use cmd_lpush::LPushCmd;
-pub use cmd_lrange::LRangeCmd;
-pub use cmd_ping::PingCmd;
-pub use cmd_rpop::RPopCmd;
-pub use cmd_rpush::RPushCmd;
-pub use cmd_sadd::SaddCmd;
-pub use cmd_scard::ScardCmd;
-pub use cmd_set::SetCmd;
-pub use cmd_sismember::SismemberCmd;
-pub use cmd_smembers::SmembersCmd;
-pub use cmd_srem::SremCmd;
-pub use cmd_ttl::TtlCmd;
-pub use cmd_zadd::ZAddCmd;
-pub use cmd_zcard::ZCardCmd;
-pub use cmd_zrange::ZRangeCmd;
-pub use cmd_zrem::ZRemCmd;
-pub use cmd_zscore::ZScoreCmd;
-pub use table::CmdTable;
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn command_lookup_is_case_insensitive() {
+		for name in ["PING", "ping", "pInG"] {
+			let mut uppercase = [0; COMMAND_NAME_STACK_CAPACITY];
+			assert_eq!(normalize_command_name(name, &mut uppercase), Some("PING"));
+		}
+	}
+
+	#[test]
+	fn long_unknown_command_is_not_found() {
+		let name = "x".repeat(COMMAND_NAME_STACK_CAPACITY + 1);
+		let mut uppercase = [0; COMMAND_NAME_STACK_CAPACITY];
+
+		assert_eq!(normalize_command_name(&name, &mut uppercase), None);
+	}
+
+	#[test]
+	fn preserves_command_name_case() {
+		let value = RespValue::array([RespValue::bulk_string("pInG")]);
+
+		let parsed = ParsedCmd::try_from(value).unwrap();
+
+		assert_eq!(parsed.name(), "pInG");
+	}
+
+	#[test]
+	fn rejects_non_utf8_command_name() {
+		let value = RespValue::array([RespValue::bulk_string(Bytes::from_static(b"\xff"))]);
+
+		let error = ParsedCmd::try_from(value).err().unwrap();
+
+		assert_eq!(error, "Invalid command type");
+	}
+}
