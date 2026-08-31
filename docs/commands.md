@@ -1,23 +1,24 @@
 # Commands
 
-This document summarizes the command framework and the currently implemented
+This document summarizes command dispatch and the currently implemented
 Nimbis commands. Nimbis intentionally diverges from Redis for typed key
 lifecycle commands so they can route to one physical database without type
 discovery.
 
-## Command Framework
+## Command Dispatch
 
 Command implementation lives in `nimbis/src/cmd/`.
 
-Core types in `nimbis/src/cmd/mod.rs`:
+The core pieces in `nimbis/src/cmd/mod.rs` are:
 
-- `CmdMeta { name, arity }`
-- `CmdContext { client_id }`
-- `Cmd` trait (`meta`, `do_cmd`, `execute`)
-- `ParsedCmd`
-- `CmdTable`
+- `ParsedCmd`, which holds a UTF-8 command name and its arguments
+- `CmdContext { client_id, client_sessions }`, which carries the connection's
+  client identity and session-registry access
+- `execute`, which normalizes the command name, dispatches through a static
+  match, validates the arity literal beside each match arm, and calls the
+  command module's `execute` function
 
-`Cmd::execute` performs arity validation first, then calls `do_cmd`.
+Each `cmd_xxx.rs` module exposes one `pub(super) async fn execute` handler.
 
 ## Arity Rules
 
@@ -25,6 +26,7 @@ Nimbis follows Redis-style arity conventions:
 
 - `arity > 0`: exact number of tokens required (including command name)
 - `arity < 0`: minimum number of tokens required (including command name)
+- `arity == 0`: any number of tokens is accepted
 - validation uses `args.len() + 1`
 
 Examples:
@@ -35,7 +37,7 @@ Examples:
 
 ## Supported Commands (Current)
 
-Source of truth: `nimbis/src/cmd/table.rs`.
+Source of truth: the static dispatcher in `nimbis/src/cmd/mod.rs`.
 
 Nimbis extends Redis key semantics by giving each data type an independent
 namespace. The same raw key may simultaneously hold a String, Hash, List, Set,
@@ -55,7 +57,7 @@ is no cross-database type discovery or fallback.
 - `TTL <TYPE> key` (`3`)
 - `INCR` (`2`)
 - `DECR` (`2`)
-- `FLUSHDB` (`1`)
+- `FLUSHDB` (`0`)
 
 ### String
 
@@ -111,7 +113,7 @@ is no cross-database type discovery or fallback.
 ## Benchmark Alignment
 
 The `full` redis-benchmark profile in `xtask/src/redis_benchmark.rs` should
-cover this implemented command table. `FLUSHDB` is the exception: it is used for
+cover this implemented command set. `FLUSHDB` is the exception: it is used for
 benchmark setup and cleanup, not throughput comparison.
 
 The `comparison` redis-benchmark profile is intentionally smaller so CI can
@@ -121,10 +123,10 @@ still contain only commands listed in this document.
 ## Add a New Command
 
 1. Add `cmd_xxx.rs` under `nimbis/src/cmd/`.
-2. Implement `Cmd` for the command struct.
-3. Export the module in `nimbis/src/cmd/mod.rs`.
-4. Register it in `nimbis/src/cmd/table.rs`.
-5. Update this document, `docs/redis-benchmark.md`, and the benchmark profiles
+2. Add its `pub(super) async fn execute` handler.
+3. Declare the module and add its match arm with the correct arity literal in
+   `nimbis/src/cmd/mod.rs`.
+4. Update this document, `docs/redis-benchmark.md`, and the benchmark profiles
    in `xtask/src/redis_benchmark.rs` together.
 
 ## Redis Compatibility Notes (Known Gaps)
@@ -142,7 +144,8 @@ Nimbis is Redis-compatible for the implemented subset, but does **not** yet impl
 - `ZRANGE` supports `start stop [WITHSCORES]` rank mode only; flags such as `BYSCORE`, `BYLEX`, `REV`, and `LIMIT` are not part of this interface.
 - `CONFIG` is limited to `GET` and `SET` subcommands.
 - `CLIENT` is limited to `ID`, `SETNAME`, `GETNAME`, and `LIST`.
-- Multi-key string helpers like `MGET`/`MSET`, transactions (`MULTI`/`EXEC`), pub/sub, scripting, streams, cluster commands, and ACL are not documented as implemented in this command table.
+- Multi-key string helpers like `MGET`/`MSET`, transactions (`MULTI`/`EXEC`), pub/sub, scripting, streams, cluster commands, and ACL are not documented as implemented in this command set.
 
-When adding new commands or options, update `nimbis/src/cmd/table.rs`, this
-document, and the benchmark documentation/profile lists together.
+When adding new commands or options, update the static dispatcher in
+`nimbis/src/cmd/mod.rs`, this document, and the benchmark
+documentation/profile lists together.

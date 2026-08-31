@@ -6,7 +6,7 @@ expanding command breadth.
 
 ## Current Baseline
 
-- Server command registration lives in `nimbis/src/cmd/table.rs`.
+- Server command dispatch lives in `nimbis/src/cmd/mod.rs`.
 - The implemented command list is documented in `docs/commands.md`.
 - Redis benchmark coverage is documented in `docs/redis-benchmark.md` and
   implemented in `xtask/src/redis_benchmark.rs`.
@@ -16,7 +16,7 @@ expanding command breadth.
 ## P0: Fact Alignment And Benchmark Coherence
 
 - Keep `docs/commands.md`, `docs/redis-benchmark.md`, and
-  `xtask/src/redis_benchmark.rs` aligned with the command table.
+  `xtask/src/redis_benchmark.rs` aligned with the static dispatcher.
 - Keep the `full` redis-benchmark profile limited to currently implemented
   commands. `FLUSHDB` is setup/cleanup only, not a throughput benchmark.
 - Keep the `comparison` redis-benchmark profile on a stable subset that can be

@@ -48,9 +48,9 @@ cargo install --locked cargo-nextest
 - Keep formatting and structural conventions clean (`cargo xtask check-code-fmt`).
 - Do not add numbered step comments in code (`cargo xtask check-numbered-comments`).
 - For command implementation work, update all three places:
-  1. `crates/nimbis/src/cmd/cmd_*.rs`
-  2. `crates/nimbis/src/cmd/mod.rs`
-  3. `crates/nimbis/src/cmd/table.rs`
+  1. The handler in `nimbis/src/cmd/cmd_*.rs`
+  2. The module declaration and static dispatcher arm in `nimbis/src/cmd/mod.rs`
+  3. `docs/commands.md` and benchmark coverage when the command set changes
 
 ## Where to read first for common tasks
 - High-level overview: `README.md`

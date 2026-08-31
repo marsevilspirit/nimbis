@@ -196,7 +196,7 @@ Extra arguments for `redis-benchmark` can be passed after `--` and are forwarded
 to every benchmark invocation.
 
 The default command profile is `full`, which covers the currently implemented
-Nimbis command table from [Commands](commands.md). `FLUSHDB` is used only for
+Nimbis command set from [Commands](commands.md). `FLUSHDB` is used only for
 setup and cleanup isolation, not as a throughput benchmark. Benchmark CI uses
 `--profile comparison` for the main-vs-PR comparison so the main branch can be
 benchmarked before it has newly added commands from a PR.
