@@ -61,7 +61,7 @@ The main executable, integrating all crates, implementing the command system and
 - **Startup Display** (`src/logo.rs`): Displays banner and build information.
 - `Server` struct
 - TCP connection handling
-- **Command System** (`src/cmd/`): Meta, Trait, and concrete command implementations (GET, SET, HSET, etc.)
+- **Command System** (`src/cmd/`): Direct dispatcher and concrete command implementations (GET, SET, HSET, etc.)
 - Request processing
 
 **Documentation**: See [Server Design](server_design.md), [Config Design](config.md), and [Commands](commands.md)
@@ -85,9 +85,8 @@ nimbis
 To add a new command to Nimbis:
 
 1. Create a new file in `nimbis/src/cmd/cmd_your_command.rs`
-2. Implement the `Cmd` trait
-3. Export it in `nimbis/src/cmd/mod.rs`
-4. Register it in `nimbis/src/cmd/table.rs`
+2. Add its module-level `execute` handler
+3. Declare it and add its static dispatcher match arm in `nimbis/src/cmd/mod.rs`
 
 See [Commands](commands.md) for detailed instructions on implementing new commands.
 

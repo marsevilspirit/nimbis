@@ -1,46 +1,21 @@
-use async_trait::async_trait;
 use bytes::Bytes;
 use nimbis_resp::RespValue;
 use nimbis_storage::Storage;
 
-use super::Cmd;
 use super::CmdContext;
-use super::CmdMeta;
 
-pub struct HGetAllCmd {
-	meta: CmdMeta,
-}
+pub(super) async fn execute(storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
+	let key = &args[0];
 
-impl Default for HGetAllCmd {
-	fn default() -> Self {
-		Self {
-			meta: CmdMeta {
-				name: "HGETALL".to_string(),
-				arity: 2, // HGETALL key
-			},
-		}
-	}
-}
-
-#[async_trait]
-impl Cmd for HGetAllCmd {
-	fn meta(&self) -> &CmdMeta {
-		&self.meta
-	}
-
-	async fn do_cmd(&self, storage: &Storage, args: &[Bytes], _ctx: &CmdContext) -> RespValue {
-		let key = &args[0];
-
-		match storage.hgetall(key.clone()).await {
-			Ok(pairs) => {
-				let mut array = Vec::with_capacity(pairs.len() * 2);
-				for (field, value) in pairs {
-					array.push(RespValue::bulk_string(field));
-					array.push(RespValue::bulk_string(value));
-				}
-				RespValue::array(array)
+	match storage.hgetall(key.clone()).await {
+		Ok(pairs) => {
+			let mut array = Vec::with_capacity(pairs.len() * 2);
+			for (field, value) in pairs {
+				array.push(RespValue::bulk_string(field));
+				array.push(RespValue::bulk_string(value));
 			}
-			Err(e) => RespValue::error(e.to_string()),
+			RespValue::array(array)
 		}
+		Err(e) => RespValue::error(e.to_string()),
 	}
 }

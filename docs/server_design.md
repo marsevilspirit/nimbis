@@ -11,8 +11,7 @@ The runtime thread count is configured by `runtime_threads`.
 All client tasks share:
 
 - one `Arc<Storage>` opened from the configured object store root
-- one `Arc<CmdTable>` for command lookup
-- one global `ClientSessions` registry for `CLIENT` command state
+- one `Arc<ClientSessions>` owned by `Server` for `CLIENT` command state
 
 The server no longer shards data per worker. All commands operate on the same
 logical database view. Command concurrency is controlled by the storage-owned
@@ -33,12 +32,13 @@ locking state inside `Storage`.
 
 `Server::new()` initializes shared process state:
 
-1. Create and register `ClientSessions`.
-2. Create the command table.
-3. Open a single `Storage` with `Storage::open_object_store(..., None)`.
+1. Create a shared `ClientSessions` registry.
+2. Open a single `Storage` with `Storage::open_object_store(..., None)`.
 
 `Server::run()` binds to `host:port`, accepts connections, and spawns a
-`ClientConnection` task for each accepted socket.
+`ClientConnection` task for each accepted socket. Each task registers a client
+ID, receives a `CmdContext { client_id, client_sessions }`, and unregisters the
+client when the connection ends.
 
 ## Command Execution
 
@@ -53,9 +53,11 @@ This preserves Redis pipeline response ordering without inter-worker channels.
 
 Command execution follows this order:
 
-1. Look up the command in `CmdTable`.
-2. Validate arity.
-3. Execute the command against shared `Storage`.
+1. Normalize the command name and match it in `cmd::execute`'s static
+   dispatcher.
+2. Validate the arity literal stored beside that match arm.
+3. Call the command module's `execute` handler with shared `Storage` and the
+   connection's `CmdContext`.
 4. Let each storage API acquire and release its own read/write/global lock.
 
 ## Locking Model
