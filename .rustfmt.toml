@@ -16,8 +16,8 @@ reorder_imports = true
 # Use hard tabs instead of spaces for indentation
 hard_tabs = true
 
-# Allow automatic line-wrapping for comments
-wrap_comments = true
+# Preserve manually wrapped comments across nightly rustfmt updates
+wrap_comments = false
 
 # Set the maximum width for comments (usually recommended to match max_width, default is 80)
 comment_width = 80
