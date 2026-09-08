@@ -5,6 +5,7 @@ use std::net::TcpStream;
 use std::time::Duration;
 
 use bytes::Bytes;
+use bytes::BytesMut;
 use nimbis_resp::RespEncoder;
 use nimbis_resp::RespParseResult;
 use nimbis_resp::RespParser;
@@ -37,7 +38,7 @@ pub struct MockNimbisClient {
 	id: i64,
 	stream: TcpStream,
 	parser: RespParser,
-	read_buffer: bytes::BytesMut,
+	read_buffer: BytesMut,
 }
 
 impl MockNimbisClient {
@@ -48,7 +49,7 @@ impl MockNimbisClient {
 			id: 0,
 			stream,
 			parser: RespParser::new(),
-			read_buffer: bytes::BytesMut::with_capacity(4096),
+			read_buffer: BytesMut::with_capacity(4096),
 		};
 		client.id = client.client_id();
 		Ok(client)
@@ -71,15 +72,15 @@ impl MockNimbisClient {
 	}
 
 	pub fn execute_pipeline(&mut self, commands: &[&[&str]]) -> Vec<RespValue> {
+		let mut request_buffer = BytesMut::new();
 		for args in commands {
 			let req = RespValue::array(
 				args.iter()
 					.map(|arg| RespValue::bulk_string(Bytes::copy_from_slice(arg.as_bytes()))),
 			);
-			self.stream
-				.write_all(&req.encode().expect("encode request"))
-				.unwrap_or_else(|e| panic!("write request {:?}: {}", args, e));
+			req.encode_to(&mut request_buffer).expect("encode request");
 		}
+		self.write_raw(&request_buffer);
 
 		commands
 			.iter()
@@ -90,7 +91,11 @@ impl MockNimbisClient {
 			.collect()
 	}
 
-	fn read_response(&mut self) -> Result<RespValue, String> {
+	pub fn write_raw(&mut self, request: &[u8]) {
+		self.stream.write_all(request).expect("write raw request");
+	}
+
+	pub fn read_response(&mut self) -> Result<RespValue, String> {
 		let mut read_chunk = [0u8; 1024];
 
 		loop {
