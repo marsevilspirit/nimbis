@@ -184,7 +184,11 @@ impl ClientConnection {
 					}
 					return Err(e.into());
 				}
-				response_buffer.clear();
+				if response_buffer.capacity() > 2 * RESPONSE_BATCH_BYTES {
+					response_buffer = BytesMut::new();
+				} else {
+					response_buffer.clear();
+				}
 			}
 		}
 	}

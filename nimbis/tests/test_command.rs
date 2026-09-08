@@ -139,11 +139,14 @@ fn test_pipeline_large_bulk_responses() {
 	let mut client = server.get_client();
 	let value = "x".repeat(40 * 1024);
 	assert_eq!(client.set("it:pipeline:large", &value), "OK");
+	let oversized_value = "y".repeat(160 * 1024);
+	assert_eq!(client.set("it:pipeline:oversized", &oversized_value), "OK");
 
 	let responses = client.execute_pipeline(&[
 		&["GET", "it:pipeline:large"],
 		&["GET", "it:pipeline:large"],
 		&["GET", "it:pipeline:large"],
+		&["GET", "it:pipeline:oversized"],
 		&["PING"],
 	]);
 
@@ -153,6 +156,7 @@ fn test_pipeline_large_bulk_responses() {
 			RespValue::bulk_string(value.clone()),
 			RespValue::bulk_string(value.clone()),
 			RespValue::bulk_string(value),
+			RespValue::bulk_string(oversized_value),
 			RespValue::simple_string("PONG"),
 		]
 	);
