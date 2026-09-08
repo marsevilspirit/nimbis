@@ -75,16 +75,18 @@ var _ = Describe("CONFIG Commands", func() {
 		It("should get all fields with * wildcard", func() {
 			result, err := rdb.ConfigGet(ctx, "*").Result()
 			Expect(err).NotTo(HaveOccurred())
-			// host, port, object_store_url, object_store_options, save, appendonly,
+			// host, port, object_store_url, object_store_options, block_cache_capacity_bytes,
+			// save, appendonly,
 			// log_level, log_output, log_rotation, trace_enabled, trace_endpoint,
 			// trace_sampling_ratio, trace_protocol, trace_export_timeout_seconds,
 			// trace_report_interval_ms, runtime_threads
-			Expect(result).To(HaveLen(16))
+			Expect(result).To(HaveLen(17))
 			Expect(result).To(HaveKeyWithValue("host", "127.0.0.1"))
 			Expect(result).To(HaveKeyWithValue("port", "6379"))
 			Expect(result).To(HaveKey("object_store_url"))
 			Expect(result["object_store_url"]).NotTo(BeEmpty())
 			Expect(result).To(HaveKey("object_store_options"))
+			Expect(result).To(HaveKeyWithValue("block_cache_capacity_bytes", "67108864"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))
@@ -140,6 +142,20 @@ var _ = Describe("CONFIG Commands", func() {
 	})
 
 	Describe("CONFIG SET", func() {
+		It("should fail to set immutable field 'block_cache_capacity_bytes'", func() {
+			before, err := rdb.ConfigGet(ctx, "block_cache_capacity_bytes").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(before).To(HaveLen(1))
+
+			err = rdb.ConfigSet(ctx, "block_cache_capacity_bytes", "268435456").Err()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Field 'block_cache_capacity_bytes' is immutable"))
+
+			after, err := rdb.ConfigGet(ctx, "block_cache_capacity_bytes").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after).To(Equal(before))
+		})
+
 		It("should fail to set immutable field 'host'", func() {
 			err := rdb.ConfigSet(ctx, "host", "localhost").Err()
 			Expect(err).To(HaveOccurred())

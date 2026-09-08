@@ -35,7 +35,8 @@ locking state inside `Storage`.
 
 1. Create and register `ClientSessions`.
 2. Create the command table.
-3. Open a single `Storage` with `Storage::open_object_store(..., None)`.
+3. Open a single `Storage` with `Storage::open_object_store`, using the configured
+   shared block cache capacity and no shard prefix.
 
 `Server::run()` binds to `host:port`, accepts connections, and spawns a
 `ClientConnection` task for each accepted socket.

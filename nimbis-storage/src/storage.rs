@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -8,6 +9,7 @@ use slatedb::config::PutOptions;
 #[cfg(test)]
 use slatedb::config::WriteOptions;
 use slatedb::db_cache::foyer::FoyerCache;
+use slatedb::db_cache::foyer::FoyerCacheOptions;
 use slatedb::object_store::ObjectStore;
 use slatedb::object_store::ObjectStoreScheme;
 use slatedb::object_store::local::LocalFileSystem;
@@ -31,6 +33,9 @@ use crate::string::value::StringValue;
 #[cfg(test)]
 use crate::top_level_key::TopLevelKey;
 use crate::typed_db::TypedDb;
+
+pub const DEFAULT_BLOCK_CACHE_CAPACITY_BYTES: NonZeroUsize =
+	NonZeroUsize::new(64 * 1024 * 1024).unwrap();
 
 #[derive(Clone)]
 pub struct Storage {
@@ -192,7 +197,13 @@ impl Storage {
 		shard_id: Option<usize>,
 	) -> Result<Self, StorageError> {
 		let url = local_path_url(path.as_ref())?;
-		Self::open_object_store(&url, std::iter::empty::<(&str, &str)>(), shard_id).await
+		Self::open_object_store(
+			&url,
+			std::iter::empty::<(&str, &str)>(),
+			shard_id,
+			DEFAULT_BLOCK_CACHE_CAPACITY_BYTES,
+		)
+		.await
 	}
 
 	#[fastrace::trace]
@@ -200,6 +211,7 @@ impl Storage {
 		url: &str,
 		options: I,
 		shard_id: Option<usize>,
+		block_cache_capacity_bytes: NonZeroUsize,
 	) -> Result<Self, StorageError>
 	where
 		I: IntoIterator<Item = (K, V)>,
@@ -211,19 +223,23 @@ impl Storage {
 		let (object_store, base_path) = build_object_store(raw_url, &url, options).await?;
 		let root_path = shard_path(base_path, shard_id);
 
-		Self::open_with_object_store(object_store, root_path).await
+		Self::open_with_object_store(object_store, root_path, block_cache_capacity_bytes).await
 	}
 
 	async fn open_with_object_store(
 		object_store: Arc<dyn ObjectStore>,
 		root_path: ObjectStorePath,
+		block_cache_capacity_bytes: NonZeroUsize,
 	) -> Result<Self, StorageError> {
 		let child_path = |name: &'static str| root_path.clone().join(name);
 
 		let marker = child_path(".nimbis");
 
 		// Create a single shared cache for all databases in this shard
-		let cache = Arc::new(FoyerCache::new());
+		let cache = Arc::new(FoyerCache::new_with_opts(FoyerCacheOptions {
+			max_capacity: block_cache_capacity_bytes.get() as u64,
+			..FoyerCacheOptions::default()
+		}));
 
 		// Open string_db — no custom compaction filter needed;
 		// SlateDB's built-in TTL mechanism handles expiration during compaction.
@@ -422,9 +438,14 @@ mod tests {
 		let path = std::env::temp_dir().join(format!("nimbis_test_object_store_{}", timestamp));
 		let url = local_path_url(path.as_path()).unwrap();
 
-		let storage = Storage::open_object_store(&url, std::iter::empty::<(&str, &str)>(), Some(3))
-			.await
-			.unwrap();
+		let storage = Storage::open_object_store(
+			&url,
+			std::iter::empty::<(&str, &str)>(),
+			Some(3),
+			NonZeroUsize::new(8 * 1024 * 1024).unwrap(),
+		)
+		.await
+		.unwrap();
 		storage
 			.set(Bytes::from("key"), Bytes::from("value"))
 			.await
@@ -433,6 +454,12 @@ mod tests {
 
 		assert!(path.join("shard-3").exists());
 		assert_current_layout_marker(&path.join("shard-3")).await;
+		let reopened = Storage::open(&path, Some(3)).await.unwrap();
+		assert_eq!(
+			reopened.get(Bytes::from("key")).await.unwrap(),
+			Some(Bytes::from("value"))
+		);
+		reopened.close().await.unwrap();
 		let _ = std::fs::remove_dir_all(path);
 	}
 

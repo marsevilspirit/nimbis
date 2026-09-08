@@ -34,6 +34,7 @@ impl MockNimbisServer {
 			port,
 			object_store_url: object_store_url.clone(),
 			object_store_options: Default::default(),
+			block_cache_capacity_bytes: nimbis_storage::DEFAULT_BLOCK_CACHE_CAPACITY_BYTES,
 			save: "".to_string(),
 			appendonly: "no".to_string(),
 			log_level: "error".to_string(),
