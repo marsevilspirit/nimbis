@@ -3,6 +3,7 @@ use log::warn;
 use nimbis_macros::storage_lock;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
+use slatedb::config::ScanOptions;
 
 use crate::data_type::DataType;
 use crate::error::StorageError;
@@ -150,26 +151,39 @@ impl Storage {
 			})?;
 		let mut results = Vec::with_capacity(result_capacity);
 		let mut encoded_element_keys = Vec::with_capacity(result_capacity);
-
-		for _ in 0..loop_count {
-			let seq = if is_left {
-				meta_val.head
-			} else {
-				meta_val
-					.tail
-					.checked_sub(1)
-					.ok_or_else(|| StorageError::DataInconsistency {
-						message: "list tail underflow during RPOP".to_string(),
-					})?
+		// The validated [head, tail) span contains every requested element.
+		let start_seq = if is_left {
+			meta_val.head
+		} else {
+			meta_val.tail - loop_count
+		};
+		let mut stream = if loop_count > 1 {
+			let start_key = ListElementKey::new(key.clone(), start_seq).encode()?;
+			let stop_key = ListElementKey::new(key.clone(), start_seq + loop_count - 1).encode()?;
+			// Preserve point-read caching for subsequent pops within the same block.
+			let options = ScanOptions {
+				cache_blocks: true,
+				..ScanOptions::default()
 			};
+			Some(
+				self.list_db
+					.scan_entries_with_options(start_key..=stop_key, &options)
+					.await?,
+			)
+		} else {
+			None
+		};
 
+		for offset in 0..loop_count {
+			let seq = start_seq + offset;
 			let element_key = ListElementKey::new(key.clone(), seq);
 			let encoded_element_key = element_key.encode()?;
-			let Some(kv) = self
-				.list_db
-				.get_entry(encoded_element_key.clone())
-				.await?
-				.filter(|kv| kv.seq >= meta_val.version)
+			let entry = match stream.as_mut() {
+				Some(stream) => stream.next().await?,
+				None => self.list_db.get_entry(encoded_element_key.clone()).await?,
+			};
+			let Some(kv) =
+				entry.filter(|kv| kv.key == encoded_element_key && kv.seq >= meta_val.version)
 			else {
 				return Err(StorageError::DataInconsistency {
 					message: format!(
@@ -180,23 +194,14 @@ impl Storage {
 
 			results.push(kv.value);
 			encoded_element_keys.push(encoded_element_key);
-			if is_left {
-				meta_val.head = meta_val.head.checked_add(1).ok_or_else(|| {
-					StorageError::DataInconsistency {
-						message: "list head overflow during LPOP".to_string(),
-					}
-				})?;
-			} else {
-				meta_val.tail = seq;
-			}
-			meta_val.len =
-				meta_val
-					.len
-					.checked_sub(1)
-					.ok_or_else(|| StorageError::DataInconsistency {
-						message: "list length underflow during pop".to_string(),
-					})?;
 		}
+		if is_left {
+			meta_val.head += loop_count;
+		} else {
+			meta_val.tail = start_seq;
+			results.reverse();
+		}
+		meta_val.len -= loop_count;
 
 		let mut batch = WriteBatch::new();
 		for encoded_element_key in encoded_element_keys {
@@ -296,6 +301,7 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
+	use rstest::rstest;
 	use slatedb::config::WriteOptions;
 
 	use super::*;
@@ -538,6 +544,59 @@ mod tests {
 		let _ = std::fs::remove_dir_all(path);
 	}
 
+	#[rstest]
+	#[case::single(None, 1)]
+	#[case::single_count(Some(1), 1)]
+	#[case::many(Some(4), 4)]
+	#[case::clamped(Some(8), 6)]
+	#[tokio::test]
+	async fn test_list_pop_uses_one_scan_only_for_multiple_elements(
+		#[values(true, false)] is_left: bool,
+		#[case] count: Option<usize>,
+		#[case] popped_count: usize,
+	) {
+		let (storage, path) = get_storage().await;
+		let key = Bytes::from("list_pop_read_paths");
+		let elements: Vec<_> = (0..6)
+			.map(|index| Bytes::from(format!("value:{index}")))
+			.collect();
+		storage.rpush(key.clone(), elements.clone()).await.unwrap();
+		let gets_before = request_metric(&storage.list_db, "get");
+		let scans_before = request_metric(&storage.list_db, "scan");
+		let batches_before = metric(&storage.list_db, "slatedb.db.write_batch_count");
+
+		let popped = if is_left {
+			storage.lpop(key.clone(), count).await.unwrap()
+		} else {
+			storage.rpop(key.clone(), count).await.unwrap()
+		};
+		let mut expected = elements.clone();
+		if !is_left {
+			expected.reverse();
+		}
+		assert_eq!(popped, expected[..popped_count]);
+		assert_eq!(
+			request_metric(&storage.list_db, "get") - gets_before,
+			if popped_count == 1 { 2 } else { 1 }
+		);
+		assert_eq!(
+			request_metric(&storage.list_db, "scan") - scans_before,
+			i64::from(popped_count > 1)
+		);
+		assert_eq!(
+			metric(&storage.list_db, "slatedb.db.write_batch_count") - batches_before,
+			1
+		);
+		let remaining = if is_left {
+			&elements[popped_count..]
+		} else {
+			&elements[..elements.len() - popped_count]
+		};
+		assert_eq!(storage.lrange(key, 0, -1).await.unwrap(), remaining);
+
+		let _ = std::fs::remove_dir_all(path);
+	}
+
 	#[tokio::test]
 	async fn test_empty_push_and_zero_count_pop_do_not_write() {
 		let (storage, path) = get_storage().await;
@@ -575,19 +634,61 @@ mod tests {
 		let _ = std::fs::remove_dir_all(path);
 	}
 
+	#[rstest]
+	#[case::missing_head(0, false)]
+	#[case::missing_middle(1, false)]
+	#[case::missing_tail(2, false)]
+	#[case::stale_middle(1, true)]
 	#[tokio::test]
-	async fn test_list_pop_missing_element_leaves_all_visible_state_unchanged() {
+	async fn test_list_pop_invalid_element_leaves_all_visible_state_unchanged(
+		#[values(true, false)] is_left: bool,
+		#[case] invalid_offset: usize,
+		#[case] stale: bool,
+	) {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("list_pop_inconsistent");
-		storage
-			.rpush(
-				key.clone(),
-				vec![Bytes::from("first"), Bytes::from("missing")],
-			)
-			.await
-			.unwrap();
+		let elements = vec![
+			Bytes::from("first"),
+			Bytes::from("middle"),
+			Bytes::from("last"),
+		];
+		storage.rpush(key.clone(), elements.clone()).await.unwrap();
 
 		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
+		let mut meta = storage.list_db.load(&key).await.unwrap().unwrap();
+		let element_keys: Vec<_> = (0..elements.len())
+			.map(|offset| {
+				ListElementKey::new(key.clone(), meta.head + offset as u64)
+					.encode()
+					.unwrap()
+			})
+			.collect();
+		if stale {
+			meta.version += 1;
+			storage
+				.list_db
+				.raw()
+				.put(meta_key.clone(), meta.encode())
+				.await
+				.unwrap();
+			for (offset, element) in elements.iter().enumerate() {
+				if offset != invalid_offset {
+					storage
+						.list_db
+						.raw()
+						.put(element_keys[offset].clone(), element.clone())
+						.await
+						.unwrap();
+				}
+			}
+		} else {
+			storage
+				.list_db
+				.raw()
+				.delete(element_keys[invalid_offset].clone())
+				.await
+				.unwrap();
+		}
 		let raw_meta_before = storage
 			.list_db
 			.raw()
@@ -595,18 +696,19 @@ mod tests {
 			.await
 			.unwrap()
 			.unwrap();
-		let meta = storage.list_db.load(&key).await.unwrap().unwrap();
-		let first_key = ListElementKey::new(key.clone(), meta.head)
-			.encode()
-			.unwrap();
-		let missing_key = ListElementKey::new(key.clone(), meta.head + 1)
-			.encode()
-			.unwrap();
-		storage.list_db.raw().delete(missing_key).await.unwrap();
-
 		let before_batches = metric(&storage.list_db, "slatedb.db.write_batch_count");
 		let before_ops = metric(&storage.list_db, "slatedb.db.write_ops");
-		let err = storage.lpop(key.clone(), Some(2)).await.unwrap_err();
+		let err = if is_left {
+			storage
+				.lpop(key.clone(), Some(elements.len()))
+				.await
+				.unwrap_err()
+		} else {
+			storage
+				.rpop(key.clone(), Some(elements.len()))
+				.await
+				.unwrap_err()
+		};
 		assert!(matches!(err, StorageError::DataInconsistency { .. }));
 		assert_eq!(
 			metric(&storage.list_db, "slatedb.db.write_batch_count") - before_batches,
@@ -626,10 +728,17 @@ mod tests {
 			.unwrap();
 		assert_eq!(raw_meta_after.seq, raw_meta_before.seq);
 		assert_eq!(raw_meta_after.value, raw_meta_before.value);
-		assert_eq!(
-			storage.list_db.raw().get(first_key).await.unwrap(),
-			Some(Bytes::from("first"))
-		);
+		for (offset, element_key) in element_keys.into_iter().enumerate() {
+			let expected = if !stale && offset == invalid_offset {
+				None
+			} else {
+				Some(elements[offset].clone())
+			};
+			assert_eq!(
+				storage.list_db.raw().get(element_key).await.unwrap(),
+				expected
+			);
+		}
 
 		let _ = std::fs::remove_dir_all(path);
 	}
@@ -700,8 +809,11 @@ mod tests {
 		let _ = std::fs::remove_dir_all(path);
 	}
 
+	#[rstest]
+	#[case::left(true)]
+	#[case::right(false)]
 	#[tokio::test]
-	async fn test_list_push_preserves_metadata_ttl_and_generation() {
+	async fn test_list_push_and_pop_preserve_metadata_ttl_and_generation(#[case] is_left: bool) {
 		let (storage, path) = get_storage().await;
 		let key = Bytes::from("list_ttl_generation");
 		let meta_key = TopLevelKey::new(key.clone()).unwrap().encode();
@@ -733,13 +845,20 @@ mod tests {
 			.unwrap();
 
 		storage
-			.rpush(key.clone(), vec![Bytes::from("second")])
+			.rpush(
+				key.clone(),
+				vec![
+					Bytes::from("second"),
+					Bytes::from("third"),
+					Bytes::from("fourth"),
+				],
+			)
 			.await
 			.unwrap();
 		let raw_meta_after = storage
 			.list_db
 			.raw()
-			.get_key_value(meta_key)
+			.get_key_value(meta_key.clone())
 			.await
 			.unwrap()
 			.unwrap();
@@ -748,7 +867,31 @@ mod tests {
 		assert!(expire_after.abs_diff(expire_before) < 1_000);
 		let meta_after = ListMetaValue::decode(&raw_meta_after.value).unwrap();
 		assert_eq!(meta_after.version, generation);
-		assert_eq!(meta_after.len, 2);
+		assert_eq!(meta_after.len, 4);
+
+		if is_left {
+			assert_eq!(
+				storage.lpop(key, Some(2)).await.unwrap(),
+				vec![Bytes::from("first"), Bytes::from("second")]
+			);
+		} else {
+			assert_eq!(
+				storage.rpop(key, Some(2)).await.unwrap(),
+				vec![Bytes::from("fourth"), Bytes::from("third")]
+			);
+		}
+		let raw_after_pop = storage
+			.list_db
+			.raw()
+			.get_key_value(meta_key)
+			.await
+			.unwrap()
+			.unwrap();
+		assert!(raw_after_pop.expire_ts.unwrap().abs_diff(expire_after) < 1_000);
+		let meta_after_pop = ListMetaValue::decode(&raw_after_pop.value).unwrap();
+		assert_eq!(meta_after_pop.version, generation);
+		assert_eq!(meta_after_pop.expire_time, meta_after.expire_time);
+		assert_eq!(meta_after_pop.len, 2);
 
 		let _ = std::fs::remove_dir_all(path);
 	}

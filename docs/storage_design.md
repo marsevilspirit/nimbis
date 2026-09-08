@@ -132,6 +132,14 @@ List sequence numbers use big-endian encoding for the same reason: a logical
 path scans that bounded interval once and filters entries against the current
 collection version.
 
+`LPOP` and `RPOP` keep a point read when popping one element. Count pops read
+their bounded interval in one scan and verify every expected element key and
+collection version before committing deletes and metadata in one batch. `RPOP`
+reverses the scanned values to preserve tail-first response order. A missing or
+stale element fails the whole command before any mutation is committed. POP scans
+cache fetched blocks, retaining the point-read policy for subsequent pops from
+the same block.
+
 ## Version + Compaction Strategy
 
 Collection metadata includes a `version`. The first metadata row and all initial
