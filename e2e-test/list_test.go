@@ -63,6 +63,25 @@ var _ = Describe("List Commands", func() {
 		Expect(val).To(Equal("v1"))
 	})
 
+	It("should preserve count-pop order and remaining elements", func() {
+		key := "mylist_count"
+		Expect(rdb.RPush(ctx, key, "a", "b", "c", "d", "e", "f").Err()).To(Succeed())
+
+		left, err := rdb.LPopCount(ctx, key, 2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(left).To(Equal([]string{"a", "b"}))
+		right, err := rdb.RPopCount(ctx, key, 2).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(right).To(Equal([]string{"f", "e"}))
+		remaining, err := rdb.LRange(ctx, key, 0, -1).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(remaining).To(Equal([]string{"c", "d"}))
+		left, err = rdb.LPopCount(ctx, key, 99).Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(left).To(Equal(remaining))
+		Expect(rdb.LLen(ctx, key).Val()).To(Equal(int64(0)))
+	})
+
 	It("should LLEN correctly", func() {
 		key := "mylist_len"
 		Expect(rdb.LLen(ctx, key).Val()).To(Equal(int64(0)))

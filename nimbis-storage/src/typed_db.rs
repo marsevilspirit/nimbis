@@ -8,6 +8,7 @@ use slatedb::DbIterator;
 use slatedb::KeyValue;
 use slatedb::WriteBatch;
 use slatedb::config::PutOptions;
+use slatedb::config::ScanOptions;
 use slatedb::config::WriteOptions;
 #[cfg(test)]
 use slatedb_common::metrics::DefaultMetricsRecorder;
@@ -150,7 +151,19 @@ impl<M: CollectionMeta> TypedDb<M> {
 	where
 		T: ByteRangeBounds + Send,
 	{
-		Ok(self.db.scan(range).await?)
+		self.scan_entries_with_options(range, &ScanOptions::default())
+			.await
+	}
+
+	pub(crate) async fn scan_entries_with_options<T>(
+		&self,
+		range: T,
+		options: &ScanOptions,
+	) -> Result<DbIterator, StorageError>
+	where
+		T: ByteRangeBounds + Send,
+	{
+		Ok(self.db.scan_with_options(range, options).await?)
 	}
 
 	/// Scan physical sub-keys sharing a prefix in this collection database.
