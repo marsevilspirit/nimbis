@@ -86,7 +86,7 @@ var _ = Describe("CONFIG Commands", func() {
 			Expect(result).To(HaveKey("object_store_url"))
 			Expect(result["object_store_url"]).NotTo(BeEmpty())
 			Expect(result).To(HaveKey("object_store_options"))
-			Expect(result).To(HaveKeyWithValue("block_cache_capacity_bytes", "67108864"))
+			Expect(result).To(HaveKeyWithValue("block_cache_capacity_bytes", "536870912"))
 			Expect(result).To(HaveKeyWithValue("save", ""))
 			Expect(result).To(HaveKeyWithValue("appendonly", "no"))
 			Expect(result).To(HaveKeyWithValue("log_level", "info"))

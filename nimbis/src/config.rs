@@ -633,10 +633,10 @@ runtime_threads: 4
 	#[test]
 	fn test_block_cache_capacity_is_readable_and_immutable() {
 		let mut config = ServerConfig::default();
-		assert_eq!(config.block_cache_capacity_bytes.get(), 64 * 1024 * 1024);
+		assert_eq!(config.block_cache_capacity_bytes.get(), 512 * 1024 * 1024);
 		assert_eq!(
 			config.get_field("block_cache_capacity_bytes").unwrap(),
-			"67108864"
+			"536870912"
 		);
 		assert_eq!(
 			config
@@ -644,7 +644,7 @@ runtime_threads: 4
 				.unwrap_err(),
 			"Field 'block_cache_capacity_bytes' is immutable"
 		);
-		assert_eq!(config.block_cache_capacity_bytes.get(), 64 * 1024 * 1024);
+		assert_eq!(config.block_cache_capacity_bytes.get(), 512 * 1024 * 1024);
 	}
 
 	#[rstest]

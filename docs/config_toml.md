@@ -24,15 +24,15 @@ Nimbis stores data using the `object_store` crate. SlateDB persists data against
 ### Shared Block Cache
 
 ```toml
-# Shared cache capacity in bytes; default: 64 MiB.
-block_cache_capacity_bytes = 67108864
+# Shared cache capacity in bytes; default: 512 MiB.
+block_cache_capacity_bytes = 536870912
 ```
 
 This cache stores SST blocks, indexes, and filters. Its capacity is shared by the
 String, Hash, List, Set, and ZSet databases; it is not a separate budget per database
 or a limit on total process memory. Set a positive integer that fits the platform's
 `usize` type. Zero, negative values, and overflow are rejected when loading the
-configuration.
+configuration. Lower this capacity to fit a smaller memory budget.
 
 Set this top-level field before any `[object_store_options]` table. It takes effect
 at startup and is visible through `CONFIG GET block_cache_capacity_bytes`.

@@ -35,7 +35,7 @@ use crate::top_level_key::TopLevelKey;
 use crate::typed_db::TypedDb;
 
 pub const DEFAULT_BLOCK_CACHE_CAPACITY_BYTES: NonZeroUsize =
-	NonZeroUsize::new(64 * 1024 * 1024).unwrap();
+	NonZeroUsize::new(512 * 1024 * 1024).unwrap();
 
 #[derive(Clone)]
 pub struct Storage {
