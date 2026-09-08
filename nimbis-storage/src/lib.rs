@@ -23,5 +23,6 @@ mod zset;
 pub use crate::data_type::DataType;
 pub use crate::error::DecoderError;
 pub use crate::error::StorageError;
+pub use crate::storage::DEFAULT_BLOCK_CACHE_CAPACITY_BYTES;
 pub use crate::storage::Storage;
 pub use crate::storage::validate_object_store_url;

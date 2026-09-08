@@ -33,6 +33,7 @@ impl Server {
 		let config = crate::config::SERVER_CONF.load();
 		let object_store_url = config.object_store_url.clone();
 		let object_store_options = config.object_store_options.0.clone();
+		let block_cache_capacity_bytes = config.block_cache_capacity_bytes;
 		drop(config);
 
 		let storage = Arc::new(
@@ -42,6 +43,7 @@ impl Server {
 					.iter()
 					.map(|(key, value)| (key.as_str(), value.as_str())),
 				None,
+				block_cache_capacity_bytes,
 			)
 			.await?,
 		);

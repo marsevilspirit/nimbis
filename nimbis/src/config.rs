@@ -23,6 +23,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -31,6 +32,7 @@ use std::sync::OnceLock;
 
 use arc_swap::ArcSwap;
 pub use nimbis_macros::OnlineConfig;
+use nimbis_storage::DEFAULT_BLOCK_CACHE_CAPACITY_BYTES;
 use nimbis_telemetry::TelemetryError;
 use nimbis_telemetry::logger::File as LogFile;
 use nimbis_telemetry::logger::LogOutput;
@@ -120,6 +122,8 @@ pub struct ServerConfig {
 	pub object_store_url: String,
 	#[online_config(immutable)]
 	pub object_store_options: ObjectStoreOptions,
+	#[online_config(immutable)]
+	pub block_cache_capacity_bytes: NonZeroUsize,
 	// Support redis-benchmark
 	#[online_config(immutable)]
 	pub save: String,
@@ -204,6 +208,7 @@ impl Default for ServerConfig {
 			port: 6379,
 			object_store_url: "file:nimbis_store".into(),
 			object_store_options: ObjectStoreOptions::default(),
+			block_cache_capacity_bytes: DEFAULT_BLOCK_CACHE_CAPACITY_BYTES,
 			save: "".into(),
 			appendonly: "no".into(),
 			log_level: "info".into(),
@@ -488,6 +493,7 @@ host = "127.0.0.1"
 port = 1234
 object_store_url = "file:./data"
 object_store_options = { aws_region = "us-east-1" }
+block_cache_capacity_bytes = 268435456
 save = "900 1"
 appendonly = "yes"
 log_level = "debug"
@@ -503,6 +509,7 @@ runtime_threads = 4
 		assert_eq!(config.host, "127.0.0.1");
 		assert_eq!(config.port, 1234);
 		assert_eq!(config.object_store_url, "file:./data");
+		assert_eq!(config.block_cache_capacity_bytes.get(), 268435456);
 		assert_eq!(
 			config
 				.object_store_options
@@ -621,6 +628,44 @@ runtime_threads: 4
 			"file:nimbis_store"
 		);
 		assert!(ServerConfig::default().object_store_options.0.is_empty());
+	}
+
+	#[test]
+	fn test_block_cache_capacity_is_readable_and_immutable() {
+		let mut config = ServerConfig::default();
+		assert_eq!(config.block_cache_capacity_bytes.get(), 512 * 1024 * 1024);
+		assert_eq!(
+			config.get_field("block_cache_capacity_bytes").unwrap(),
+			"536870912"
+		);
+		assert_eq!(
+			config
+				.set_field("block_cache_capacity_bytes", "268435456")
+				.unwrap_err(),
+			"Field 'block_cache_capacity_bytes' is immutable"
+		);
+		assert_eq!(config.block_cache_capacity_bytes.get(), 512 * 1024 * 1024);
+	}
+
+	#[rstest]
+	#[case::zero("0")]
+	#[case::negative("-1")]
+	#[case::overflow("18446744073709551616")]
+	fn test_block_cache_capacity_rejects_invalid_values(#[case] value: &str) {
+		assert!(
+			toml::from_str::<ServerConfig>(&format!("block_cache_capacity_bytes = {value}"))
+				.is_err()
+		);
+		assert!(
+			serde_json::from_str::<ServerConfig>(&format!(
+				"{{\"block_cache_capacity_bytes\": {value}}}"
+			))
+			.is_err()
+		);
+		assert!(
+			serde_yaml::from_str::<ServerConfig>(&format!("block_cache_capacity_bytes: {value}"))
+				.is_err()
+		);
 	}
 
 	#[test]

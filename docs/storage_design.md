@@ -34,7 +34,8 @@ Each data type has its own database instance for isolation and predictable perfo
 The same raw user key may exist independently in multiple type databases. Type-specific
 commands only access their own database, so, for example, `SET k v` and `HSET k f v`
 can coexist without a cross-type `WRONGTYPE` lookup.
-`Storage::open(path, shard_id)` and `Storage::open_object_store(url, options, shard_id)`
+`Storage::open(path, shard_id)` and
+`Storage::open_object_store(url, options, shard_id, block_cache_capacity_bytes)`
 open all five DBs under either the root path (`None`) or a shard subdirectory (`Some(id)`).
 The server opens one shared storage instance with `None`.
 
@@ -224,6 +225,7 @@ let storage = Storage::open_object_store(
     "file:nimbis_store",
     std::iter::empty::<(&str, &str)>(),
     None,
+    nimbis_storage::DEFAULT_BLOCK_CACHE_CAPACITY_BYTES,
 ).await?;
 ```
 
