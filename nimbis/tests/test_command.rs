@@ -114,12 +114,89 @@ fn test_pipeline_response_order() {
 	let responses = client.execute_pipeline(&[
 		&["SET", "it:pipeline:key", "1"],
 		&["INCR", "it:pipeline:key"],
+		&["GET"],
+		&["NO_SUCH_CMD"],
 		&["GET", "it:pipeline:key"],
 	]);
 
-	assert_eq!(responses[0], RespValue::SimpleString("OK".into()));
-	assert_eq!(responses[1], RespValue::Integer(2));
-	assert_eq!(responses[2], RespValue::bulk_string("2"));
+	assert_eq!(
+		responses,
+		vec![
+			RespValue::simple_string("OK"),
+			RespValue::Integer(2),
+			RespValue::error("ERR wrong number of arguments for 'get' command"),
+			RespValue::error("ERR unknown command 'no_such_cmd'"),
+			RespValue::bulk_string("2"),
+		]
+	);
+	assert_eq!(client.ping(), "PONG");
+}
+
+#[test]
+#[serial]
+fn test_pipeline_large_bulk_responses() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+	let value = "x".repeat(40 * 1024);
+	assert_eq!(client.set("it:pipeline:large", &value), "OK");
+	let oversized_value = "y".repeat(160 * 1024);
+	assert_eq!(client.set("it:pipeline:oversized", &oversized_value), "OK");
+
+	let responses = client.execute_pipeline(&[
+		&["GET", "it:pipeline:large"],
+		&["GET", "it:pipeline:large"],
+		&["GET", "it:pipeline:large"],
+		&["GET", "it:pipeline:oversized"],
+		&["PING"],
+	]);
+
+	assert_eq!(
+		responses,
+		vec![
+			RespValue::bulk_string(value.clone()),
+			RespValue::bulk_string(value.clone()),
+			RespValue::bulk_string(value),
+			RespValue::bulk_string(oversized_value),
+			RespValue::simple_string("PONG"),
+		]
+	);
+	assert_eq!(client.ping(), "PONG");
+}
+
+#[test]
+#[serial]
+fn test_pipeline_response_before_partial_request_finishes() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+
+	client.write_raw(b"*1\r\n$4\r\nPING\r\n*2\r\n$4\r\nPING\r\n$4\r\npar");
+	assert_eq!(
+		client.read_response().unwrap(),
+		RespValue::simple_string("PONG")
+	);
+	client.write_raw(b"t\r\n");
+	assert_eq!(
+		client.read_response().unwrap(),
+		RespValue::bulk_string("part")
+	);
+	assert_eq!(client.ping(), "PONG");
+}
+
+#[test]
+#[serial]
+fn test_protocol_error_closes_connection() {
+	let server = MockNimbisServer::new();
+	let mut client = server.get_client();
+
+	client.write_raw(b"*0\r\n");
+	assert_eq!(
+		client.read_response().unwrap(),
+		RespValue::error("ERR Protocol error: Empty command")
+	);
+	assert_eq!(
+		client.read_response().unwrap_err(),
+		"connection closed before full response"
+	);
 }
 
 #[test]

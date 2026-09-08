@@ -48,7 +48,12 @@ Each `ClientConnection` owns a RESP parser and a socket. For every read:
 1. Parse all complete RESP commands currently in the buffer.
 2. Convert each RESP array into `ParsedCmd`.
 3. Execute commands in parse order.
-4. Write responses in the same order.
+4. Encode responses in the same order into a reusable connection buffer.
+5. Write buffered responses at the end of the parsed batch or after reaching
+   64 KiB. A single response may exceed this flush threshold. A single command
+   is flushed immediately without waiting for another request.
+   Buffers larger than 128 KiB are released after writing. Within a batch,
+   an earlier response can wait for a later command until the next flush.
 
 This preserves Redis pipeline response ordering without inter-worker channels.
 

@@ -25,6 +25,7 @@ use crate::cmd::ParsedCmd;
 use crate::server_config;
 
 static NEXT_CLIENT_SESSION_ID: AtomicI64 = AtomicI64::new(1);
+const RESPONSE_BATCH_BYTES: usize = 64 * 1024;
 
 pub fn next_client_session_id() -> i64 {
 	NEXT_CLIENT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
@@ -115,6 +116,7 @@ impl ClientConnection {
 	#[trace]
 	pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		let mut buffer = BytesMut::with_capacity(4096);
+		let mut response_buffer = BytesMut::with_capacity(4096);
 		debug!("Client connection started");
 
 		loop {
@@ -168,14 +170,24 @@ impl ClientConnection {
 				}
 			}
 
-			for parsed_cmd in parsed_cmds {
+			let command_count = parsed_cmds.len();
+			for (index, parsed_cmd) in parsed_cmds.into_iter().enumerate() {
 				let response = self.execute_command(parsed_cmd).await;
-				if let Err(e) = self.socket.write_all(&response.encode()?).await {
+				response.encode_to(&mut response_buffer)?;
+				if response_buffer.len() < RESPONSE_BATCH_BYTES && index + 1 < command_count {
+					continue;
+				}
+				if let Err(e) = self.socket.write_all(&response_buffer).await {
 					if e.kind() == std::io::ErrorKind::ConnectionReset {
 						debug!("Connection reset by peer");
 						return Ok(());
 					}
 					return Err(e.into());
+				}
+				if response_buffer.capacity() > 2 * RESPONSE_BATCH_BYTES {
+					response_buffer = BytesMut::new();
+				} else {
+					response_buffer.clear();
 				}
 			}
 		}
