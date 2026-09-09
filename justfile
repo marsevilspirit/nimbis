@@ -35,6 +35,26 @@ bench package="" *args:
 redis-bench *args:
     cargo xtask redis-benchmark {{args}}
 
+# Run all explicit-count list-pop cells with paired P=1/P=50 passes
+[positional-arguments]
+[group: 'test']
+redis-bench-counted-pop base_binary="target/release/nimbis" head_binary="target/release/nimbis" output_dir="target/counted-pop" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    counted_base="$1"
+    counted_head="$2"
+    counted_output="$3"
+    shift 3
+    counted_commands=lpop-count-1,lpop-count-2,lpop-count-32,lpop-count-256,rpop-count-1,rpop-count-2,rpop-count-32,rpop-count-256
+    cargo xtask benchmark-ci-shard \
+      --main-binary "$counted_base" --pr-binary "$counted_head" \
+      --commands "$counted_commands" --data-size "${D:-128}" \
+      --requests "${N:-1000}" --clients "${C:-20}" --replica 1 \
+      --output-dir "$counted_output" "$@"
+    cargo xtask benchmark-ci-report --input-dir "$counted_output" \
+      --output "$counted_output/report.md" --expected-replicas 1 \
+      --expected-data-sizes "${D:-128}" --expected-commands "$counted_commands"
+
 # Compare redis-benchmark results for two Git refs
 [positional-arguments]
 [group: 'test']

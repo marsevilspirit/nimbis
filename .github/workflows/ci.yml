@@ -405,6 +405,64 @@ jobs:
         if-no-files-found: error
         retention-days: 30
 
+  benchmark_counted_pop:
+    name: Counted POP tracking (short paired samples)
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: [build_release, build_main_release, build_redis_benchmark]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Download Main release binary
+      uses: actions/download-artifact@v8
+      with:
+        name: nimbis-release-main-ubuntu-latest
+        path: artifacts/main
+
+    - name: Download PR release binaries
+      uses: actions/download-artifact@v8
+      with:
+        name: nimbis-release-ubuntu-latest
+        path: artifacts/pr
+
+    - name: Download Redis 8.0.0 benchmark client
+      uses: actions/download-artifact@v8
+      with:
+        name: redis-benchmark-8.0.0
+        path: artifacts/redis
+
+    - name: Record counted POP behavior and throughput
+      run: |
+        chmod +x artifacts/main/nimbis artifacts/pr/nimbis artifacts/pr/xtask artifacts/redis/*
+        mkdir -p counted-pop
+        {
+          uname -a
+          lscpu
+          sha256sum artifacts/main/nimbis artifacts/pr/nimbis artifacts/pr/xtask artifacts/redis/*
+          artifacts/redis/redis-benchmark --version
+        } > counted-pop/environment.txt
+        artifacts/pr/xtask benchmark-ci-shard \
+          --main-binary artifacts/main/nimbis --pr-binary artifacts/pr/nimbis \
+          --commands lpop-count-32,rpop-count-32 --data-size 128 \
+          --requests 1000 --clients 20 --replica 1 --run-attempt ${{ github.run_attempt }} \
+          --main-label '${{ github.event.pull_request.base.sha }}' --pr-label '${{ github.sha }}' \
+          --redis-benchmark "$GITHUB_WORKSPACE/artifacts/redis/redis-benchmark" \
+          --redis-cli "$GITHUB_WORKSPACE/artifacts/redis/redis-cli" \
+          --output-dir counted-pop
+        artifacts/pr/xtask benchmark-ci-report --input-dir counted-pop \
+          --output counted-pop/report.md --expected-replicas 1 --expected-data-sizes 128 \
+          --expected-commands lpop-count-32,rpop-count-32
+        echo 'Counted POP short samples: fixture validation and tracking only; no performance gate.' >> "$GITHUB_STEP_SUMMARY"
+        cat counted-pop/report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload counted POP evidence
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: counted-pop-attempt-${{ github.run_attempt }}
+        path: counted-pop
+        if-no-files-found: error
+        retention-days: 30
+
   benchmark_context:
     name: Cross-database benchmark context (${{ matrix.data_size }} bytes)
     if: ${{ github.event_name == 'pull_request' }}

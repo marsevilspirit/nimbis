@@ -3,16 +3,19 @@ use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
+use std::iter::repeat_n;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use clap::Args as ClapArgs;
 use clap::ValueEnum;
 
+use crate::benchmarks;
 use crate::write_stdout_line;
 
 const BUILTIN_SUPPORTED: &str = "ping,set,get,incr,lpush,rpush,lpop,rpop,sadd,hset,zadd,lrange";
@@ -125,6 +128,22 @@ pub enum ComparisonCommand {
 	Srem,
 	Zadd,
 	Zrem,
+	#[value(name = "lpop-count-1")]
+	LpopCount1,
+	#[value(name = "lpop-count-2")]
+	LpopCount2,
+	#[value(name = "lpop-count-32")]
+	LpopCount32,
+	#[value(name = "lpop-count-256")]
+	LpopCount256,
+	#[value(name = "rpop-count-1")]
+	RpopCount1,
+	#[value(name = "rpop-count-2")]
+	RpopCount2,
+	#[value(name = "rpop-count-32")]
+	RpopCount32,
+	#[value(name = "rpop-count-256")]
+	RpopCount256,
 }
 
 impl ComparisonCommand {
@@ -140,6 +159,14 @@ impl ComparisonCommand {
 			Self::Srem => "SREM",
 			Self::Zadd => "ZADD",
 			Self::Zrem => "ZREM",
+			Self::LpopCount1 => "LPOP_COUNT_1",
+			Self::LpopCount2 => "LPOP_COUNT_2",
+			Self::LpopCount32 => "LPOP_COUNT_32",
+			Self::LpopCount256 => "LPOP_COUNT_256",
+			Self::RpopCount1 => "RPOP_COUNT_1",
+			Self::RpopCount2 => "RPOP_COUNT_2",
+			Self::RpopCount32 => "RPOP_COUNT_32",
+			Self::RpopCount256 => "RPOP_COUNT_256",
 		}
 	}
 
@@ -155,11 +182,33 @@ impl ComparisonCommand {
 			Self::Srem => "srem",
 			Self::Zadd => "zadd",
 			Self::Zrem => "zrem",
+			Self::LpopCount1 => "lpop_count_1",
+			Self::LpopCount2 => "lpop_count_2",
+			Self::LpopCount32 => "lpop_count_32",
+			Self::LpopCount256 => "lpop_count_256",
+			Self::RpopCount1 => "rpop_count_1",
+			Self::RpopCount2 => "rpop_count_2",
+			Self::RpopCount32 => "rpop_count_32",
+			Self::RpopCount256 => "rpop_count_256",
+		}
+	}
+
+	pub(crate) fn counted_pop(self) -> Option<(&'static str, u64)> {
+		match self {
+			Self::LpopCount1 => Some(("LPOP", 1)),
+			Self::LpopCount2 => Some(("LPOP", 2)),
+			Self::LpopCount32 => Some(("LPOP", 32)),
+			Self::LpopCount256 => Some(("LPOP", 256)),
+			Self::RpopCount1 => Some(("RPOP", 1)),
+			Self::RpopCount2 => Some(("RPOP", 2)),
+			Self::RpopCount32 => Some(("RPOP", 32)),
+			Self::RpopCount256 => Some(("RPOP", 256)),
+			_ => None,
 		}
 	}
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Config {
 	host: String,
 	port: u16,
@@ -228,6 +277,12 @@ impl Config {
 				"--seed must not exceed {MAX_REDIS_RANDOM_SEED} for Redis 8 compatibility"
 			));
 		}
+		if config
+			.command
+			.is_some_and(|command| command.counted_pop().is_some())
+		{
+			validate_counted_pop_config(&config)?;
+		}
 		Ok(config)
 	}
 
@@ -280,6 +335,7 @@ pub fn run(args: Args, workspace_root: &Path) -> Result<(), String> {
 
 trait Runner {
 	fn run_status(&self, program: &str, args: &[String]) -> Result<(), String>;
+	fn run_output(&self, program: &str, args: &[String]) -> Result<String, String>;
 	fn run_streaming_output(
 		&self,
 		program: &str,
@@ -311,9 +367,13 @@ fn run_with_runner<R: Runner>(config: &Config, runner: &R) -> Result<(), String>
 
 	redis_cli(config, runner, &["FLUSHDB"])?;
 	if let Some(command) = config.command {
-		seed_comparison_command(config, runner, command)?;
-		settle_after_seed(config);
-		run_comparison_command(config, runner, command)?;
+		if let Some((direction, count)) = command.counted_pop() {
+			run_counted_pop(config, runner, command.label(), direction, count)?;
+		} else {
+			seed_comparison_command(config, runner, command)?;
+			settle_after_seed(config);
+			run_comparison_command(config, runner, command)?;
+		}
 	} else {
 		seed_fixed_data(config, runner)?;
 		seed_random_data(config, runner)?;
@@ -361,6 +421,7 @@ fn seed_comparison_command<R: Runner>(
 		| ComparisonCommand::Lpush
 		| ComparisonCommand::Sadd
 		| ComparisonCommand::Zadd => Ok(()),
+		_ => Err("counted pops require their validated fixture path".into()),
 	}
 }
 
@@ -400,7 +461,127 @@ fn run_comparison_command<R: Runner>(
 			let member = random_payload(config.data_size)?;
 			run_benchmark(config, runner, label, &["ZREM", "bench:zset:zrem", &member])
 		}
+		_ => Err("counted pops require their validated fixture path".into()),
 	}
+}
+
+fn validate_counted_pop_config(config: &Config) -> Result<(), String> {
+	let batch = config
+		.clients
+		.checked_mul(config.pipeline)
+		.filter(|batch| *batch > 0)
+		.ok_or_else(|| "counted pops require positive C and P without overflow".to_string())?;
+	if config.requests == 0 || !config.requests.is_multiple_of(batch) {
+		return Err("counted pops require N to be a positive multiple of C * P".into());
+	}
+	if config.requests > MAX_REDIS_RANDOM_SEED - 2 || config.data_size == 0 {
+		return Err("counted pops require N + 2 <= i32::MAX and D > 0".into());
+	}
+	if config.csv || !config.extra_args.is_empty() {
+		return Err(
+			"counted pops require quiet output and do not allow extra benchmark arguments".into(),
+		);
+	}
+	Ok(())
+}
+
+fn run_counted_pop<R: Runner>(
+	config: &Config,
+	runner: &R,
+	label: &str,
+	direction: &str,
+	count: u64,
+) -> Result<(), String> {
+	validate_counted_pop_config(config)?;
+	let key = "bench:list:counted-pop";
+	let value = fixed_payload(config.data_size)?;
+	let count_arg = count.to_string();
+	let seed = Config {
+		seed_requests: config.requests + 2,
+		pipeline: 1,
+		..config.clone()
+	};
+	let mut push = vec!["RPUSH", key];
+	push.extend(repeat_n(value.as_str(), count as usize));
+	seed_benchmark(&seed, runner, &push)?;
+	let seeded_elements = (config.requests + 2) * count;
+	check_list_len(config, runner, key, seeded_elements)?;
+	let popped = redis_cli_output(config, runner, &["--json", direction, key, &count_arg])?;
+	let popped: Vec<String> = serde_json::from_str(&popped)
+		.map_err(|error| format!("Invalid {direction} count preflight response: {error}"))?;
+	if popped.len() != count as usize || popped.iter().any(|item| item != &value) {
+		return Err(format!(
+			"{direction} {count} preflight did not return {count} seeded values"
+		));
+	}
+	check_list_len(config, runner, key, (config.requests + 1) * count)?;
+	settle_after_seed(config);
+	let started = Instant::now();
+	run_benchmark(config, runner, label, &[direction, key, &count_arg])?;
+	let wall_seconds = started.elapsed().as_secs_f64();
+	check_list_len(config, runner, key, count)?;
+
+	let output = config.output_dir.join(format!("{label}.txt"));
+	let raw = fs::read_to_string(&output).map_err(|error| error.to_string())?;
+	let result = benchmarks::parse_benchmark(&raw)
+		.remove(direction)
+		.filter(|result| result.rps.is_finite() && result.rps > 0.0)
+		.ok_or_else(|| format!("No positive {direction} throughput in {}", output.display()))?;
+	let validation = serde_json::json!({
+		"command": direction,
+		"count": count,
+		"requests": config.requests,
+		"clients": config.clients,
+		"pipeline": config.pipeline,
+		"element_bytes": config.data_size,
+		"seeded_elements": seeded_elements,
+		"preflight_elements": count,
+		"measured_elements": config.requests * count,
+		"remaining_elements": count,
+		"requests_per_second": result.rps,
+		"elements_per_second": result.rps * count as f64,
+		"measurement_seconds_from_rps": config.requests as f64 / result.rps,
+		"benchmark_process_wall_seconds": wall_seconds,
+	});
+	let validation_path = config.output_dir.join(format!("{label}-validation.json"));
+	fs::write(&validation_path, format!("{validation:#}\n"))
+		.map_err(|error| format!("Failed to write {}: {error}", validation_path.display()))?;
+	write_stdout_line(&format!(
+		"Verified {direction} count={count}: {} full requests, {count} elements remain",
+		config.requests
+	))
+}
+
+fn check_list_len<R: Runner>(
+	config: &Config,
+	runner: &R,
+	key: &str,
+	expected: u64,
+) -> Result<(), String> {
+	let output = redis_cli_output(config, runner, &["--raw", "LLEN", key])?;
+	if output.trim().parse::<u64>() != Ok(expected) {
+		return Err(format!(
+			"counted-pop LLEN expected {expected}, received {}",
+			output.trim()
+		));
+	}
+	Ok(())
+}
+
+fn redis_cli_output<R: Runner>(
+	config: &Config,
+	runner: &R,
+	command_args: &[&str],
+) -> Result<String, String> {
+	let mut args = vec![
+		"-h".into(),
+		config.host.clone(),
+		"-p".into(),
+		config.port.to_string(),
+		"-e".into(),
+	];
+	args.extend(command_args.iter().map(|arg| (*arg).to_string()));
+	runner.run_output(&config.redis_cli, &args)
 }
 
 fn fixed_payload(data_size: u64) -> Result<String, String> {
@@ -708,12 +889,17 @@ struct ProcessRunner;
 
 impl Runner for ProcessRunner {
 	fn run_status(&self, program: &str, args: &[String]) -> Result<(), String> {
+		self.run_output(program, args).map(|_| ())
+	}
+
+	fn run_output(&self, program: &str, args: &[String]) -> Result<String, String> {
 		let output = Command::new(program)
 			.args(args)
 			.output()
 			.map_err(|error| format!("Failed to run {program}: {error}"))?;
 		if output.status.success() {
-			Ok(())
+			String::from_utf8(output.stdout)
+				.map_err(|error| format!("Invalid {program} output: {error}"))
 		} else {
 			let stderr = String::from_utf8_lossy(&output.stderr);
 			let stdout = String::from_utf8_lossy(&output.stdout);
@@ -875,6 +1061,7 @@ fn env_bool(env_name: &str) -> bool {
 mod tests {
 	use std::cell::RefCell;
 	use std::collections::BTreeSet;
+	use std::collections::VecDeque;
 	use std::path::Path;
 	use std::path::PathBuf;
 
@@ -893,6 +1080,8 @@ mod tests {
 	struct FakeRunner {
 		status_calls: RefCell<Vec<RecordedCall>>,
 		streaming_calls: RefCell<Vec<RecordedCall>>,
+		output_responses: RefCell<VecDeque<String>>,
+		benchmark_output: Option<String>,
 	}
 
 	const BENCHMARKED_FULL_PROFILE_COMMANDS: &[&str] = &[
@@ -1009,6 +1198,14 @@ mod tests {
 	}
 
 	impl Runner for FakeRunner {
+		fn run_output(&self, program: &str, args: &[String]) -> Result<String, String> {
+			self.run_status(program, args)?;
+			self.output_responses
+				.borrow_mut()
+				.pop_front()
+				.ok_or_else(|| "missing fake response".into())
+		}
+
 		fn run_status(&self, program: &str, args: &[String]) -> Result<(), String> {
 			self.status_calls.borrow_mut().push(RecordedCall {
 				program: program.to_string(),
@@ -1029,8 +1226,13 @@ mod tests {
 				args: args.to_vec(),
 				output_file: Some(file.to_path_buf()),
 			});
-			fs::write(file, b"PING_INLINE: 1.00 requests per second\n")
-				.map_err(|error| error.to_string())
+			fs::write(
+				file,
+				self.benchmark_output
+					.as_deref()
+					.unwrap_or("PING_INLINE: 1.00 requests per second\n"),
+			)
+			.map_err(|error| error.to_string())
 		}
 	}
 
@@ -1054,6 +1256,93 @@ mod tests {
 			redis_cli: "/bin/echo".into(),
 			extra_args: vec!["--cluster".into()],
 			profile,
+		}
+	}
+
+	#[test]
+	fn counted_pop_checks_exact_seed_preflight_and_measured_consumption() {
+		for command in ComparisonCommand::value_variants().iter().copied() {
+			let Some((direction, count)) = command.counted_pop() else {
+				continue;
+			};
+			for pipeline in [1, 50] {
+				let directory = tempdir().unwrap();
+				let mut config = test_config(directory.path().into(), Profile::Comparison);
+				config.requests = 200;
+				config.pipeline = pipeline;
+				config.extra_args.clear();
+				let runner = FakeRunner {
+					output_responses: RefCell::new(VecDeque::from([
+						(202 * count).to_string(),
+						serde_json::to_string(&vec!["x".repeat(16); count as usize]).unwrap(),
+						(201 * count).to_string(),
+						count.to_string(),
+					])),
+					benchmark_output: Some(format!(
+						"{direction} bench:list:counted-pop {count}: 1000.00 requests per second, p50=1.0 msec\n"
+					)),
+					..FakeRunner::default()
+				};
+				run_counted_pop(&config, &runner, command.label(), direction, count).unwrap();
+				let calls = runner.status_calls.borrow();
+				assert!(args_contain_pair(&calls[0].args, "-n", "202"));
+				assert!(args_contain_pair(&calls[0].args, "-P", "1"));
+				assert_eq!(
+					calls[0]
+						.args
+						.iter()
+						.filter(|arg| **arg == "x".repeat(16))
+						.count(),
+					count as usize
+				);
+				assert!(args_end_with(
+					&runner.streaming_calls.borrow()[0].args,
+					&[direction, "bench:list:counted-pop", &count.to_string()]
+				));
+				let validation: serde_json::Value = serde_json::from_slice(
+					&fs::read(
+						directory
+							.path()
+							.join(format!("{}-validation.json", command.label())),
+					)
+					.unwrap(),
+				)
+				.unwrap();
+				assert_eq!(validation["measured_elements"], 200 * count);
+				assert_eq!(validation["remaining_elements"], count);
+				assert_eq!(validation["elements_per_second"], 1000.0 * count as f64);
+			}
+		}
+	}
+
+	#[test]
+	fn counted_pop_rejects_partial_pipeline_or_incorrect_fixture() {
+		let directory = tempdir().unwrap();
+		let mut config = test_config(directory.path().into(), Profile::Comparison);
+		config.extra_args.clear();
+		config.pipeline = 50;
+		assert!(
+			validate_counted_pop_config(&config)
+				.unwrap_err()
+				.contains("multiple of C * P")
+		);
+		config.requests = 200;
+		for responses in [
+			vec!["0".into()],
+			vec!["404".into(), "[]".into()],
+			vec![
+				"404".into(),
+				"[\"xxxxxxxxxxxxxxxx\",\"xxxxxxxxxxxxxxxx\"]".into(),
+				"402".into(),
+				"0".into(),
+			],
+		] {
+			let runner = FakeRunner {
+				output_responses: RefCell::new(responses.into()),
+				benchmark_output: Some("LPOP: 1000 requests per second\n".into()),
+				..FakeRunner::default()
+			};
+			assert!(run_counted_pop(&config, &runner, "lpop_count_2", "LPOP", 2).is_err());
 		}
 	}
 
