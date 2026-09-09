@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::process;
 use std::sync::Arc;
 
 use fastrace::trace;
@@ -5,6 +7,7 @@ use log::debug;
 use log::error;
 use log::info;
 use nimbis_storage::Storage;
+use nimbis_storage::StorageError;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
@@ -106,20 +109,39 @@ impl Server {
 			}
 		};
 		drop(listener);
-		// Stop every command producer before flushing storage. Requests without a
-		// response may have executed; callers must treat their outcome as unknown.
-		sessions.abort_all();
-		while let Some(result) = sessions.join_next().await {
-			if let Err(error) = result
-				&& !error.is_cancelled()
-			{
-				error!("Client task failed during shutdown: {}", error);
+		info!("Shutdown requested; send another shutdown signal to force exit");
+		finish_shutdown(async {
+			// Stop every command producer before flushing storage. Requests without a
+			// response may have executed; callers must treat their outcome as unknown.
+			sessions.abort_all();
+			while let Some(result) = sessions.join_next().await {
+				if let Err(error) = result
+					&& !error.is_cancelled()
+				{
+					error!("Client task failed during shutdown: {}", error);
+				}
 			}
-		}
-		self.storage.close().await?;
+			self.storage.close().await
+		})
+		.await?;
 		result?;
 		info!("Storage closed; shutdown complete");
 		Ok(())
+	}
+}
+
+async fn finish_shutdown(
+	close: impl Future<Output = Result<(), StorageError>>,
+) -> Result<(), StorageError> {
+	tokio::select! {
+		biased;
+		signal = shutdown_signal() => {
+			signal?;
+			error!("Second shutdown signal received; forcing exit before storage close completes");
+			// Returning an error can still block in Runtime::drop on stuck tasks.
+			process::exit(1);
+		}
+		result = close => result,
 	}
 }
 
@@ -134,4 +156,96 @@ async fn shutdown_signal() -> std::io::Result<()> {
 	}
 	#[cfg(not(unix))]
 	tokio::signal::ctrl_c().await
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+	use std::env;
+	use std::future::pending;
+	use std::io;
+	use std::io::Write;
+	use std::process::Stdio;
+	use std::time::Duration;
+
+	use rstest::rstest;
+	use tokio::io::AsyncBufReadExt;
+	use tokio::io::BufReader;
+	use tokio::process::Command;
+	use tokio::time::timeout;
+
+	use super::*;
+
+	#[rstest]
+	#[case("-INT")]
+	#[case("-TERM")]
+	#[tokio::test]
+	async fn second_signal_exits_during_pending_close(#[case] signal: &str) {
+		let mut child = Command::new(env::current_exe().unwrap())
+			.args([
+				"--exact",
+				"server::tests::shutdown_signal_child",
+				"--nocapture",
+			])
+			.env("NIMBIS_SHUTDOWN_TEST_CHILD", "1")
+			.stdout(Stdio::piped())
+			.kill_on_drop(true)
+			.spawn()
+			.unwrap();
+		let pid = child.id().unwrap().to_string();
+		let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+		for marker in ["READY", "CLOSING"] {
+			timeout(Duration::from_secs(10), async {
+				loop {
+					let line = lines
+						.next_line()
+						.await
+						.unwrap()
+						.expect("child exited early");
+					if line == marker {
+						break;
+					}
+				}
+			})
+			.await
+			.unwrap();
+			assert!(
+				Command::new("kill")
+					.args([signal, &pid])
+					.status()
+					.await
+					.unwrap()
+					.success()
+			);
+		}
+		let status = timeout(Duration::from_secs(10), child.wait())
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(status.code(), Some(1));
+	}
+
+	#[tokio::test]
+	async fn shutdown_signal_child() {
+		if env::var_os("NIMBIS_SHUTDOWN_TEST_CHILD").is_none() {
+			return;
+		}
+		tokio::select! {
+			biased;
+			result = shutdown_signal() => result.unwrap(),
+			_ = async {
+				io::stdout().write_all(b"READY\n").unwrap();
+				io::stdout().flush().unwrap();
+				pending::<()>().await;
+			} => unreachable!(),
+		}
+		finish_shutdown(async {
+			// This is polled only after the escalation signal handler is listening.
+			io::stdout().write_all(b"CLOSING\n").unwrap();
+			io::stdout().flush().unwrap();
+			pending().await
+		})
+		.await
+		.unwrap();
+		panic!("pending close unexpectedly completed");
+	}
 }

@@ -47,6 +47,11 @@ without a response has an unknown outcome. `SIGKILL` bypasses this path. See the
 [acknowledgment and recovery contract](storage_design.md#acknowledgment-and-recovery-contract)
 for the difference between a command ACK and durable data.
 
+A second Ctrl-C or Unix `SIGTERM` during client cleanup or storage close forces
+an immediate exit with status 1, including when the close is stuck. This skips
+completion of the final flush and can lose acknowledged writes that are not yet
+durable; a forced exit is not a successful shutdown.
+
 ## Command Execution
 
 Each `ClientConnection` owns a RESP parser and a socket. For every read:

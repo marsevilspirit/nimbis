@@ -10,6 +10,7 @@ use slatedb::config::Settings;
 use tempfile::tempdir;
 use tokio::process::Command;
 use tokio::sync::Notify;
+use tokio::task::spawn_blocking;
 use tokio::time::timeout;
 
 use super::*;
@@ -150,7 +151,7 @@ async fn recovery_child() {
 			assert!(db.status().durable_seq < pending.seq);
 			assert!(barrier.await_durable().now_or_never().is_none());
 			fail_parallel::remove(failpoints.clone(), WAL_FAILPOINT);
-			release.wait();
+			spawn_blocking(move || release.wait()).await.unwrap();
 			flush.await.unwrap().unwrap();
 			barrier.await_durable().await.unwrap();
 		}

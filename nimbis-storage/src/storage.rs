@@ -356,7 +356,7 @@ impl Storage {
 			self.all_raw_dbs()
 				.into_iter()
 				.map(|(data_type, db)| async move {
-					let result = db.close().await;
+					db.close().await?;
 					// SlateDB permits closing an already failed DB without flushing it.
 					if let Some(reason) = db.status().close_reason
 						&& reason != CloseReason::Clean
@@ -366,7 +366,7 @@ impl Storage {
 							reason,
 						));
 					}
-					result
+					Ok(())
 				}),
 		)
 		.await;

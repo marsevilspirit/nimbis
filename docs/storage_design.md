@@ -68,6 +68,10 @@ be revoked. Before an ACK, a detected write error is returned as a command error
 | Successful server `SIGINT` / Unix `SIGTERM` shutdown | The listener has stopped, client tasks have been cancelled and joined, and storage close has succeeded before exit. |
 | Abrupt process exit / `SIGKILL` | No close is run. Recovery keeps durable writes; recently acknowledged writes may be lost. |
 
+During client cleanup or storage close, a second Ctrl-C or Unix `SIGTERM`
+forces immediate exit with status 1. The final flush is not guaranteed to have
+completed, so the same pending-write loss boundary as an abrupt exit applies.
+
 Commands interrupted before their response have an unknown outcome and may have
 executed. Client tasks cannot continue writing concurrently with the server's
 final storage close. Lower-level users of `Storage::close()` must likewise stop
@@ -88,6 +92,7 @@ partition recovery, cloud-service durability, or power-loss safety.
 ```sh
 cargo test -p nimbis-storage --lib recovery
 cargo test -p nimbis --test test_command test_process_recovery
+cargo test -p nimbis --lib second_signal_exits_during_pending_close
 ```
 
 The storage check starts the test executable as a separate writer process using
@@ -109,6 +114,10 @@ restarts the same object-store root. It checks all five data types, then uses
 ordinary ACK is permitted either outcome; the deterministic storage check above
 establishes the exact durable/pending distinction. The subprocess is reaped and
 timeouts bound startup and shutdown. Windows does not run the Unix signal check.
+The escalation check uses a test subprocess and an explicitly pending close
+future in the production shutdown helper. Readiness handshakes establish that
+signal handling is active and close is pending before sending the second signal.
+Both `SIGINT` and `SIGTERM` must terminate that subprocess with status 1.
 
 ### Redis comparison boundary
 
