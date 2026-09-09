@@ -2,8 +2,11 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::join_all;
 use nimbis_macros::storage_lock;
+use slatedb::CloseReason;
 use slatedb::Db;
+use slatedb::Error as SlateDbError;
 #[cfg(test)]
 use slatedb::config::PutOptions;
 #[cfg(test)]
@@ -327,7 +330,6 @@ impl Storage {
 		}
 	}
 
-	#[cfg(test)]
 	pub(crate) fn all_raw_dbs(&self) -> [(DataType, &Db); 5] {
 		[
 			(DataType::String, self.string_db.raw()),
@@ -347,14 +349,30 @@ impl Storage {
 		]
 	}
 
+	/// Flush and close every DB. Callers must stop command producers first.
 	pub async fn close(&self) -> Result<(), StorageError> {
-		tokio::try_join!(
-			self.hash_db.raw().close(),
-			self.list_db.raw().close(),
-			self.set_db.raw().close(),
-			self.zset_db.raw().close(),
-		)?;
-		self.string_db.raw().close().await?;
+		// Finish all closes even if one fails, so sibling DB flushes are not cancelled.
+		let results = join_all(
+			self.all_raw_dbs()
+				.into_iter()
+				.map(|(data_type, db)| async move {
+					db.close().await?;
+					// SlateDB permits closing an already failed DB without flushing it.
+					if let Some(reason) = db.status().close_reason
+						&& reason != CloseReason::Clean
+					{
+						return Err(SlateDbError::closed(
+							format!("{data_type:?} database failed before completing shutdown"),
+							reason,
+						));
+					}
+					Ok(())
+				}),
+		)
+		.await;
+		for result in results {
+			result?;
+		}
 		Ok(())
 	}
 
@@ -387,6 +405,9 @@ impl Storage {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod recovery_tests;
 
 #[cfg(test)]
 mod tests {

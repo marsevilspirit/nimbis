@@ -23,14 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 	let result = runtime.block_on(async {
 		let server = Server::new().await?;
-		tokio::select! {
-			result = server.run() => result,
-			signal = tokio::signal::ctrl_c() => {
-				signal?;
-				log::info!("Shutdown signal received");
-				Ok(())
-			}
-		}
+		server.run().await
 	});
 
 	TELEMETRY_MANAGER.load().flush();

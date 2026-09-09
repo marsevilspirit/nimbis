@@ -39,6 +39,97 @@ can coexist without a cross-type `WRONGTYPE` lookup.
 open all five DBs under either the root path (`None`) or a shard subdirectory (`Some(id)`).
 The server opens one shared storage instance with `None`.
 
+## Acknowledgment and Recovery Contract
+
+`SET key value` returns `OK` after the write is accepted into SlateDB's in-memory
+WAL and MemTable. It does **not** wait for object-storage persistence. A following
+`GET` can see the value immediately, but that read does not prove durability.
+
+The call chain is `SetCmd::do_cmd` → `Storage::set` → `TypedDb::store` →
+`Db::put_with_options`. The typed write path drops the returned `WriteHandle`.
+This follows the API in the SlateDB revision pinned by `Cargo.lock`,
+[`4919857e75b30f63ce2005c8d4a64786de6c553d`](https://github.com/slatedb/slatedb/blob/4919857e75b30f63ce2005c8d4a64786de6c553d/slatedb/src/db.rs):
+`WriteHandle::await_durable()` waits for that write's durability, and
+`Db::flush()` flushes pending WAL writes. Nimbis does not currently expose either
+operation as a Redis command or a per-write durability option. `FLUSHDB` deletes
+keys; it is not a persistence barrier. The `save` and `appendonly` configuration
+fields do not select a SlateDB durability mode or enable Redis RDB/AOF files.
+
+SlateDB's current default flush interval is 100 ms. This is a scheduling target,
+not a maximum loss window: object-store latency, errors, and backpressure can
+extend it. A successful ACK can precede a later flush failure; such an ACK cannot
+be revoked. Before an ACK, a detected write error is returned as a command error.
+
+| Boundary | What is guaranteed |
+| --- | --- |
+| `SET` returns `OK` | The value is visible in memory; it may still be absent after a process crash. |
+| SlateDB reports the write's sequence durable | It is persisted through the configured object store and can be recovered after process exit. |
+| Successful `Storage::close()` after stopping writers | All five DBs have completed close and their final flush; errors from any DB are returned. |
+| Successful server `SIGINT` / Unix `SIGTERM` shutdown | The listener has stopped, client tasks have been cancelled and joined, and storage close has succeeded before exit. |
+| Abrupt process exit / `SIGKILL` | No close is run. Recovery keeps durable writes; recently acknowledged writes may be lost. |
+
+During client cleanup or storage close, a second Ctrl-C or Unix `SIGTERM`
+forces immediate exit with status 1. The final flush is not guaranteed to have
+completed, so the same pending-write loss boundary as an abrupt exit applies.
+
+Commands interrupted before their response have an unknown outcome and may have
+executed. Client tasks cannot continue writing concurrently with the server's
+final storage close. Lower-level users of `Storage::close()` must likewise stop
+their writers first. Closing all five DBs is not a cross-type transaction. A
+failed DB must not cancel sibling closes or make the server report a successful
+shutdown: SlateDB itself can return success when closing an already failed DB
+without flushing, so Nimbis also checks the DB's close reason.
+
+Recovery guarantees remain bounded by the backend. Nimbis creates the local
+`file:` backend using `LocalFileSystem::new_with_prefix`; object_store 0.14.1
+defaults to `fsync = false`. Local tests therefore establish **process-crash
+recovery**, not machine power-loss durability. Remote object-store acknowledgments
+have the guarantees of that service. No local process test establishes network
+partition recovery, cloud-service durability, or power-loss safety.
+
+### Runnable recovery checks
+
+```sh
+cargo test -p nimbis-storage --lib recovery
+cargo test -p nimbis --test test_command test_process_recovery
+cargo test -p nimbis --lib second_signal_exits_during_pending_close
+```
+
+The storage check starts the test executable as a separate writer process using
+a temporary local object store. It disables only that test DB's periodic flush,
+checks its durable sequence, and verifies both the pre-flush and post-flush
+results after a real `process::exit` without destructors. A valid older value is
+flushed before the overwrite, so the pre-flush crash case must recover the older
+value. A later `WriteHandle` supplies an explicit durability barrier. Separate
+cases exercise clean close, a WAL write held behind a synchronization barrier,
+WAL I/O failure during close, and a failed WAL background task. Test-only
+SlateDB failpoints inject those conditions; no production option is added.
+Sibling list data and DB close status verify that one failed close does not
+cancel the others. These tests do not use elapsed time as durability evidence.
+
+The Unix server check runs the real `nimbis` binary, writes through RESP, leaves
+a client connected, sends `SIGINT` or `SIGTERM`, waits for successful exit, and
+restarts the same object-store root. It checks all five data types, then uses
+`SIGKILL` and checks recovery of the established durable value. The most recent
+ordinary ACK is permitted either outcome; the deterministic storage check above
+establishes the exact durable/pending distinction. The subprocess is reaped and
+timeouts bound startup and shutdown. Windows does not run the Unix signal check.
+The escalation check uses a test subprocess and an explicitly pending close
+future in the production shutdown helper. Readiness handshakes establish that
+signal handling is active and close is pending before sending the second signal.
+Both `SIGINT` and `SIGTERM` must terminate that subprocess with status 1.
+
+### Redis comparison boundary
+
+Report Nimbis results as **asynchronous WAL acknowledgment throughput**. Record
+the backend, cache, CPU allocation, client concurrency, pipeline, value sizes,
+and actual Redis persistence settings alongside every comparison. Redis without
+persistence, Redis AOF `everysec`, and Redis AOF `always` have different
+acknowledgment and synchronization costs; none is an implicit durability match
+for Nimbis. Consult the [Redis persistence documentation](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
+for those policies. Comparing `SET` throughput alone does not establish equal
+durability, and Nimbis `SET OK` must not be labeled synchronous-durable throughput.
+
 ## Storage API Locking
 
 `Storage` owns concurrency control through

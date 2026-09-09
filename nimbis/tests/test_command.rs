@@ -1,12 +1,67 @@
 mod mock;
 
+#[cfg(unix)]
+use std::net::TcpListener;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::thread;
 
 use mock::KeyType;
 use mock::MockNimbisServer;
+#[cfg(unix)]
+use mock::mock_server::MockNimbisProcess;
 use mock::utils::resp_error;
 use nimbis_resp::RespValue;
 use serial_test::serial;
+
+#[cfg(unix)]
+#[test]
+#[should_panic(expected = "server exited before readiness")]
+fn test_process_recovery_rejects_occupied_port() {
+	let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+	let directory = tempfile::tempdir().unwrap();
+	MockNimbisProcess::start(directory.path(), occupied.local_addr().unwrap().port());
+}
+
+#[cfg(unix)]
+#[rstest::rstest]
+#[case("-INT")]
+#[case("-TERM")]
+fn test_process_recovery(#[case] signal: &str) {
+	let directory = tempfile::tempdir().unwrap();
+	let port = mock::utils::pick_free_port().unwrap();
+	let (mut server, mut client) = MockNimbisProcess::start(directory.path(), port);
+	assert_eq!(client.set("key", "durable"), "OK");
+	assert_eq!(client.hset("hash", "field", "value"), 1);
+	assert_eq!(client.rpush("list", &["a", "b"]), 2);
+	assert_eq!(client.sadd("set", &["member"]), 1);
+	assert_eq!(client.zadd("zset", &[("1", "member")]), 1);
+	// Leave an idle client connected: shutdown must not wait for client EOF.
+	assert!(server.stop(signal).success());
+	drop(client);
+	drop(server);
+
+	let (mut server, mut client) = MockNimbisProcess::start(directory.path(), port);
+	assert_eq!(client.get("key"), "durable");
+	assert_eq!(client.hget("hash", "field"), "value");
+	assert_eq!(client.lrange("list", 0, -1), vec!["a", "b"]);
+	assert!(client.sismember("set", "member"));
+	assert_eq!(client.zscore("zset", "member"), "1");
+	assert_eq!(client.set("recent", "possibly-pending"), "OK");
+	assert_eq!(server.stop("-KILL").signal(), Some(9));
+	drop(client);
+	drop(server);
+
+	let (mut server, mut client) = MockNimbisProcess::start(directory.path(), port);
+	assert_eq!(client.get("key"), "durable");
+	// An ordinary SET ACK is not a durability barrier. The deterministic storage
+	// recovery tests separately prove loss before flush and recovery after flush.
+	assert!(matches!(
+		client.get("recent").as_str(),
+		"" | "possibly-pending"
+	));
+	assert!(server.stop(signal).success());
+}
 
 #[test]
 #[serial]

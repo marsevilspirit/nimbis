@@ -66,6 +66,7 @@ walkdir = "2.5.0"
 
 # Dev Dependencies
 criterion = { version = "0.8.1", features = ["html_reports"] }
+fail-parallel = "0.6.0"
 rstest = "0.26.1"
 serial_test = { version = "3.2.0", features = ["file_locks"] }
 ulid = "3.0.0"
