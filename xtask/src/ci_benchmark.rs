@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Args as ClapArgs;
+use clap::ValueEnum;
 use serde::Deserialize;
 use serde::Serialize;
 use walkdir::WalkDir;
@@ -82,7 +83,8 @@ pub struct ShardArgs {
 	#[arg(long)]
 	runtime_threads: Option<usize>,
 
-	/// Setup request count. Defaults to the measured request count.
+	/// Setup request count. Counted-pop shards always use measured requests + 2;
+	/// other shards default to the measured request count.
 	#[arg(long = "seed-n")]
 	seed_requests: Option<u64>,
 
@@ -136,6 +138,10 @@ pub struct ReportArgs {
 	/// Required payload sizes.
 	#[arg(long, value_delimiter = ',', default_value = "512,1024")]
 	expected_data_sizes: Vec<u64>,
+
+	/// Optional isolated command set. Defaults to the legacy comparison suite.
+	#[arg(long, value_delimiter = ',')]
+	expected_commands: Vec<ComparisonCommand>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -205,7 +211,12 @@ struct ShardResult {
 	blocks: Vec<BlockResult>,
 }
 
-pub fn run_shard(args: ShardArgs, workspace_root: &Path) -> Result<(), String> {
+pub fn run_shard(mut args: ShardArgs, workspace_root: &Path) -> Result<(), String> {
+	args.seed_requests = Some(effective_seed_requests(
+		&args.commands,
+		args.requests,
+		args.seed_requests,
+	)?);
 	validate_shard_args(&args)?;
 	redis_benchmark::require_cmd(&args.redis_benchmark)?;
 	redis_benchmark::require_cmd(&args.redis_cli)?;
@@ -294,6 +305,29 @@ pub fn run_shard(args: ShardArgs, workspace_root: &Path) -> Result<(), String> {
 		.map_err(|error| format!("Failed to write {}: {error}", result_path.display()))?;
 	write_stdout_line(&format!("Shard result: {}", result_path.display()))?;
 	Ok(())
+}
+
+fn effective_seed_requests(
+	commands: &[ComparisonCommand],
+	requests: u64,
+	configured: Option<u64>,
+) -> Result<u64, String> {
+	if commands
+		.iter()
+		.any(|command| command.counted_pop().is_some())
+	{
+		if commands
+			.iter()
+			.any(|command| command.counted_pop().is_none())
+		{
+			return Err("counted-pop and ordinary commands must run in separate shards".into());
+		}
+		requests
+			.checked_add(2)
+			.ok_or_else(|| "counted-pop seed request count overflow".into())
+	} else {
+		Ok(configured.unwrap_or(requests))
+	}
 }
 
 fn validate_shard_args(args: &ShardArgs) -> Result<(), String> {
@@ -534,7 +568,9 @@ fn read_single_command_result(
 		}
 	}
 	let mut parsed = benchmarks::parse_benchmark(&combined);
-	let expected = command.as_str();
+	let expected = command
+		.counted_pop()
+		.map_or(command.as_str(), |(direction, _)| direction);
 	let result = parsed
 		.remove(expected)
 		.or_else(|| {
@@ -646,7 +682,21 @@ pub fn report(args: ReportArgs) -> Result<(), String> {
 		return Err("expected data sizes must be unique and greater than zero".into());
 	}
 	let shards = read_shards(&args.input_dir)?;
-	let report = build_report(&shards, args.expected_replicas, &args.expected_data_sizes)?;
+	let report = if args.expected_commands.is_empty() {
+		build_report(&shards, args.expected_replicas, &args.expected_data_sizes)?
+	} else {
+		let commands = args
+			.expected_commands
+			.iter()
+			.map(|command| command.as_str())
+			.collect::<Vec<_>>();
+		build_report_with_commands(
+			&shards,
+			args.expected_replicas,
+			&args.expected_data_sizes,
+			&commands,
+		)?
+	};
 	if let Some(parent) = args.output.parent() {
 		fs::create_dir_all(parent)
 			.map_err(|error| format!("Failed to create {}: {error}", parent.display()))?;
@@ -902,19 +952,10 @@ fn validate_shard_result(shard: &ShardResult, path: &Path) -> Result<(), String>
 }
 
 fn comparison_command(command: &str) -> Option<ComparisonCommand> {
-	match command {
-		"GET" => Some(ComparisonCommand::Get),
-		"SET" => Some(ComparisonCommand::Set),
-		"HGET" => Some(ComparisonCommand::Hget),
-		"HSET" => Some(ComparisonCommand::Hset),
-		"LPUSH" => Some(ComparisonCommand::Lpush),
-		"LPOP" => Some(ComparisonCommand::Lpop),
-		"SADD" => Some(ComparisonCommand::Sadd),
-		"SREM" => Some(ComparisonCommand::Srem),
-		"ZADD" => Some(ComparisonCommand::Zadd),
-		"ZREM" => Some(ComparisonCommand::Zrem),
-		_ => None,
-	}
+	ComparisonCommand::value_variants()
+		.iter()
+		.copied()
+		.find(|candidate| candidate.as_str() == command)
 }
 
 fn optional_metric_effect_matches(
@@ -956,6 +997,20 @@ fn build_report(
 	expected_replicas: u64,
 	expected_data_sizes: &[u64],
 ) -> Result<String, String> {
+	build_report_with_commands(
+		shards,
+		expected_replicas,
+		expected_data_sizes,
+		redis_benchmark::COMPARISON_PROFILE_COMMANDS,
+	)
+}
+
+fn build_report_with_commands(
+	shards: &[ShardResult],
+	expected_replicas: u64,
+	expected_data_sizes: &[u64],
+	expected_commands: &[&str],
+) -> Result<String, String> {
 	let first = shards
 		.first()
 		.ok_or_else(|| "At least one benchmark shard is required".to_string())?;
@@ -992,7 +1047,7 @@ fn build_report(
 			}
 		}
 	}
-	let expected_commands = redis_benchmark::COMPARISON_PROFILE_COMMANDS
+	let expected_commands = expected_commands
 		.iter()
 		.map(|command| (*command).to_string())
 		.collect::<BTreeSet<_>>();
@@ -1059,6 +1114,7 @@ fn build_report(
 		1,
 		P1_RPS_MATERIALITY_PERCENT,
 		P1_DUPLICATE_SPREAD_LIMIT_PERCENT,
+		first.requests,
 	);
 	push_rps_table(
 		&mut report,
@@ -1066,8 +1122,14 @@ fn build_report(
 		first.pipeline_depth,
 		PIPELINE_RPS_MATERIALITY_PERCENT,
 		PIPELINE_DUPLICATE_SPREAD_LIMIT_PERCENT,
+		first.requests,
 	);
 	push_p1_latency_table(&mut report, &groups);
+	if expected_commands.iter().any(|command| {
+		comparison_command(command).is_some_and(|command| command.counted_pop().is_some())
+	}) {
+		report.push_str("Counted POP labels are distinct workloads: RPS counts commands, and elements/s is RPS multiplied by the explicit count. Every pass verifies exact fixture length, a full preflight reply, and exactly N * count measured removals while leaving one full reply in the list. Per-pass validation JSON retains payload size, RPS, elements/s, inferred measurement duration, and process wall time. A counted-pop cell with any pass shorter than one second is labeled `short sample`; it is functional/tracking evidence and does not establish a stable performance effect.\n\n");
+	}
 	report.push_str(
 		"## Interpretation\n\n\
 `candidate regression` means every stable screening replica fell below the negative materiality boundary; `candidate improvement` means every stable replica rose above the positive boundary. Both are triggers for confirmation, not failing or passing gates. `no material signal` means every observed effect stayed inside the inclusive materiality band; it does not establish equivalence. `mixed/inconclusive` means only some replicas crossed either boundary. `noisy` means a same-branch duplicate spread crossed its instability line or the cross-runner block effects were too dispersed for a useful conclusion. The initial materiality bands and instability lines are conservative heuristics and require A/A null calibration before any result can become a gate. Pipeline p50 remains in raw JSON but is intentionally omitted here because Redis 8 records pipelined batch/first-read latency rather than independent per-request latency.\n\n\
@@ -1086,6 +1148,7 @@ fn push_rps_table(
 	pipeline_depth: u64,
 	materiality_percent: f64,
 	duplicate_spread_limit_percent: f64,
+	requests: u64,
 ) {
 	let effect_range_limit_pp = 2.0 * materiality_percent;
 	report.push_str(&format!(
@@ -1100,6 +1163,12 @@ fn push_rps_table(
 			continue;
 		}
 		let summary = summarize_metric(replicas.values().map(|block| &block.rps));
+		let short_counted_sample = comparison_command(command)
+			.is_some_and(|command| command.counted_pop().is_some())
+			&& replicas
+				.values()
+				.flat_map(|block| &block.passes)
+				.any(|pass| requests as f64 / pass.rps < 1.0);
 		report.push_str(&format!(
 			"| {command} | {data_size} | {} | {:+.2}% | {:.2} pp | {:+.2}%..{:+.2}% | {:.2}% | {} |\n",
 			replicas.len(),
@@ -1108,11 +1177,15 @@ fn push_rps_table(
 			summary.min_delta,
 			summary.max_delta,
 			summary.max_duplicate_spread,
-			screening_status(
-				&summary,
-				materiality_percent,
-				duplicate_spread_limit_percent,
-			),
+			if short_counted_sample {
+				"short sample"
+			} else {
+				screening_status(
+					&summary,
+					materiality_percent,
+					duplicate_spread_limit_percent,
+				)
+			},
 		));
 	}
 	report.push('\n');
@@ -1237,9 +1310,70 @@ fn screening_status(
 
 #[cfg(test)]
 mod tests {
+	use std::slice;
+
 	use tempfile::tempdir;
 
 	use super::*;
+
+	#[test]
+	fn effective_seed_count_matches_counted_fixture_and_rejects_mixed_shards() {
+		let counted = [
+			ComparisonCommand::LpopCount1,
+			ComparisonCommand::RpopCount256,
+		];
+		for configured in [None, Some(0), Some(7), Some(1000)] {
+			assert_eq!(
+				effective_seed_requests(&counted, 1000, configured).unwrap(),
+				1002
+			);
+		}
+		assert!(effective_seed_requests(&counted, u64::MAX, None).is_err());
+		assert!(
+			effective_seed_requests(
+				&[ComparisonCommand::Lpop, ComparisonCommand::LpopCount32],
+				1000,
+				None
+			)
+			.unwrap_err()
+			.contains("separate shards")
+		);
+		assert_eq!(
+			effective_seed_requests(&[ComparisonCommand::Lpop], 1000, Some(7)).unwrap(),
+			7
+		);
+		assert_eq!(
+			effective_seed_requests(&[ComparisonCommand::Lpop], 1000, None).unwrap(),
+			1000
+		);
+	}
+
+	#[test]
+	fn counted_pop_report_keeps_counts_distinct_and_rejects_missing_cells() {
+		let commands = ["LPOP_COUNT_32", "RPOP_COUNT_32"];
+		let mut counted = shard(&commands, 128, 1, 1);
+		counted.requests = 1;
+		let report =
+			build_report_with_commands(slice::from_ref(&counted), 1, &[128], &commands).unwrap();
+		assert!(report.contains("LPOP_COUNT_32"));
+		assert!(report.contains("RPOP_COUNT_32"));
+		assert!(report.contains("short sample"));
+		assert!(
+			build_report(slice::from_ref(&counted), 1, &[128])
+				.unwrap_err()
+				.contains("Unexpected benchmark cell")
+		);
+		assert!(
+			build_report_with_commands(
+				&[counted],
+				1,
+				&[128],
+				&["LPOP_COUNT_32", "RPOP_COUNT_32", "LPOP_COUNT_256"]
+			)
+			.unwrap_err()
+			.contains("Missing benchmark cell")
+		);
+	}
 
 	fn pass(position: usize, branch: Branch, rps: f64, p50_msec: f64) -> PassResult {
 		PassResult {

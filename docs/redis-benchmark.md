@@ -81,6 +81,108 @@ The temporary source clone and object stores are removed after the command
 finishes. Pressing Ctrl-C requests a graceful stop so those temporary resources
 and any running child server are cleaned up before exit.
 
+## Explicit-Count List Pops
+
+Counted pops use separate labels (`LPOP_COUNT_32`, for example). The ordinary
+`LPOP` comparison remains Redis's single-element built-in test and does not
+measure the multi-element scan path. These fixtures use one shared list, so the
+results describe contended operations on one key, not independent-key scaling.
+
+Run the full `LPOP`/`RPOP` × count `1,2,32,256` × pipeline `1,50` matrix with
+already-built release binaries:
+
+```bash
+just redis-bench-counted-pop target/release/nimbis target/release/nimbis \
+  target/counted-pop-main-aa
+```
+
+The two binary arguments are base and candidate. Using the same binary produces
+an A/A baseline. The entry point reuses the paired CI runner: four sequential
+`ABBA` passes per cell, with a fresh server and local object store per pass.
+It writes raw output, server logs, `result.json`, and a separate `report.md`.
+Use a new output directory for each run. Existing completed results are never
+overwritten. No binaries are built by the runner; the `just` recipe only builds
+the xtask if necessary.
+
+Defaults are a small functional run: `N=1000`, `C=20`, `D=128`, one replica,
+64 measured passes. `N`, `C`, and `D` override those defaults. At count 256,
+one default pass seeds 256,512 elements, about 31.3 MiB of payload before
+metadata and storage overhead. Across the complete matrix it seeds about
+569.5 MiB of payload, sequentially. Seeding and process startup are outside
+measurement. Short samples are useful for validating fixtures and collecting
+an initial baseline, not for declaring stable speedups.
+
+For performance work, bound the total element volume and increase requests
+only when a cell is too short. These are starting sizes at `C=100`, `D=128`:
+
+| Explicit count | Requests per pass | Seed payload per pass, approximately |
+|---:|---:|---:|
+| 1 | 200,000 | 24.4 MiB |
+| 2 | 200,000 | 48.8 MiB |
+| 32 | 20,000 | 78.1 MiB |
+| 256 | 5,000 | 156.3 MiB |
+
+Run a count group independently, using identical settings for the two binaries:
+
+```bash
+cargo xtask benchmark-ci-shard \
+  --main-binary /path/to/base/nimbis --pr-binary target/release/nimbis \
+  --commands lpop-count-32,rpop-count-32 --data-size 128 \
+  --requests 20000 --clients 100 --replica 1 \
+  --main-label base-commit --pr-label candidate-commit \
+  --output-dir target/counted-pop-32
+cargo xtask benchmark-ci-report --input-dir target/counted-pop-32 \
+  --output target/counted-pop-32/report.md --expected-replicas 1 \
+  --expected-data-sizes 128 --expected-commands lpop-count-32,rpop-count-32
+```
+
+Both pipeline modes run automatically. Separate directories are required for
+count groups with different request counts; the report rejects mixed workload
+metadata. Repeat paired blocks and inspect duplicate spread before drawing a
+performance conclusion. `--replica 2` reverses the order to `BAAB`; separate
+local repeats are not independent hardware replicas.
+
+Against an already-running server, a single cell is also available:
+
+```bash
+cargo xtask redis-benchmark --profile comparison --command rpop-count-256 \
+  --n 5000 --c 100 --d 128 --p 50 --output-dir target/rpop-256-p50
+```
+
+Every counted-pop pass requires `N` to be a positive multiple of `C * P` and
+rejects extra benchmark arguments that could change the workload. It seeds
+exactly `(N + 2) * count` elements with `RPUSH` at `P=1`, checks `LLEN`, then
+validates that a preflight pop returns exactly `count` values of `D` bytes and
+leaves `(N + 1) * count` elements. After the measured `N` requests, `LLEN` must
+equal exactly `count`. This leaves a full reply in reserve and rejects empty
+pop workloads, incomplete fixtures, or unexpected consumption. `SEED_N` and
+`--seed-n` do not override this derived fixture size. Counted-only shards record
+the effective `seed_requests=N+2` in `result.json`, independently of any supplied
+seed count. Counted and ordinary commands must run in separate shards so that
+this metadata has one unambiguous meaning.
+
+Redis 8.0.0's pinned
+[`writeHandler`](https://github.com/redis/redis/blob/e91a340e241cf0abe3c6a0c254214fbe4aa1d95f/src/redis-benchmark.c#L554-L569)
+claims requests in pipeline-sized batches before sending them. Requiring
+divisibility by `C * P` also guarantees divisibility by `P`, eliminating a
+partial final batch rather than estimating an in-flight overshoot. The final
+length check remains mandatory when using a different client version.
+
+Each `*-validation.json` records exact seeded/measured/remaining element
+counts, RPS in **commands/s**, elements/s (`RPS * count`), measurement duration
+inferred from the client's RPS, and the separately measured benchmark-process
+wall time. A cell with any pass below one second is labeled `short sample` in
+the report. Pipeline latency is still batch/first-read latency. These are
+normal command acknowledgement measurements; they do not establish that each
+reply waited for object-storage durability.
+
+Pull request CI adds a separate small tracking job: both directions at count
+32, `D=128`, `N=1000`, `C=20`, `P=1/50`, and one paired block per cell (16
+passes). It validates fixtures, publishes its own job summary and artifact,
+and does not gate on throughput. The existing single-element screening and
+cross-database tables are unchanged. Use the full local matrix for counts 1,
+2, and 256 and longer confirmation runs.
+
 ## Pull Request Benchmark CI
 
 Pull request CI publishes two separate views in one comment. A single-runner
