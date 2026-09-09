@@ -21,8 +21,10 @@ url = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+fail-parallel = { workspace = true, features = ["failpoints"] }
 rstest = { workspace = true }
 slatedb-common = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 ulid = { workspace = true }
 

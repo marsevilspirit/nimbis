@@ -39,7 +39,13 @@ locking state inside `Storage`.
    shared block cache capacity and no shard prefix.
 
 `Server::run()` binds to `host:port`, accepts connections, and spawns a
-`ClientConnection` task for each accepted socket.
+`ClientConnection` task for each accepted socket. It owns the client tasks and
+handles Ctrl-C (`SIGINT`) and, on Unix, `SIGTERM`. On shutdown it stops accepting,
+cancels and joins every client task, then closes all five storage DBs. The process
+returns success only after storage close succeeds; an interrupted command
+without a response has an unknown outcome. `SIGKILL` bypasses this path. See the
+[acknowledgment and recovery contract](storage_design.md#acknowledgment-and-recovery-contract)
+for the difference between a command ACK and durable data.
 
 ## Command Execution
 

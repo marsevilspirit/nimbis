@@ -6,6 +6,11 @@ use log::error;
 use log::info;
 use nimbis_storage::Storage;
 use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio::signal::unix::SignalKind;
+#[cfg(unix)]
+use tokio::signal::unix::signal;
+use tokio::task::JoinSet;
 
 use crate::GCTX;
 use crate::client::ClientConnection;
@@ -60,16 +65,30 @@ impl Server {
 		let addr = format!("{}:{}", server_config!(host), server_config!(port));
 		let listener = TcpListener::bind(&addr).await?;
 		info!("Nimbis server listening on {}", addr);
+		let mut sessions = JoinSet::new();
+		let shutdown = shutdown_signal();
+		tokio::pin!(shutdown);
 
-		loop {
+		let result = loop {
 			debug!("Waiting for accept...");
-			match listener.accept().await {
+			let accepted = tokio::select! {
+				biased;
+				result = &mut shutdown => break result,
+				Some(result) = sessions.join_next() => {
+					if let Err(error) = result {
+						error!("Client task failed: {}", error);
+					}
+					continue;
+				}
+				accepted = listener.accept() => accepted,
+			};
+			match accepted {
 				Ok((socket, addr)) => {
 					debug!("New client connected from {}", addr);
 
 					let storage = self.storage.clone();
 					let cmd_table = self.cmd_table.clone();
-					tokio::spawn(async move {
+					sessions.spawn(async move {
 						let client_id = next_client_session_id();
 						let ctx = CmdContext { client_id };
 						let mut session = ClientConnection::new(socket, storage, cmd_table, ctx);
@@ -85,6 +104,34 @@ impl Server {
 					tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 				}
 			}
+		};
+		drop(listener);
+		// Stop every command producer before flushing storage. Requests without a
+		// response may have executed; callers must treat their outcome as unknown.
+		sessions.abort_all();
+		while let Some(result) = sessions.join_next().await {
+			if let Err(error) = result
+				&& !error.is_cancelled()
+			{
+				error!("Client task failed during shutdown: {}", error);
+			}
+		}
+		self.storage.close().await?;
+		result?;
+		info!("Storage closed; shutdown complete");
+		Ok(())
+	}
+}
+
+async fn shutdown_signal() -> std::io::Result<()> {
+	#[cfg(unix)]
+	{
+		let mut terminate = signal(SignalKind::terminate())?;
+		tokio::select! {
+			result = tokio::signal::ctrl_c() => result,
+			_ = terminate.recv() => Ok(()),
 		}
 	}
+	#[cfg(not(unix))]
+	tokio::signal::ctrl_c().await
 }

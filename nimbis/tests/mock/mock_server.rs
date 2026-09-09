@@ -1,5 +1,21 @@
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::fs::File;
+#[cfg(unix)]
+use std::path::Path;
+#[cfg(unix)]
+use std::process::Child;
+#[cfg(unix)]
+use std::process::Command;
+#[cfg(unix)]
+use std::process::ExitStatus;
+#[cfg(unix)]
+use std::process::Stdio;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use nimbis::config::SERVER_CONF;
 use nimbis::config::ServerConfig;
@@ -97,10 +113,10 @@ fn wait_until_ready(host: &str, port: u16, object_store_url: &str) {
 	// Keep startup failures quick while still allowing slower CI hosts
 	// enough time to initialize SlateDB.
 	let ready_timeout = Duration::from_secs(15);
-	let deadline = std::time::Instant::now() + ready_timeout;
+	let deadline = Instant::now() + ready_timeout;
 	let mut last_error = String::from("server was not probed");
 
-	while std::time::Instant::now() < deadline {
+	while Instant::now() < deadline {
 		match MockNimbisClient::connect(host, port).map(|mut client| client.ping()) {
 			Ok(resp) if resp == "PONG" => return,
 			Ok(resp) => {
@@ -112,11 +128,91 @@ fn wait_until_ready(host: &str, port: u16, object_store_url: &str) {
 		}
 
 		// Poll often enough to keep the test suite snappy.
-		std::thread::sleep(Duration::from_millis(100));
+		thread::sleep(Duration::from_millis(100));
 	}
 
 	panic!(
 		"nimbis did not become ready at {}:{} within {:?}; object_store_url={}; last_error={}",
 		host, port, ready_timeout, object_store_url, last_error
 	);
+}
+
+#[cfg(unix)]
+pub struct MockNimbisProcess(Child);
+
+#[cfg(unix)]
+impl MockNimbisProcess {
+	pub fn start(directory: &Path, port: u16) -> (Self, MockNimbisClient) {
+		let config_path = directory.join("recovery.toml");
+		let object_store_url = url::Url::from_directory_path(directory.join("store"))
+			.unwrap()
+			.to_string();
+		fs::write(
+			&config_path,
+			format!(
+				"host = '127.0.0.1'\nport = {port}\nobject_store_url = '{object_store_url}'\nlog_level = 'error,nimbis::server=info'\nruntime_threads = 2\nblock_cache_capacity_bytes = 8388608\n"
+			),
+		)
+		.unwrap();
+		let log_path = directory.join("recovery-server.log");
+		let log = File::create(&log_path).unwrap();
+		let mut process = Self(
+			Command::new(env!("CARGO_BIN_EXE_nimbis"))
+				.env_clear()
+				.env("NIMBIS_TRACE_ENABLED", "false")
+				.arg("--config")
+				.arg(config_path)
+				.stdout(Stdio::from(log.try_clone().unwrap()))
+				.stderr(Stdio::from(log))
+				.spawn()
+				.unwrap(),
+		);
+		let deadline = Instant::now() + Duration::from_secs(15);
+		let marker = format!("Nimbis server listening on 127.0.0.1:{port}");
+		loop {
+			let log = fs::read_to_string(&log_path).unwrap();
+			assert!(
+				process.0.try_wait().unwrap().is_none(),
+				"server exited before readiness: {log}"
+			);
+			if log.contains(&marker)
+				&& let Ok(mut client) = MockNimbisClient::connect("127.0.0.1", port)
+			{
+				assert_eq!(client.ping(), "PONG");
+				assert!(
+					process.0.try_wait().unwrap().is_none(),
+					"server exited after PING"
+				);
+				return (process, client);
+			}
+			assert!(Instant::now() < deadline, "server startup hung: {log}");
+			thread::sleep(Duration::from_millis(10));
+		}
+	}
+
+	pub fn stop(&mut self, signal: &str) -> ExitStatus {
+		assert!(
+			Command::new("kill")
+				.args([signal, &self.0.id().to_string()])
+				.status()
+				.unwrap()
+				.success()
+		);
+		let deadline = Instant::now() + Duration::from_secs(15);
+		loop {
+			if let Some(status) = self.0.try_wait().unwrap() {
+				return status;
+			}
+			assert!(Instant::now() < deadline, "server shutdown hung");
+			thread::sleep(Duration::from_millis(10));
+		}
+	}
+}
+
+#[cfg(unix)]
+impl Drop for MockNimbisProcess {
+	fn drop(&mut self) {
+		let _ = self.0.kill();
+		let _ = self.0.wait();
+	}
 }
